@@ -33,7 +33,7 @@ README と `pkg.go.dev`（v12.13.0）で確認した事実:
 ## 3. シナリオの書き心地（案A）
 
 ```go
-var checkout = jotaro.Scenario("checkout", func(ctx context.Context, u *jotaro.User) error {
+var checkout = jotaro.NewScenario("checkout", func(ctx context.Context, u *jotaro.User) error {
     var login struct{ Token string `json:"token"` }
     if err := u.Step("login", func(s *jotaro.Step) error {
         return s.Post("/login").JSON(creds(u.ID)).Do().Decode(&login)
@@ -53,7 +53,7 @@ var checkout = jotaro.Scenario("checkout", func(ctx context.Context, u *jotaro.U
 })
 ```
 
-API 名は仮。
+実装では `Scenario` を型名として使うため、コンストラクタは `NewScenario` にした。
 
 ### エラーの扱い
 
@@ -76,8 +76,15 @@ jotaro.Run(ctx, jotaro.Plan{
 })
 ```
 
-- `Users`（クローズド）: N 個の goroutine が逐次実行する。
-- `Rate`（オープン）: 到着レート固定。vegeta の強みをシナリオ単位で再現する。
+- `Users`（クローズド）: N 個の goroutine が逐次実行する。**実装済み**。
+- `Rate`（オープン）: 到着レート固定。vegeta の強みをシナリオ単位で再現する。フェーズ2。
+
+`Users` モデルの終了の仕方:
+
+- `Duration` を過ぎたら、新しいイテレーションを始めない。
+- 実行中のイテレーションは `Grace`（既定 30 秒）まで完了を待つ。超えたものは中断して `canceled` として記録する。リクエスト自体のタイムアウト（`Timeout`、既定 30 秒）は `timeout` で、区別される。
+- 親の `ctx` が終わったら、実行中のものも含めてすぐ止まる。
+- そのため `Report.Elapsed` は `Duration` より少し長くなり、RPS はわずかに低めに出る。
 
 ## 5. 計測
 
@@ -107,7 +114,26 @@ jotaro.Run(ctx, jotaro.Plan{
 
 **後回し**: `Rate`、レスポンスからの値の抽出ヘルパー（まずは `Decode`）、vegeta 互換出力、案B（ビルダー）、YAML
 
-## 7. 未決
+## 7. 実装状況
+
+フェーズ1（MVP）は実装済み。`go run ./examples/checkout` で動作を確認できる。
+
+| ファイル | 内容 |
+|---|---|
+| `record.go` | `Record` / `StepRecord` / `IterationRecord` / `Collector` |
+| `request.go` `response.go` `exec.go` | リクエスト記述とビルダー、`httptrace` つきの実行、エラー分類 |
+| `scenario.go` `user.go` `step.go` | `Scenario` / `User` / `Step`（`Think`、panic の回復を含む） |
+| `report.go` `report_print.go` | 集計と出力 |
+| `run.go` | `Plan` / `Run`（`Users` モデル） |
+
+実装中に決めたこと:
+
+- Cookie jar はイテレーションごとに新しくする（k6 の既定と同じ。毎回ログインし直す）。接続プールは全ユーザーで共有する。
+- パーセンタイルは、現状は全記録をソートして求める（nearest-rank）。長時間・高負荷でメモリが問題になったら、ヒストグラムに置き換える。
+- リクエストのレイテンシには、通信エラー（タイムアウトなど）になったものも含める。TTFB は応答を受け取れたものだけ。
+- `BytesIn` / `BytesOut` はボディのバイト数（ヘッダーは含まない）。
+
+## 8. 未決
 
 - `Pacer` に近い抽象を自前で持つか、vegeta の `lib` を import するか。
 - vegeta 互換の程度（`Result` の JSON/CSV 出力だけか、`lib` の型を直接使うか）。
