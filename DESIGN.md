@@ -154,6 +154,7 @@ Feeder はシナリオの外で作り、クロージャで共有する（`User` 
 | `run.go` | `Plan` / `Run`（`Users` / `Arrival` の両モデル） |
 | `arrival.go` | `Arrival` / `Rate` / `Ramp` / `Stages` |
 | `feeder.go` | `Feeder` / `LoadCSV` |
+| `threshold.go` | `Threshold` / `ParseThreshold` / `Report.Check`（しきい値判定。[`docs/result.md`](docs/result.md) 5 章） |
 
 実装中に決めたこと:
 
