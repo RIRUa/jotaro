@@ -105,6 +105,8 @@ type Report struct {
 	Elapsed   time.Duration
 	Requests  RequestStats
 	Scenarios []ScenarioReport // 最初に実行された順
+	// Series は StartedAt から 1 秒ごとの集計。StartedAt が無いときは nil。
+	Series []SeriesPoint
 }
 
 // RPS は 1 秒あたりのリクエスト数。
@@ -126,6 +128,7 @@ func BuildReport(reqs []Record, steps []StepRecord, iters []IterationRecord, ela
 		elapsed = observedSpan(reqs, iters)
 	}
 	rep := &Report{StartedAt: observedStart(reqs, steps, iters), Elapsed: elapsed, Requests: requestStats(reqs)}
+	rep.Series = buildSeries(rep.StartedAt, reqs, iters)
 
 	type stepKey struct{ scenario, step string }
 	var (

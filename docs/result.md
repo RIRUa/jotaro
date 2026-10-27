@@ -86,7 +86,7 @@ if err := rep.WriteJSON(f); err != nil {
 ```
 
 - 時間はすべて**ナノ秒の整数**（フィールド名は `_ns` で終わる）。
-- トップレベルに `version`（現在 `2`、定数 `JSONVersion`）を持つ。互換を壊す変更のたびに上げる。`ReadJSON` は 1 以降を読める。
+- トップレベルに `version`（現在 `3`、定数 `JSONVersion`）を持つ。互換を壊す変更のたびに上げる。`ReadJSON` は 1 以降を読める。
   - `2`: `started_at`（実行の開始時刻、RFC 3339）と、各 `latency` の `buckets`（ヒストグラム）を追加
   - `1`: 初版
 - 内部の `Report` とは別の出力用の型を持つので、`Report` を変えても JSON の形は変わらない。
@@ -133,6 +133,7 @@ jotaro merge -format html -o report.html a.json b.json
 
 - **ヒストグラム**: 各 `latency` に対数バケット（DDSketch 方式、相対誤差 1%）を持たせた（JSON の `buckets`: バケット番号 → 件数）。バケットは足し算で結合できるので、何台分でも順序に関係なく同じ結果になる。1 つのレポートの `P50`〜`P99` は従来どおり nearest-rank の正確な値で、結合したときだけ近似になる。
 - **サイズ**: バケットの数は分布の広がりで決まる（件数には比例しない）。10 万件・裾の重い分布で 1 つの `latency` あたり数百バケット。
+- **時系列 (`series`、version 3)**: `started_at` からの 1 秒ごとの配列。要素は `second` / `requests` / `errors`（通信エラー。HTTP 4xx/5xx は含まない）/ `latency`（`buckets` つき）/ `concurrency`（その秒の実行中イテレーション数の最大）。`started_at` が無いと空。結合では `started_at` の差だけ秒をずらして足し、`concurrency` は合計（上限の見積り）。version 1・2 の JSON には無い。
 - **version 1 の JSON との互換**: 読める。`buckets` と `started_at` が無いので、それが混じる結合では次のフォールバックになる。
   - `P50`〜`P99` は件数で重み付けした平均（誤差が大きい）。
   - `Elapsed` は最大値（同時に実行した前提）。
