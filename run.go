@@ -146,13 +146,12 @@ func (r *runner) runClosed() {
 	wg.Wait()
 }
 
-// runOpen は Arrival の間隔でイテレーションを開始する。
+// runOpen は Arrival の到着時刻にイテレーションを開始する。
 //
-// 到着時刻は開始時刻からの累積で決めるので、ディスパッチャが遅れても
+// 到着時刻は開始時刻からの経過で決めるので、ディスパッチャが遅れても
 // 間隔はずれない。遅れた分はまとめて起動し、予定時刻を Scheduled に残す。
 // 同時実行数が上限に達しているときの到着はドロップする。
 func (r *runner) runOpen() {
-	iv := r.p.Arrival.interval()
 	slots := make(chan struct{}, r.p.maxConcurrency())
 
 	var wg sync.WaitGroup
@@ -164,7 +163,11 @@ func (r *runner) runOpen() {
 	<-timer.C
 
 	for i := 0; r.stopCtx.Err() == nil; i++ {
-		at := t0.Add(time.Duration(i) * iv)
+		off, ok := r.p.Arrival.at(i)
+		if !ok {
+			return
+		}
+		at := t0.Add(off)
 		if wait := time.Until(at); wait > 0 {
 			timer.Reset(wait)
 			select {

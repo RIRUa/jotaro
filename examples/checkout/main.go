@@ -3,6 +3,7 @@
 //
 //	go run ./examples/checkout            # 20 ユーザー固定（クローズド）
 //	go run ./examples/checkout -rate 50   # 毎秒 50 シナリオ（オープン）
+//	go run ./examples/checkout -rate 100 -ramp 8s -duration 12s  # 0 から 100 へ 8 秒かけて増やす
 package main
 
 import (
@@ -70,6 +71,8 @@ var checkout = jotaro.NewScenario("checkout", func(ctx context.Context, u *jotar
 
 func main() {
 	rate := flag.Int("rate", 0, "毎秒のシナリオ開始数。0 なら Users モデル")
+	ramp := flag.Duration("ramp", 0, "-rate に達するまでの時間。0 なら最初から一定")
+	duration := flag.Duration("duration", 3*time.Second, "実行時間")
 	format := flag.String("format", "text", "結果の形式 (text, json, html)")
 	out := flag.String("o", "", "結果の書き出し先。空なら標準出力")
 	flag.Parse()
@@ -88,10 +91,13 @@ func main() {
 	plan := jotaro.Plan{
 		Scenario: checkout,
 		BaseURL:  srv.URL,
-		Duration: 3 * time.Second,
+		Duration: *duration,
 	}
 	if *rate > 0 {
 		plan.Arrival = jotaro.Rate(*rate, time.Second)
+		if *ramp > 0 {
+			plan.Arrival = jotaro.Ramp(0, *rate, time.Second, *ramp)
+		}
 	} else {
 		plan.Users = 20
 	}
