@@ -1,4 +1,4 @@
-package jotaro
+package record
 
 import (
 	"bufio"
@@ -31,18 +31,6 @@ type Raw struct {
 	Iterations []IterationRecord
 	// Health は負荷生成側の健全性。記録が無ければ nil。
 	Health []HealthPoint
-}
-
-// Report は生データを集計する。Run が返す Report と同じ集計になる。
-func (raw *Raw) Report() *Report {
-	rep := BuildReport(raw.Requests, raw.Steps, raw.Iterations, raw.Elapsed)
-	rep.Open = raw.Open
-	rep.Dropped = raw.Dropped
-	if !raw.StartedAt.IsZero() {
-		rep.StartedAt = wallUTC(raw.StartedAt)
-	}
-	rep.Health = raw.Health
-	return rep
 }
 
 // 出力用の型。1 行に 1 つ、type で種類を分ける。
@@ -131,6 +119,9 @@ func derefTime(t *time.Time) time.Time {
 	}
 	return *t
 }
+
+// ns は d をナノ秒の整数にする。
+func ns(d time.Duration) int64 { return d.Nanoseconds() }
 
 // WriteRaw は生データを JSON Lines（1 行に 1 レコード）で w に書き出す。
 //

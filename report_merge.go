@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/RIRUa/jotaro/internal/histogram"
+	"github.com/RIRUa/jotaro/record"
 	"math"
 	"time"
 )
@@ -143,12 +144,12 @@ func mergeRequests(a, b RequestStats) RequestStats {
 	return out
 }
 
-func mergeErrs(a, b map[ErrKind]int) map[ErrKind]int {
-	var out map[ErrKind]int
-	for _, m := range []map[ErrKind]int{a, b} {
+func mergeErrs(a, b map[record.ErrKind]int) map[record.ErrKind]int {
+	var out map[record.ErrKind]int
+	for _, m := range []map[record.ErrKind]int{a, b} {
 		for k, v := range m {
 			if out == nil {
-				out = map[ErrKind]int{}
+				out = map[record.ErrKind]int{}
 			}
 			out[k] += v
 		}

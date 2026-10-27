@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/RIRUa/jotaro/record"
 )
 
 func TestHealthSampler(t *testing.T) {
@@ -80,8 +82,8 @@ func TestRunRecordsHealth(t *testing.T) {
 }
 
 func TestHealthJSONRoundTrip(t *testing.T) {
-	rep := BuildReport([]Record{{Latency: time.Millisecond}}, nil, nil, time.Second)
-	rep.Health = []HealthPoint{{Second: 0, Goroutines: 12, CPU: 0.25}, {Second: 1, Goroutines: 40, CPU: -1}}
+	rep := BuildReport([]record.Record{{Latency: time.Millisecond}}, nil, nil, time.Second)
+	rep.Health = []record.HealthPoint{{Second: 0, Goroutines: 12, CPU: 0.25}, {Second: 1, Goroutines: 40, CPU: -1}}
 
 	var buf bytes.Buffer
 	if err := rep.WriteJSON(&buf); err != nil {
@@ -108,22 +110,22 @@ func TestReadJSONWithoutHealth(t *testing.T) {
 
 func TestMergeHealth(t *testing.T) {
 	t0 := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	a := &Report{StartedAt: t0, Elapsed: 2 * time.Second, Health: []HealthPoint{{0, 10, 0.2}, {1, 12, 0.9}}}
-	b := &Report{StartedAt: t0.Add(time.Second), Elapsed: 2 * time.Second, Health: []HealthPoint{{0, 5, 0.5}, {1, 6, -1}}}
+	a := &Report{StartedAt: t0, Elapsed: 2 * time.Second, Health: []record.HealthPoint{{Second: 0, Goroutines: 10, CPU: 0.2}, {Second: 1, Goroutines: 12, CPU: 0.9}}}
+	b := &Report{StartedAt: t0.Add(time.Second), Elapsed: 2 * time.Second, Health: []record.HealthPoint{{Second: 0, Goroutines: 5, CPU: 0.5}, {Second: 1, Goroutines: 6, CPU: -1}}}
 
 	got, err := MergeReports(a, b)
 	if err != nil {
 		t.Fatal(err)
 	}
 	// b は 1 秒遅れて始まったので、b の 0 秒目は a の 1 秒目と重なる。
-	want := []HealthPoint{{0, 10, 0.2}, {1, 12 + 5, 0.9}, {2, 6, -1}}
+	want := []record.HealthPoint{{Second: 0, Goroutines: 10, CPU: 0.2}, {Second: 1, Goroutines: 12 + 5, CPU: 0.9}, {Second: 2, Goroutines: 6, CPU: -1}}
 	if !reflect.DeepEqual(got.Health, want) {
 		t.Errorf("Health = %+v\nwant     %+v", got.Health, want)
 	}
 }
 
-func healthReport(pts ...HealthPoint) *Report {
-	rep := BuildReport([]Record{{Code: 200, Latency: time.Millisecond}}, nil, nil, time.Second)
+func healthReport(pts ...record.HealthPoint) *Report {
+	rep := BuildReport([]record.Record{{Code: 200, Latency: time.Millisecond}}, nil, nil, time.Second)
 	rep.Health = pts
 	return rep
 }
@@ -132,30 +134,30 @@ func TestSummarizeHealth(t *testing.T) {
 	if _, ok := summarizeHealth(nil); ok {
 		t.Error("点が無いのに ok")
 	}
-	h, _ := summarizeHealth([]HealthPoint{{0, 10, 0.2}, {1, 30, 0.6}, {2, 20, -1}})
+	h, _ := summarizeHealth([]record.HealthPoint{{Second: 0, Goroutines: 10, CPU: 0.2}, {Second: 1, Goroutines: 30, CPU: 0.6}, {Second: 2, Goroutines: 20, CPU: -1}})
 	if !h.HasCPU || h.MaxCPU != 0.6 || h.MaxGoroutines != 30 || h.Hot() {
 		t.Errorf("h = %+v", h)
 	}
 	if got := h.AvgCPU; got < 0.399 || got > 0.401 { // -1（不明）は平均に含めない
 		t.Errorf("AvgCPU = %v, want 0.4", got)
 	}
-	if h, _ := summarizeHealth([]HealthPoint{{0, 1, 0.95}}); !h.Hot() {
+	if h, _ := summarizeHealth([]record.HealthPoint{{Second: 0, Goroutines: 1, CPU: 0.95}}); !h.Hot() {
 		t.Errorf("0.95 は詰まっている疑い: %+v", h)
 	}
-	if h, _ := summarizeHealth([]HealthPoint{{0, 1, -1}}); h.HasCPU || h.Hot() || !strings.Contains(h.String(), "cpu n/a") {
+	if h, _ := summarizeHealth([]record.HealthPoint{{Second: 0, Goroutines: 1, CPU: -1}}); h.HasCPU || h.Hot() || !strings.Contains(h.String(), "cpu n/a") {
 		t.Errorf("CPU 不明: %+v %q", h, h)
 	}
 }
 
 func TestPrintHealth(t *testing.T) {
 	var buf bytes.Buffer
-	healthReport(HealthPoint{0, 10, 0.2}, HealthPoint{1, 30, 0.5}).Print(&buf)
+	healthReport(record.HealthPoint{Second: 0, Goroutines: 10, CPU: 0.2}, record.HealthPoint{Second: 1, Goroutines: 30, CPU: 0.5}).Print(&buf)
 	if out := buf.String(); !strings.Contains(out, "loadgen:    cpu max 50.0% (avg 35.0%), goroutines max 30") || strings.Contains(out, "warning:") {
 		t.Errorf("出力:\n%s", out)
 	}
 
 	buf.Reset()
-	healthReport(HealthPoint{0, 10, 0.97}).Print(&buf)
+	healthReport(record.HealthPoint{Second: 0, Goroutines: 10, CPU: 0.97}).Print(&buf)
 	if out := buf.String(); !strings.Contains(out, "warning:    load generator CPU reached 97%") {
 		t.Errorf("警告が無い:\n%s", out)
 	}
@@ -169,7 +171,7 @@ func TestPrintHealth(t *testing.T) {
 
 func TestWriteHTMLHealth(t *testing.T) {
 	var buf bytes.Buffer
-	if err := healthReport(HealthPoint{0, 10, 0.2}, HealthPoint{1, 30, 0.95}).WriteHTML(&buf); err != nil {
+	if err := healthReport(record.HealthPoint{Second: 0, Goroutines: 10, CPU: 0.2}, record.HealthPoint{Second: 1, Goroutines: 30, CPU: 0.95}).WriteHTML(&buf); err != nil {
 		t.Fatal(err)
 	}
 	out := buf.String()
@@ -181,7 +183,7 @@ func TestWriteHTMLHealth(t *testing.T) {
 
 	// CPU が取得できない環境では、CPU のグラフを出さない。
 	buf.Reset()
-	if err := healthReport(HealthPoint{0, 10, -1}).WriteHTML(&buf); err != nil {
+	if err := healthReport(record.HealthPoint{Second: 0, Goroutines: 10, CPU: -1}).WriteHTML(&buf); err != nil {
 		t.Fatal(err)
 	}
 	if out := buf.String(); !strings.Contains(out, "load generator goroutines") || strings.Contains(out, "load generator CPU (") {

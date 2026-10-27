@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/RIRUa/jotaro/record"
 )
 
 func ms(n int) time.Duration { return time.Duration(n) * time.Millisecond }
@@ -39,23 +41,23 @@ func TestNewLatencyEdge(t *testing.T) {
 	}
 }
 
-func sampleRecords() ([]Record, []StepRecord, []IterationRecord) {
+func sampleRecords() ([]record.Record, []record.StepRecord, []record.IterationRecord) {
 	t0 := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	reqs := []Record{
+	reqs := []record.Record{
 		{Scenario: "s", Step: "login", Code: 200, Latency: ms(10), TTFB: ms(5), BytesIn: 100, BytesOut: 10, Start: t0},
 		{Scenario: "s", Step: "login", Code: 200, Latency: ms(20), TTFB: ms(8), BytesIn: 100, BytesOut: 10, Start: t0},
 		{Scenario: "s", Step: "order", Code: 500, Latency: ms(30), TTFB: ms(25), BytesIn: 50, BytesOut: 20, Start: t0},
-		{Scenario: "s", Step: "order", Code: 0, Err: ErrTimeout, Latency: ms(1000), Start: t0},
+		{Scenario: "s", Step: "order", Code: 0, Err: record.ErrTimeout, Latency: ms(1000), Start: t0},
 	}
-	steps := []StepRecord{
+	steps := []record.StepRecord{
 		{Scenario: "s", Step: "login", Start: t0, Duration: ms(10)},
 		{Scenario: "s", Step: "login", Start: t0.Add(ms(1)), Duration: ms(20)},
-		{Scenario: "s", Step: "order", Start: t0.Add(ms(2)), Duration: ms(30), Err: ErrExpect},
-		{Scenario: "s", Step: "order", Start: t0.Add(ms(3)), Duration: ms(1000), Err: ErrTimeout},
+		{Scenario: "s", Step: "order", Start: t0.Add(ms(2)), Duration: ms(30), Err: record.ErrExpect},
+		{Scenario: "s", Step: "order", Start: t0.Add(ms(3)), Duration: ms(1000), Err: record.ErrTimeout},
 	}
-	iters := []IterationRecord{
+	iters := []record.IterationRecord{
 		{Scenario: "s", Start: t0, Duration: ms(500), Think: ms(400)},
-		{Scenario: "s", Start: t0, Duration: ms(1200), Think: ms(100), Err: ErrTimeout},
+		{Scenario: "s", Start: t0, Duration: ms(1200), Think: ms(100), Err: record.ErrTimeout},
 	}
 	return reqs, steps, iters
 }
@@ -70,7 +72,7 @@ func TestBuildReport(t *testing.T) {
 	if rep.Requests.Status["2xx"] != 2 || rep.Requests.Status["5xx"] != 1 {
 		t.Fatalf("Status = %v", rep.Requests.Status)
 	}
-	if rep.Requests.Errors[ErrTimeout] != 1 {
+	if rep.Requests.Errors[record.ErrTimeout] != 1 {
 		t.Fatalf("Errors = %v", rep.Requests.Errors)
 	}
 	if rep.Requests.BytesIn != 250 || rep.Requests.BytesOut != 40 {
@@ -84,7 +86,7 @@ func TestBuildReport(t *testing.T) {
 		t.Fatalf("Scenarios = %d", len(rep.Scenarios))
 	}
 	sc := rep.Scenarios[0]
-	if sc.Iterations.Count != 2 || sc.Iterations.Failed != 1 || sc.Iterations.Errors[ErrTimeout] != 1 {
+	if sc.Iterations.Count != 2 || sc.Iterations.Failed != 1 || sc.Iterations.Errors[record.ErrTimeout] != 1 {
 		t.Fatalf("Iterations = %+v", sc.Iterations)
 	}
 	// Active は Think を除く: 100ms と 1100ms
@@ -99,7 +101,7 @@ func TestBuildReport(t *testing.T) {
 		t.Fatalf("Steps の順序: %+v", sc.Steps)
 	}
 	order := sc.Steps[1]
-	if order.Count != 2 || order.Failed != 2 || order.Errors[ErrExpect] != 1 || order.Errors[ErrTimeout] != 1 {
+	if order.Count != 2 || order.Failed != 2 || order.Errors[record.ErrExpect] != 1 || order.Errors[record.ErrTimeout] != 1 {
 		t.Fatalf("order = %+v", order)
 	}
 	if order.Requests.Count != 2 || order.Requests.Status["5xx"] != 1 {
@@ -113,10 +115,10 @@ func TestBuildReport(t *testing.T) {
 // ステップが交互に現れても、それぞれの件数が正しく数えられること。
 func TestBuildReportInterleavedSteps(t *testing.T) {
 	t0 := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	var steps []StepRecord
+	var steps []record.StepRecord
 	for i := 0; i < 4; i++ {
 		for j, name := range []string{"a", "b", "c", "d"} {
-			steps = append(steps, StepRecord{
+			steps = append(steps, record.StepRecord{
 				Scenario: "s", Step: name,
 				Start:    t0.Add(time.Duration(i*4+j) * time.Millisecond),
 				Duration: ms(1),
@@ -147,7 +149,7 @@ func TestBuildReportEmpty(t *testing.T) {
 
 func TestObservedSpan(t *testing.T) {
 	t0 := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	reqs := []Record{
+	reqs := []record.Record{
 		{Start: t0, Latency: ms(10)},
 		{Start: t0.Add(ms(500)), Latency: ms(100)},
 	}
@@ -201,11 +203,11 @@ func TestFmtHelpers(t *testing.T) {
 
 func TestConnStats(t *testing.T) {
 	ms := func(n int) time.Duration { return time.Duration(n) * time.Millisecond }
-	reqs := []Record{
-		{Step: "a", Code: 200, Latency: ms(10), Conn: ConnNew, DNS: ms(2), Connect: ms(1), TLS: ms(4)},
-		{Step: "a", Code: 200, Latency: ms(10), Conn: ConnReused},
-		{Step: "a", Code: 200, Latency: ms(10), Conn: ConnReused},
-		{Step: "a", Err: ErrConnRefused, Latency: ms(1)}, // 接続を得る前の失敗
+	reqs := []record.Record{
+		{Step: "a", Code: 200, Latency: ms(10), Conn: record.ConnNew, DNS: ms(2), Connect: ms(1), TLS: ms(4)},
+		{Step: "a", Code: 200, Latency: ms(10), Conn: record.ConnReused},
+		{Step: "a", Code: 200, Latency: ms(10), Conn: record.ConnReused},
+		{Step: "a", Err: record.ErrConnRefused, Latency: ms(1)}, // 接続を得る前の失敗
 	}
 	q := BuildReport(reqs, nil, nil, time.Second).Requests
 	if q.NewConns != 1 || q.ReusedConns != 2 {

@@ -9,15 +9,16 @@ import (
 	"time"
 
 	"github.com/RIRUa/jotaro"
+	"github.com/RIRUa/jotaro/record"
 )
 
 // writeSample は小さな結果を JSON にして path に書く。
 func writeSample(t *testing.T, path string) {
 	t.Helper()
 	rep := jotaro.BuildReport(
-		[]jotaro.Record{{Scenario: "checkout", Step: "login", Code: 200, Latency: 12 * time.Millisecond}},
-		[]jotaro.StepRecord{{Scenario: "checkout", Step: "login", Duration: 15 * time.Millisecond}},
-		[]jotaro.IterationRecord{{Scenario: "checkout", Duration: 20 * time.Millisecond}},
+		[]record.Record{{Scenario: "checkout", Step: "login", Code: 200, Latency: 12 * time.Millisecond}},
+		[]record.StepRecord{{Scenario: "checkout", Step: "login", Duration: 15 * time.Millisecond}},
+		[]record.IterationRecord{{Scenario: "checkout", Duration: 20 * time.Millisecond}},
 		time.Second,
 	)
 	var buf bytes.Buffer
@@ -182,14 +183,14 @@ func TestCheckUsageErrors(t *testing.T) {
 func writeSampleRaw(t *testing.T, path string) {
 	t.Helper()
 	t0 := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	raw := &jotaro.Raw{
+	raw := &record.Raw{
 		StartedAt: t0, Elapsed: time.Second,
-		Requests:   []jotaro.Record{{Scenario: "checkout", Step: "login", Code: 200, Start: t0, Latency: 12 * time.Millisecond}},
-		Steps:      []jotaro.StepRecord{{Scenario: "checkout", Step: "login", Start: t0, Duration: 15 * time.Millisecond}},
-		Iterations: []jotaro.IterationRecord{{Scenario: "checkout", Start: t0, Duration: 20 * time.Millisecond}},
+		Requests:   []record.Record{{Scenario: "checkout", Step: "login", Code: 200, Start: t0, Latency: 12 * time.Millisecond}},
+		Steps:      []record.StepRecord{{Scenario: "checkout", Step: "login", Start: t0, Duration: 15 * time.Millisecond}},
+		Iterations: []record.IterationRecord{{Scenario: "checkout", Start: t0, Duration: 20 * time.Millisecond}},
 	}
 	var buf bytes.Buffer
-	if err := jotaro.WriteRaw(&buf, raw); err != nil {
+	if err := record.WriteRaw(&buf, raw); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(path, buf.Bytes(), 0o644); err != nil {

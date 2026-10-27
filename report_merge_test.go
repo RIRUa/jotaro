@@ -9,19 +9,20 @@ import (
 	"time"
 
 	"github.com/RIRUa/jotaro/internal/histogram"
+	"github.com/RIRUa/jotaro/record"
 )
 
 func mergeSample(open bool, lat time.Duration, n int, elapsed time.Duration, extraStep string) *Report {
-	var reqs []Record
-	var steps []StepRecord
-	var iters []IterationRecord
+	var reqs []record.Record
+	var steps []record.StepRecord
+	var iters []record.IterationRecord
 	for i := 0; i < n; i++ {
-		reqs = append(reqs, Record{Scenario: "s", Step: "a", Code: 200, Latency: lat, BytesIn: 10})
-		steps = append(steps, StepRecord{Scenario: "s", Step: "a", Duration: lat})
-		iters = append(iters, IterationRecord{Scenario: "s", Duration: lat})
+		reqs = append(reqs, record.Record{Scenario: "s", Step: "a", Code: 200, Latency: lat, BytesIn: 10})
+		steps = append(steps, record.StepRecord{Scenario: "s", Step: "a", Duration: lat})
+		iters = append(iters, record.IterationRecord{Scenario: "s", Duration: lat})
 	}
 	if extraStep != "" {
-		steps = append(steps, StepRecord{Scenario: "s", Step: extraStep, Duration: lat, Err: ErrTimeout})
+		steps = append(steps, record.StepRecord{Scenario: "s", Step: extraStep, Duration: lat, Err: record.ErrTimeout})
 	}
 	rep := BuildReport(reqs, steps, iters, elapsed)
 	rep.Open = open
@@ -90,11 +91,11 @@ func within(got, want time.Duration, rel float64) bool {
 // 分割して結合した結果が、全データを一度に集計した結果に近いこと。
 func TestMergeReportsPercentilesMatchWhole(t *testing.T) {
 	rng := rand.New(rand.NewPCG(1, 2))
-	var all, left, right []Record
+	var all, left, right []record.Record
 	for i := 0; i < 20000; i++ {
 		// 裾の重い分布 (対数正規風)。A と B で分布の中心をずらす。
 		lat := time.Duration(float64(5*time.Millisecond) * (1 + rng.ExpFloat64()*rng.ExpFloat64()*3))
-		r := Record{Scenario: "s", Step: "a", Code: 200, Latency: lat}
+		r := record.Record{Scenario: "s", Step: "a", Code: 200, Latency: lat}
 		all = append(all, r)
 		if i%3 == 0 {
 			r.Latency *= 4
@@ -175,12 +176,12 @@ func TestMergeReportsVersion1Fallback(t *testing.T) {
 
 func TestMergeConnStats(t *testing.T) {
 	mk := func(newN, reusedN int) *Report {
-		var reqs []Record
+		var reqs []record.Record
 		for i := 0; i < newN; i++ {
-			reqs = append(reqs, Record{Code: 200, Latency: time.Millisecond, Conn: ConnNew, Connect: time.Millisecond})
+			reqs = append(reqs, record.Record{Code: 200, Latency: time.Millisecond, Conn: record.ConnNew, Connect: time.Millisecond})
 		}
 		for i := 0; i < reusedN; i++ {
-			reqs = append(reqs, Record{Code: 200, Latency: time.Millisecond, Conn: ConnReused})
+			reqs = append(reqs, record.Record{Code: 200, Latency: time.Millisecond, Conn: record.ConnReused})
 		}
 		return BuildReport(reqs, nil, nil, time.Second)
 	}

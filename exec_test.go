@@ -10,14 +10,16 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/RIRUa/jotaro/record"
 )
 
-// testExec は結果の Record を records に集める executor を返す。
-func testExec(t *testing.T, baseURL string, client *http.Client) (*executor, *[]Record) {
+// testExec は結果の record.Record を records に集める executor を返す。
+func testExec(t *testing.T, baseURL string, client *http.Client) (*executor, *[]record.Record) {
 	t.Helper()
 	var (
 		mu      sync.Mutex
-		records []Record
+		records []record.Record
 	)
 	if client == nil {
 		client = &http.Client{}
@@ -26,8 +28,8 @@ func testExec(t *testing.T, baseURL string, client *http.Client) (*executor, *[]
 		ctx:     context.Background(),
 		client:  client,
 		baseURL: baseURL,
-		tag:     Record{Scenario: "s", Step: "st", UserID: 7, Iteration: 3},
-		sink: func(r Record) {
+		tag:     record.Record{Scenario: "s", Step: "st", UserID: 7, Iteration: 3},
+		sink: func(r record.Record) {
 			mu.Lock()
 			records = append(records, r)
 			mu.Unlock()
@@ -55,7 +57,7 @@ func TestDoRecordsRequest(t *testing.T) {
 		t.Fatalf("records = %d, want 1", len(*recs))
 	}
 	r := (*recs)[0]
-	if r.Code != 200 || r.Err != ErrNone {
+	if r.Code != 200 || r.Err != record.ErrNone {
 		t.Fatalf("Code=%d Err=%q", r.Code, r.Err)
 	}
 	if r.Scenario != "s" || r.Step != "st" || r.UserID != 7 || r.Iteration != 3 {
@@ -112,7 +114,7 @@ func TestHTTPErrorStatusIsNotAnError(t *testing.T) {
 	if resp.Err() != nil || resp.Code != 404 {
 		t.Fatalf("Err=%v Code=%d", resp.Err(), resp.Code)
 	}
-	if r := (*recs)[0]; r.Code != 404 || r.Err != ErrNone {
+	if r := (*recs)[0]; r.Code != 404 || r.Err != record.ErrNone {
 		t.Fatalf("Code=%d Err=%q", r.Code, r.Err)
 	}
 
@@ -121,7 +123,7 @@ func TestHTTPErrorStatusIsNotAnError(t *testing.T) {
 	if !errors.As(err, &ee) || ee.Want != 200 || ee.Got != 404 {
 		t.Fatalf("err = %v", err)
 	}
-	if classify(err) != ErrExpect {
+	if classify(err) != record.ErrExpect {
 		t.Fatalf("classify = %q", classify(err))
 	}
 }
@@ -137,7 +139,7 @@ func TestConnectionRefused(t *testing.T) {
 		t.Fatal("エラーが返るはず")
 	}
 	r := (*recs)[0]
-	if r.Err != ErrConnRefused || r.Code != 0 {
+	if r.Err != record.ErrConnRefused || r.Code != 0 {
 		t.Fatalf("Err=%q Code=%d", r.Err, r.Code)
 	}
 }
@@ -153,7 +155,7 @@ func TestTimeout(t *testing.T) {
 
 	e, recs := testExec(t, srv.URL, &http.Client{Timeout: 50 * time.Millisecond})
 	newRequest(e, "GET", "/").Do()
-	if r := (*recs)[0]; r.Err != ErrTimeout {
+	if r := (*recs)[0]; r.Err != record.ErrTimeout {
 		t.Fatalf("Err = %q, want timeout", r.Err)
 	}
 }
@@ -172,7 +174,7 @@ func TestCanceled(t *testing.T) {
 		cancel()
 	}()
 	newRequest(e, "GET", "/").Do()
-	if r := (*recs)[0]; r.Err != ErrCanceled {
+	if r := (*recs)[0]; r.Err != record.ErrCanceled {
 		t.Fatalf("Err = %q, want canceled", r.Err)
 	}
 }
@@ -219,10 +221,10 @@ func TestConnReuse(t *testing.T) {
 	if len(got) != 2 {
 		t.Fatalf("records = %d", len(got))
 	}
-	if got[0].Conn != ConnNew || got[0].Connect <= 0 || got[0].TLS <= 0 {
+	if got[0].Conn != record.ConnNew || got[0].Connect <= 0 || got[0].TLS <= 0 {
 		t.Errorf("1 回目は新規接続で Connect/TLS を持つはず: %+v", got[0])
 	}
-	if got[1].Conn != ConnReused || got[1].Connect != 0 || got[1].TLS != 0 || got[1].DNS != 0 {
+	if got[1].Conn != record.ConnReused || got[1].Connect != 0 || got[1].TLS != 0 || got[1].DNS != 0 {
 		t.Errorf("2 回目は再利用で区間を持たないはず: %+v", got[1])
 	}
 }

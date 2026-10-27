@@ -7,6 +7,8 @@ import (
 	"strings"
 	"text/tabwriter"
 	"time"
+
+	"github.com/RIRUa/jotaro/record"
 )
 
 // Print はレポートを人が読める形で w に書き出す。
@@ -110,7 +112,7 @@ func fmtStatus(m map[string]int) string {
 	return strings.Join(parts, " ")
 }
 
-func fmtErrors(m map[ErrKind]int) string {
+func fmtErrors(m map[record.ErrKind]int) string {
 	if len(m) == 0 {
 		return "-"
 	}
@@ -121,7 +123,7 @@ func fmtErrors(m map[ErrKind]int) string {
 	slices.Sort(keys)
 	parts := make([]string, len(keys))
 	for i, k := range keys {
-		parts[i] = fmt.Sprintf("%s=%d", k, m[ErrKind(k)])
+		parts[i] = fmt.Sprintf("%s=%d", k, m[record.ErrKind(k)])
 	}
 	return strings.Join(parts, " ")
 }

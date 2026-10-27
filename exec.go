@@ -14,20 +14,22 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/RIRUa/jotaro/record"
 )
 
-// executor はリクエストを実行して Record を残す。
+// executor はリクエストを実行して record.Record を残す。
 type executor struct {
 	ctx     context.Context
 	client  *http.Client
 	baseURL string
 
-	// tag は Scenario/Step/UserID/Iteration などを埋めた Record のひな形。
-	tag Record
+	// tag は Scenario/Step/UserID/Iteration などを埋めた record.Record のひな形。
+	tag record.Record
 	// sched は予定到着時刻の置き場所。最初のリクエストが Scheduled に使って 0 に戻す。
 	// ステップは順に実行されるので、ロックはしない。
 	sched *time.Time
-	sink  func(Record)
+	sink  func(record.Record)
 }
 
 func (e *executor) resolve(path string) string {
@@ -101,7 +103,7 @@ type tracer struct {
 	conStart, conEnd time.Time
 	tlsStart, tlsEnd time.Time
 	firstByte        time.Time
-	conn             ConnKind
+	conn             record.ConnKind
 }
 
 func (t *tracer) clientTrace() *httptrace.ClientTrace {
@@ -116,9 +118,9 @@ func (t *tracer) clientTrace() *httptrace.ClientTrace {
 		GotConn: func(info httptrace.GotConnInfo) {
 			t.mu.Lock()
 			defer t.mu.Unlock()
-			t.conn = ConnNew
+			t.conn = record.ConnNew
 			if info.Reused {
-				t.conn = ConnReused
+				t.conn = record.ConnReused
 			}
 		},
 		GotFirstResponseByte: func() { t.set(&t.firstByte, true) },
@@ -134,7 +136,7 @@ func (t *tracer) set(dst *time.Time, overwrite bool) {
 	}
 }
 
-func (t *tracer) fill(rec *Record) {
+func (t *tracer) fill(rec *record.Record) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	rec.Conn = t.conn
@@ -154,8 +156,8 @@ func span(from, to time.Time) time.Duration {
 	return to.Sub(from)
 }
 
-// classify は通信エラーを ErrKind に分類する。
-func classify(err error) ErrKind {
+// classify は通信エラーを record.ErrKind に分類する。
+func classify(err error) record.ErrKind {
 	var (
 		expect  *ExpectError
 		dnsErr  *net.DNSError
@@ -167,22 +169,22 @@ func classify(err error) ErrKind {
 	)
 	switch {
 	case err == nil:
-		return ErrNone
+		return record.ErrNone
 	case errors.As(err, &expect):
-		return ErrExpect
+		return record.ErrExpect
 	case errors.Is(err, context.Canceled):
-		return ErrCanceled
+		return record.ErrCanceled
 	case errors.As(err, &dnsErr):
-		return ErrDNS
+		return record.ErrDNS
 	case errors.As(err, &certErr), errors.As(err, &recHdr),
 		errors.As(err, &hostErr), errors.As(err, &authErr):
-		return ErrTLS
+		return record.ErrTLS
 	case errors.Is(err, syscall.ECONNREFUSED):
-		return ErrConnRefused
+		return record.ErrConnRefused
 	case errors.Is(err, context.DeadlineExceeded),
 		errors.As(err, &netErr) && netErr.Timeout():
-		return ErrTimeout
+		return record.ErrTimeout
 	default:
-		return ErrOther
+		return record.ErrOther
 	}
 }

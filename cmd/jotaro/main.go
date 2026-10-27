@@ -15,6 +15,7 @@ import (
 	"strings"
 
 	"github.com/RIRUa/jotaro"
+	"github.com/RIRUa/jotaro/record"
 )
 
 const usage = `usage: jotaro <command> [flags]
@@ -216,11 +217,11 @@ func readReport(path string, raw bool, stdin io.Reader) (*jotaro.Report, error) 
 		in = file
 	}
 	if raw {
-		r, err := jotaro.ReadRaw(in)
+		r, err := record.ReadRaw(in)
 		if err != nil {
 			return nil, err
 		}
-		return r.Report(), nil
+		return jotaro.ReportFromRaw(r), nil
 	}
 	return jotaro.ReadJSON(in)
 }

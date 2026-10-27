@@ -6,6 +6,8 @@ import (
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	"github.com/RIRUa/jotaro/record"
 )
 
 func TestRateValidate(t *testing.T) {
@@ -93,7 +95,7 @@ func TestRunRateScheduled(t *testing.T) {
 	})
 	p := Plan{Scenario: sc, BaseURL: srv.URL, Arrival: Rate(20, time.Second), Duration: 200 * time.Millisecond}
 	ctx := context.Background()
-	r := &runner{p: p, tr: http.DefaultTransport, timeout: time.Second, col: NewCollector(), stopCtx: ctx, runCtx: ctx}
+	r := &runner{p: p, tr: http.DefaultTransport, timeout: time.Second, col: record.NewCollector(), stopCtx: ctx, runCtx: ctx}
 	stopCtx, stop := context.WithTimeout(ctx, p.Duration)
 	defer stop()
 	r.stopCtx = stopCtx
@@ -119,11 +121,11 @@ func TestRunRateScheduled(t *testing.T) {
 
 func TestRecordCorrected(t *testing.T) {
 	now := time.Now()
-	r := Record{Scheduled: now, Start: now.Add(300 * time.Millisecond), Latency: 50 * time.Millisecond}
+	r := record.Record{Scheduled: now, Start: now.Add(300 * time.Millisecond), Latency: 50 * time.Millisecond}
 	if got := r.Corrected(); got != 350*time.Millisecond {
 		t.Fatalf("Corrected = %v", got)
 	}
-	if got := (Record{Latency: 5}).Corrected(); got != 5 {
+	if got := (record.Record{Latency: 5}).Corrected(); got != 5 {
 		t.Fatalf("Scheduled 未設定のとき Latency を返すはず: %v", got)
 	}
 }

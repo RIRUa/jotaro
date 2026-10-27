@@ -7,18 +7,20 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/RIRUa/jotaro/record"
 )
 
 func TestWriteJSON(t *testing.T) {
-	reqs := []Record{
+	reqs := []record.Record{
 		{Scenario: "s", Step: "a", Code: 200, Latency: 1500 * time.Nanosecond, TTFB: 700 * time.Nanosecond, BytesIn: 10, BytesOut: 2},
-		{Scenario: "s", Step: "a", Err: ErrTimeout, Latency: 3 * time.Second},
+		{Scenario: "s", Step: "a", Err: record.ErrTimeout, Latency: 3 * time.Second},
 	}
-	steps := []StepRecord{
+	steps := []record.StepRecord{
 		{Scenario: "s", Step: "a", Duration: 2 * time.Second},
-		{Scenario: "s", Step: "a", Duration: 3 * time.Second, Err: ErrTimeout},
+		{Scenario: "s", Step: "a", Duration: 3 * time.Second, Err: record.ErrTimeout},
 	}
-	iters := []IterationRecord{{Scenario: "s", Duration: 5 * time.Second, Think: time.Second}}
+	iters := []record.IterationRecord{{Scenario: "s", Duration: 5 * time.Second, Think: time.Second}}
 	rep := BuildReport(reqs, steps, iters, 10*time.Second)
 
 	var buf bytes.Buffer
@@ -125,7 +127,7 @@ func TestReadJSONErrors(t *testing.T) {
 func TestReadJSONStartedAtAndBucketsRoundTrip(t *testing.T) {
 	start := time.Date(2026, 5, 6, 7, 8, 9, 123456789, time.UTC)
 	want := BuildReport(
-		[]Record{{Scenario: "s", Step: "a", Start: start, Code: 200, Latency: 3 * time.Millisecond}},
+		[]record.Record{{Scenario: "s", Step: "a", Start: start, Code: 200, Latency: 3 * time.Millisecond}},
 		nil, nil, time.Second)
 	if !want.StartedAt.Equal(start) {
 		t.Fatalf("StartedAt = %v, want %v", want.StartedAt, start)
@@ -158,11 +160,11 @@ func TestReadJSONVersion1(t *testing.T) {
 
 func TestReadJSONRejectsTrailingData(t *testing.T) {
 	var buf bytes.Buffer
-	if err := WriteRaw(&buf, sampleRaw()); err != nil {
+	if err := record.WriteRaw(&buf, rawFixture()); err != nil {
 		t.Fatal(err)
 	}
 	// 生データの先頭行（meta）は version 1 の JSON として読めてしまうので、後ろのデータで弾く。
-	if _, err := ReadJSON(&buf); err == nil || !strings.Contains(err.Error(), "ReadRaw") {
+	if _, err := ReadJSON(&buf); err == nil || !strings.Contains(err.Error(), "record.ReadRaw") {
 		t.Errorf("err = %v、生データを渡したことが分かるはず", err)
 	}
 

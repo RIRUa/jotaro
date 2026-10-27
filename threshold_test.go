@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/RIRUa/jotaro/record"
 )
 
 func TestParseThreshold(t *testing.T) {
@@ -80,19 +82,19 @@ func TestThresholdString(t *testing.T) {
 // checkReport は 2 シナリオ・3 ステップの小さな結果。
 func checkReport() *Report {
 	ms := time.Millisecond
-	reqs := []Record{
+	reqs := []record.Record{
 		{Scenario: "checkout", Step: "login", Code: 200, Latency: 10 * ms},
 		{Scenario: "checkout", Step: "login", Code: 200, Latency: 20 * ms},
 		{Scenario: "checkout", Step: "order", Code: 500, Latency: 100 * ms},
-		{Scenario: "checkout", Step: "order", Code: 201, Latency: 200 * ms, Err: ErrExpect},
+		{Scenario: "checkout", Step: "order", Code: 201, Latency: 200 * ms, Err: record.ErrExpect},
 		{Scenario: "browse", Step: "login", Code: 404, Latency: 30 * ms},
 	}
-	iters := []IterationRecord{
+	iters := []record.IterationRecord{
 		{Scenario: "checkout", Duration: 300 * ms},
-		{Scenario: "checkout", Duration: 300 * ms, Err: ErrExpect},
+		{Scenario: "checkout", Duration: 300 * ms, Err: record.ErrExpect},
 		{Scenario: "browse", Duration: 30 * ms},
 	}
-	steps := []StepRecord{
+	steps := []record.StepRecord{
 		{Scenario: "checkout", Step: "login", Duration: 20 * ms},
 		{Scenario: "checkout", Step: "order", Duration: 200 * ms},
 		{Scenario: "browse", Step: "login", Duration: 30 * ms},
