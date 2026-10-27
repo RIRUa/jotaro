@@ -11,9 +11,10 @@ import (
 // JSONVersion は WriteJSON が出力するスキーマの版。互換を壊す変更のたびに上げる。
 // ReadJSON は 1 以降のすべての版を読める。
 //
+//	3: series（1 秒ごとの時系列）と、requests の dns / connect / tls / conn_new / conn_reused を追加
 //	2: started_at と、latency の buckets (ヒストグラム) を追加
 //	1: 初版
-const JSONVersion = 2
+const JSONVersion = 3
 
 // 出力用の型。Report の内部表現を変えても JSON の形が変わらないよう、別に持つ。
 // 時間はすべてナノ秒の整数（フィールド名は _ns で終える）。
@@ -32,14 +33,20 @@ type jsonLatency struct {
 }
 
 type jsonRequests struct {
-	Count     int            `json:"count"`
-	Latency   jsonLatency    `json:"latency"`
-	TTFB      jsonLatency    `json:"ttfb"`
-	Corrected jsonLatency    `json:"corrected"`
-	Status    map[string]int `json:"status"`
-	Errors    map[string]int `json:"errors"`
-	BytesIn   int64          `json:"bytes_in"`
-	BytesOut  int64          `json:"bytes_out"`
+	Count     int         `json:"count"`
+	Latency   jsonLatency `json:"latency"`
+	TTFB      jsonLatency `json:"ttfb"`
+	Corrected jsonLatency `json:"corrected"`
+	DNS       jsonLatency `json:"dns"`
+	Connect   jsonLatency `json:"connect"`
+	TLS       jsonLatency `json:"tls"`
+	// ConnNew / ConnReused は接続を新しく張った / 再利用したリクエストの数。
+	ConnNew    int            `json:"conn_new"`
+	ConnReused int            `json:"conn_reused"`
+	Status     map[string]int `json:"status"`
+	Errors     map[string]int `json:"errors"`
+	BytesIn    int64          `json:"bytes_in"`
+	BytesOut   int64          `json:"bytes_out"`
 }
 
 type jsonStep struct {
@@ -65,15 +72,25 @@ type jsonScenario struct {
 	Steps      []jsonStep     `json:"steps"`
 }
 
+type jsonSeriesPoint struct {
+	Second      int         `json:"second"`
+	Requests    int         `json:"requests"`
+	Errors      int         `json:"errors"`
+	HTTP5xx     int         `json:"http_5xx"`
+	Latency     jsonLatency `json:"latency"`
+	Concurrency int         `json:"concurrency"`
+}
+
 type jsonReport struct {
-	Version   int            `json:"version"`
-	Open      bool           `json:"open"`
-	Dropped   int            `json:"dropped"`
-	StartedAt time.Time      `json:"started_at"`
-	ElapsedNS int64          `json:"elapsed_ns"`
-	RPS       float64        `json:"rps"`
-	Requests  jsonRequests   `json:"requests"`
-	Scenarios []jsonScenario `json:"scenarios"`
+	Version   int               `json:"version"`
+	Open      bool              `json:"open"`
+	Dropped   int               `json:"dropped"`
+	StartedAt time.Time         `json:"started_at"`
+	ElapsedNS int64             `json:"elapsed_ns"`
+	RPS       float64           `json:"rps"`
+	Requests  jsonRequests      `json:"requests"`
+	Scenarios []jsonScenario    `json:"scenarios"`
+	Series    []jsonSeriesPoint `json:"series"`
 }
 
 // WriteJSON はレポートを JSON として w に書き出す。時間はナノ秒の整数。
@@ -93,6 +110,7 @@ func (r *Report) toJSON() jsonReport {
 		RPS:       r.RPS(),
 		Requests:  toJSONRequests(r.Requests),
 		Scenarios: []jsonScenario{}, // null ではなく [] にする
+		Series:    []jsonSeriesPoint{},
 	}
 	for _, sc := range r.Scenarios {
 		js := jsonScenario{
@@ -118,6 +136,16 @@ func (r *Report) toJSON() jsonReport {
 		}
 		out.Scenarios = append(out.Scenarios, js)
 	}
+	for _, p := range r.Series {
+		out.Series = append(out.Series, jsonSeriesPoint{
+			Second:      p.Second,
+			Requests:    p.Requests,
+			Errors:      p.Errors,
+			HTTP5xx:     p.HTTP5xx,
+			Latency:     toJSONLatency(p.Latency),
+			Concurrency: p.Concurrency,
+		})
+	}
 	return out
 }
 
@@ -127,14 +155,19 @@ func toJSONRequests(q RequestStats) jsonRequests {
 		status[k] = v
 	}
 	return jsonRequests{
-		Count:     q.Count,
-		Latency:   toJSONLatency(q.Latency),
-		TTFB:      toJSONLatency(q.TTFB),
-		Corrected: toJSONLatency(q.Corrected),
-		Status:    status,
-		Errors:    errCounts(q.Errors),
-		BytesIn:   q.BytesIn,
-		BytesOut:  q.BytesOut,
+		Count:      q.Count,
+		Latency:    toJSONLatency(q.Latency),
+		TTFB:       toJSONLatency(q.TTFB),
+		Corrected:  toJSONLatency(q.Corrected),
+		DNS:        toJSONLatency(q.DNS),
+		Connect:    toJSONLatency(q.Connect),
+		TLS:        toJSONLatency(q.TLS),
+		ConnNew:    q.NewConns,
+		ConnReused: q.ReusedConns,
+		Status:     status,
+		Errors:     errCounts(q.Errors),
+		BytesIn:    q.BytesIn,
+		BytesOut:   q.BytesOut,
 	}
 }
 
@@ -209,6 +242,16 @@ func (j jsonReport) toReport() *Report {
 		}
 		rep.Scenarios = append(rep.Scenarios, sc)
 	}
+	for _, p := range j.Series {
+		rep.Series = append(rep.Series, SeriesPoint{
+			Second:      p.Second,
+			Requests:    p.Requests,
+			Errors:      p.Errors,
+			HTTP5xx:     p.HTTP5xx,
+			Latency:     fromJSONLatency(p.Latency),
+			Concurrency: p.Concurrency,
+		})
+	}
 	return rep
 }
 
@@ -218,14 +261,19 @@ func fromJSONRequests(q jsonRequests) RequestStats {
 		status = q.Status
 	}
 	return RequestStats{
-		Count:     q.Count,
-		Latency:   fromJSONLatency(q.Latency),
-		TTFB:      fromJSONLatency(q.TTFB),
-		Corrected: fromJSONLatency(q.Corrected),
-		Status:    status,
-		Errors:    fromErrCounts(q.Errors),
-		BytesIn:   q.BytesIn,
-		BytesOut:  q.BytesOut,
+		Count:       q.Count,
+		Latency:     fromJSONLatency(q.Latency),
+		TTFB:        fromJSONLatency(q.TTFB),
+		Corrected:   fromJSONLatency(q.Corrected),
+		DNS:         fromJSONLatency(q.DNS),
+		Connect:     fromJSONLatency(q.Connect),
+		TLS:         fromJSONLatency(q.TLS),
+		NewConns:    q.ConnNew,
+		ReusedConns: q.ConnReused,
+		Status:      status,
+		Errors:      fromErrCounts(q.Errors),
+		BytesIn:     q.BytesIn,
+		BytesOut:    q.BytesOut,
 	}
 }
 

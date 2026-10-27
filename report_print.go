@@ -22,6 +22,12 @@ func (r *Report) Print(w io.Writer) {
 		fmt.Fprintf(w, "dropped:    %d\n", r.Dropped)
 	}
 	fmt.Fprintf(w, "ttfb:       %s\n", fmtPercentiles(r.Requests.TTFB))
+	if q := r.Requests; q.NewConns+q.ReusedConns > 0 {
+		fmt.Fprintf(w, "conns:      new=%d reused=%d (%.1f%% reused)\n", q.NewConns, q.ReusedConns, q.ReuseRate()*100)
+		fmt.Fprintf(w, "dns:        %s\n", fmtPercentiles(q.DNS))
+		fmt.Fprintf(w, "connect:    %s\n", fmtPercentiles(q.Connect))
+		fmt.Fprintf(w, "tls:        %s\n", fmtPercentiles(q.TLS))
+	}
 	fmt.Fprintf(w, "bytes:      in %s, out %s\n", fmtBytes(r.Requests.BytesIn), fmtBytes(r.Requests.BytesOut))
 
 	for _, sc := range r.Scenarios {

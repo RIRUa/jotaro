@@ -19,6 +19,14 @@ const (
 	ErrOther       ErrKind = "other"
 )
 
+// ConnKind はリクエストが使った接続の由来。空は接続を得る前に失敗したもの。
+type ConnKind string
+
+const (
+	ConnNew    ConnKind = "new"    // 新しく張った接続
+	ConnReused ConnKind = "reused" // 接続プールの再利用
+)
+
 // Record は 1 回の HTTP リクエストの生データ。集計はすべてここから行う。
 type Record struct {
 	Scenario  string
@@ -38,7 +46,11 @@ type Record struct {
 	Start     time.Time
 	Latency   time.Duration
 
+	// Conn は使った接続が新規か再利用か。
+	Conn ConnKind
+
 	// httptrace で取れる各区間。取れなかった区間は 0。
+	// 再利用した接続では DNS / Connect / TLS はどれも 0 になる。
 	DNS     time.Duration
 	Connect time.Duration
 	TLS     time.Duration

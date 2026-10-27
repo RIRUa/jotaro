@@ -133,7 +133,7 @@ Feeder はシナリオの外で作り、クロージャで共有する（`User` 
 |---|---|
 | 1 (MVP, `Users`) | パーセンタイル（p50/p90/p95/p99/max）、エラー内訳（タイムアウト／接続拒否／DNS／TLS／HTTP 4xx・5xx／`Expect` 不一致、ステップ別）、スループット（実 RPS・イテレーション/秒）、TTFB、送受信バイト数、思考時間を除いたシナリオ時間 |
 | 2 (`Rate`) | ドロップされたイテレーション数、Coordinated Omission の補正（予定開始時刻からの遅延で測る）。**実装済み** |
-| 3 | 時系列（1 秒ごと）、同時実行数の推移、接続の再利用率と DNS/TCP/TLS 時間、負荷生成側の健全性（CPU・ゴルーチン数） |
+| 3 | 時系列（1 秒ごと）・同時実行数の推移（**集計・JSON・結合・HTML のグラフは実装済み**）、接続の再利用率と DNS/TCP/TLS 時間（**集計・出力は実装済み**。時系列での推移は未）、負荷生成側の健全性（CPU・ゴルーチン数） |
 
 ## 6. MVP の範囲
 
@@ -152,7 +152,7 @@ Feeder はシナリオの外で作り、クロージャで共有する（`User` 
 | `scenario.go` `user.go` `step.go` | `Scenario` / `User` / `Step`（`Think`、panic の回復を含む） |
 | `report.go` `report_print.go` | 集計と出力 |
 | `run.go` | `Plan` / `Run`（`Users` / `Arrival` の両モデル） |
-| `arrival.go` | `Arrival` / `Rate` |
+| `arrival.go` | `Arrival` / `Rate` / `Ramp` / `Stages` |
 | `feeder.go` | `Feeder` / `LoadCSV` |
 
 実装中に決めたこと:
@@ -164,7 +164,7 @@ Feeder はシナリオの外で作り、クロージャで共有する（`User` 
 
 ## 8. 未決
 
-- ~~`Pacer` に近い抽象を自前で持つか、vegeta の `lib` を import するか。~~ → 自前の `Arrival` を持つことにした（依存を増やさず、シナリオ単位で制御するため）。可変レート（ランプアップなど）は `Arrival` の実装を増やして対応する。
+- ~~`Pacer` に近い抽象を自前で持つか、vegeta の `lib` を import するか。~~ → 自前の `Arrival` を持つことにした（依存を増やさず、シナリオ単位で制御するため）。可変レートは `Arrival` の実装を増やして対応する（`Ramp` で直線的なランプアップ、`Stages` で段階的な負荷を実装済み）。
 - vegeta 互換の程度（`Result` の JSON/CSV 出力だけか、`lib` の型を直接使うか）。結果の現状と出力形式の案は [`docs/result.md`](docs/result.md) にまとめた。
 - 値の受け渡しを型安全に保つ範囲（A は Go の変数なので問題ないが、B・YAML では文字列キーになる）。
 - 思考時間を含むシナリオ時間を、併記するか。

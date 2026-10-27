@@ -3,6 +3,8 @@
 //
 //	go run ./examples/checkout            # 20 ユーザー固定（クローズド）
 //	go run ./examples/checkout -rate 50   # 毎秒 50 シナリオ（オープン）
+//	go run ./examples/checkout -rate 100 -ramp 8s -duration 12s  # 0 から 100 へ 8 秒かけて増やす
+//	go run ./examples/checkout -rate 100 -duration 12s -stages    # 上げる → 保つ → 下げる
 package main
 
 import (
@@ -70,6 +72,9 @@ var checkout = jotaro.NewScenario("checkout", func(ctx context.Context, u *jotar
 
 func main() {
 	rate := flag.Int("rate", 0, "毎秒のシナリオ開始数。0 なら Users モデル")
+	ramp := flag.Duration("ramp", 0, "-rate に達するまでの時間。0 なら最初から一定")
+	stages := flag.Bool("stages", false, "-rate・-ramp・-duration を使い、上げる → 保つ → 下げるの 3 段階にする")
+	duration := flag.Duration("duration", 3*time.Second, "実行時間")
 	format := flag.String("format", "text", "結果の形式 (text, json, html)")
 	out := flag.String("o", "", "結果の書き出し先。空なら標準出力")
 	flag.Parse()
@@ -88,12 +93,24 @@ func main() {
 	plan := jotaro.Plan{
 		Scenario: checkout,
 		BaseURL:  srv.URL,
-		Duration: 3 * time.Second,
+		Duration: *duration,
 	}
 	if *rate > 0 {
 		plan.Arrival = jotaro.Rate(*rate, time.Second)
+		if *ramp > 0 {
+			plan.Arrival = jotaro.Ramp(0, *rate, time.Second, *ramp)
+		}
 	} else {
 		plan.Users = 20
+	}
+	if *rate > 0 && *stages {
+		// 前後の 1/4 ずつで上げ下げし、中間の 1/2 は一定にする。
+		q := *duration / 4
+		plan.Arrival = jotaro.Stages(
+			jotaro.Stage{Arrival: jotaro.Ramp(0, *rate, time.Second, q), For: q},
+			jotaro.Stage{Arrival: jotaro.Rate(*rate, time.Second), For: 2 * q},
+			jotaro.Stage{Arrival: jotaro.Ramp(*rate, 0, time.Second, q), For: q},
+		)
 	}
 	rep, err := jotaro.Run(ctx, plan)
 	if err != nil {

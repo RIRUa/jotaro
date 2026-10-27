@@ -170,3 +170,32 @@ func TestMergeReportsVersion1Fallback(t *testing.T) {
 		t.Fatalf("P50 = %v, want 25ms (重み付き平均)", got.Requests.Latency.P50)
 	}
 }
+
+func TestMergeConnStats(t *testing.T) {
+	mk := func(newN, reusedN int) *Report {
+		var reqs []Record
+		for i := 0; i < newN; i++ {
+			reqs = append(reqs, Record{Code: 200, Latency: time.Millisecond, Conn: ConnNew, Connect: time.Millisecond})
+		}
+		for i := 0; i < reusedN; i++ {
+			reqs = append(reqs, Record{Code: 200, Latency: time.Millisecond, Conn: ConnReused})
+		}
+		return BuildReport(reqs, nil, nil, time.Second)
+	}
+	var buf bytes.Buffer
+	if err := mk(1, 3).WriteJSON(&buf); err != nil { // JSON を経由しても残る
+		t.Fatal(err)
+	}
+	a, err := ReadJSON(&buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := MergeReports(a, mk(2, 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	q := got.Requests
+	if q.NewConns != 3 || q.ReusedConns != 3 || q.Connect.Count != 3 {
+		t.Errorf("merged: %+v", q)
+	}
+}

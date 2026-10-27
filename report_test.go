@@ -198,3 +198,26 @@ func TestFmtHelpers(t *testing.T) {
 		t.Errorf("fmtStatus(nil) = %q", got)
 	}
 }
+
+func TestConnStats(t *testing.T) {
+	ms := func(n int) time.Duration { return time.Duration(n) * time.Millisecond }
+	reqs := []Record{
+		{Step: "a", Code: 200, Latency: ms(10), Conn: ConnNew, DNS: ms(2), Connect: ms(1), TLS: ms(4)},
+		{Step: "a", Code: 200, Latency: ms(10), Conn: ConnReused},
+		{Step: "a", Code: 200, Latency: ms(10), Conn: ConnReused},
+		{Step: "a", Err: ErrConnRefused, Latency: ms(1)}, // 接続を得る前の失敗
+	}
+	q := BuildReport(reqs, nil, nil, time.Second).Requests
+	if q.NewConns != 1 || q.ReusedConns != 2 {
+		t.Fatalf("conns = %d / %d", q.NewConns, q.ReusedConns)
+	}
+	if got := q.ReuseRate(); got < 0.66 || got > 0.67 {
+		t.Errorf("ReuseRate = %v", got)
+	}
+	if q.DNS.Count != 1 || q.Connect.Count != 1 || q.TLS.Count != 1 || q.TLS.Max != ms(4) {
+		t.Errorf("dns=%+v connect=%+v tls=%+v", q.DNS, q.Connect, q.TLS)
+	}
+	if (RequestStats{}).ReuseRate() != 0 {
+		t.Error("記録が無いときは 0")
+	}
+}
