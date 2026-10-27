@@ -123,6 +123,8 @@ type Report struct {
 	Scenarios []ScenarioReport // 最初に実行された順
 	// Series は StartedAt から 1 秒ごとの集計。StartedAt が無いときは nil。
 	Series []SeriesPoint
+	// Health は StartedAt から 1 秒ごとの、負荷生成側の健全性。Run で実行したときだけ入る。
+	Health []HealthPoint
 }
 
 // RPS は 1 秒あたりのリクエスト数。

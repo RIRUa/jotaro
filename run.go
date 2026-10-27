@@ -101,18 +101,21 @@ func Run(ctx context.Context, p Plan) (*Report, error) {
 
 	r := &runner{p: p, tr: tr, timeout: timeout, col: NewCollector(), stopCtx: stopCtx, runCtx: runCtx}
 	start := time.Now()
+	health := startHealthSampler(SeriesInterval)
 	if p.Arrival != nil {
 		r.runOpen()
 	} else {
 		r.runClosed()
 	}
 	elapsed := time.Since(start)
+	healthPoints := health.stop()
 
 	reqs, steps, iters := r.col.Snapshot()
 	rep := BuildReport(reqs, steps, iters, elapsed)
 	rep.StartedAt = wallUTC(start)
 	rep.Open = p.Arrival != nil
 	rep.Dropped = r.col.Dropped()
+	rep.Health = healthPoints
 	return rep, nil
 }
 
