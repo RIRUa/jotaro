@@ -121,3 +121,37 @@ func TestReadJSONErrors(t *testing.T) {
 		}
 	}
 }
+
+func TestReadJSONStartedAtAndBucketsRoundTrip(t *testing.T) {
+	start := time.Date(2026, 5, 6, 7, 8, 9, 123456789, time.UTC)
+	want := BuildReport(
+		[]Record{{Scenario: "s", Step: "a", Start: start, Code: 200, Latency: 3 * time.Millisecond}},
+		nil, nil, time.Second)
+	if !want.StartedAt.Equal(start) {
+		t.Fatalf("StartedAt = %v, want %v", want.StartedAt, start)
+	}
+	var buf bytes.Buffer
+	if err := want.WriteJSON(&buf); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(buf.String(), `"started_at": "2026-05-06T07:08:09.123456789Z"`) || !strings.Contains(buf.String(), `"buckets"`) {
+		t.Fatalf("started_at / buckets が出ていない:\n%s", buf.String())
+	}
+	got, err := ReadJSON(&buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("往復で変わった\ngot  %+v\nwant %+v", got, want)
+	}
+}
+
+func TestReadJSONVersion1(t *testing.T) {
+	rep, err := ReadJSON(strings.NewReader(`{"version": 1, "elapsed_ns": 5}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.Elapsed != 5 || !rep.StartedAt.IsZero() {
+		t.Fatalf("%+v", rep)
+	}
+}

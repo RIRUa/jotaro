@@ -4,11 +4,16 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"time"
 )
 
 // JSONVersion は WriteJSON が出力するスキーマの版。互換を壊す変更のたびに上げる。
-const JSONVersion = 1
+// ReadJSON は 1 以降のすべての版を読める。
+//
+//	2: started_at と、latency の buckets (ヒストグラム) を追加
+//	1: 初版
+const JSONVersion = 2
 
 // 出力用の型。Report の内部表現を変えても JSON の形が変わらないよう、別に持つ。
 // 時間はすべてナノ秒の整数（フィールド名は _ns で終える）。
@@ -22,6 +27,8 @@ type jsonLatency struct {
 	P95NS  int64 `json:"p95_ns"`
 	P99NS  int64 `json:"p99_ns"`
 	MaxNS  int64 `json:"max_ns"`
+	// Buckets は対数ヒストグラム（バケット番号 → 件数）。結合時のパーセンタイルの再計算に使う。
+	Buckets map[int]int `json:"buckets"`
 }
 
 type jsonRequests struct {
@@ -62,6 +69,7 @@ type jsonReport struct {
 	Version   int            `json:"version"`
 	Open      bool           `json:"open"`
 	Dropped   int            `json:"dropped"`
+	StartedAt time.Time      `json:"started_at"`
 	ElapsedNS int64          `json:"elapsed_ns"`
 	RPS       float64        `json:"rps"`
 	Requests  jsonRequests   `json:"requests"`
@@ -80,6 +88,7 @@ func (r *Report) toJSON() jsonReport {
 		Version:   JSONVersion,
 		Open:      r.Open,
 		Dropped:   r.Dropped,
+		StartedAt: r.StartedAt,
 		ElapsedNS: ns(r.Elapsed),
 		RPS:       r.RPS(),
 		Requests:  toJSONRequests(r.Requests),
@@ -139,6 +148,8 @@ func toJSONLatency(l Latency) jsonLatency {
 		P95NS:  ns(l.P95),
 		P99NS:  ns(l.P99),
 		MaxNS:  ns(l.Max),
+		// null ではなく {} にする
+		Buckets: maps.Clone(bucketsOrEmpty(l.hist)),
 	}
 }
 
@@ -160,8 +171,8 @@ func ReadJSON(r io.Reader) (*Report, error) {
 	if err := json.NewDecoder(r).Decode(&in); err != nil {
 		return nil, fmt.Errorf("jotaro: read report: %w", err)
 	}
-	if in.Version != JSONVersion {
-		return nil, fmt.Errorf("jotaro: unsupported report version %d (want %d)", in.Version, JSONVersion)
+	if in.Version < 1 || in.Version > JSONVersion {
+		return nil, fmt.Errorf("jotaro: unsupported report version %d (want 1..%d)", in.Version, JSONVersion)
 	}
 	return in.toReport(), nil
 }
@@ -169,10 +180,11 @@ func ReadJSON(r io.Reader) (*Report, error) {
 // toReport は toJSON の逆。空の map / スライスは nil に戻す（BuildReport の結果と同じ形）。
 func (j jsonReport) toReport() *Report {
 	rep := &Report{
-		Open:     j.Open,
-		Dropped:  j.Dropped,
-		Elapsed:  time.Duration(j.ElapsedNS),
-		Requests: fromJSONRequests(j.Requests),
+		Open:      j.Open,
+		Dropped:   j.Dropped,
+		StartedAt: wallUTC(j.StartedAt),
+		Elapsed:   time.Duration(j.ElapsedNS),
+		Requests:  fromJSONRequests(j.Requests),
 	}
 	for _, js := range j.Scenarios {
 		sc := ScenarioReport{
@@ -227,6 +239,7 @@ func fromJSONLatency(l jsonLatency) Latency {
 		P95:   time.Duration(l.P95NS),
 		P99:   time.Duration(l.P99NS),
 		Max:   time.Duration(l.MaxNS),
+		hist:  nilIfEmpty(l.Buckets),
 	}
 }
 
@@ -239,4 +252,19 @@ func fromErrCounts(m map[string]int) map[ErrKind]int {
 		out[ErrKind(k)] = v
 	}
 	return out
+}
+
+// bucketsOrEmpty は nil でも空の map を返す。
+func bucketsOrEmpty(h histogram) map[int]int {
+	if h == nil {
+		return map[int]int{}
+	}
+	return h
+}
+
+func nilIfEmpty(m map[int]int) histogram {
+	if len(m) == 0 {
+		return nil
+	}
+	return m
 }

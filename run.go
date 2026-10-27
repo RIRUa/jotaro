@@ -110,6 +110,7 @@ func Run(ctx context.Context, p Plan) (*Report, error) {
 
 	reqs, steps, iters := r.col.Snapshot()
 	rep := BuildReport(reqs, steps, iters, elapsed)
+	rep.StartedAt = wallUTC(start)
 	rep.Open = p.Arrival != nil
 	rep.Dropped = r.col.Dropped()
 	return rep, nil
