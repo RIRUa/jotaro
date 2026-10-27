@@ -133,7 +133,7 @@ Feeder はシナリオの外で作り、クロージャで共有する（`User` 
 |---|---|
 | 1 (MVP, `Users`) | パーセンタイル（p50/p90/p95/p99/max）、エラー内訳（タイムアウト／接続拒否／DNS／TLS／HTTP 4xx・5xx／`Expect` 不一致、ステップ別）、スループット（実 RPS・イテレーション/秒）、TTFB、送受信バイト数、思考時間を除いたシナリオ時間 |
 | 2 (`Rate`) | ドロップされたイテレーション数、Coordinated Omission の補正（予定開始時刻からの遅延で測る）。**実装済み** |
-| 3 | 時系列（1 秒ごと）・同時実行数の推移（**集計・JSON・結合・HTML のグラフは実装済み**）、接続の再利用率と DNS/TCP/TLS 時間（**集計・出力は実装済み**。時系列での推移は未）、負荷生成側の健全性（CPU・ゴルーチン数） |
+| 3 | 時系列（1 秒ごと）・同時実行数の推移、接続の再利用率と DNS/TCP/TLS 時間（時系列での推移を含む）、負荷生成側の健全性（CPU・ゴルーチン数）。**実装済み**（集計・JSON・結合・HTML のグラフ） |
 
 ## 6. MVP の範囲
 
@@ -154,6 +154,7 @@ Feeder はシナリオの外で作り、クロージャで共有する（`User` 
 | `run.go` | `Plan` / `Run`（`Users` / `Arrival` の両モデル） |
 | `arrival.go` | `Arrival` / `Rate` / `Ramp` / `Stages` |
 | `feeder.go` | `Feeder` / `LoadCSV` |
+| `report_series.go` `report_health.go` | 時系列（1 秒ごと）と、負荷生成側の健全性（ゴルーチン数・CPU）のサンプリング |
 | `threshold.go` | `Threshold` / `ParseThreshold` / `Report.Check`（しきい値判定。[`docs/result.md`](docs/result.md) 5 章） |
 
 実装中に決めたこと:
