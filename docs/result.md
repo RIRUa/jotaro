@@ -162,7 +162,77 @@ Run ─(任意)─▶ /metrics ─▶ Prometheus ─▶ Grafana
 - 静的 HTML のグラフは、JS ライブラリを埋め込むと容量が増える。最初は表と簡単な SVG の棒グラフで足りるかもしれない。
 - 時系列を見るには、`DESIGN.md` のフェーズ3（1秒ごとの集計）が先に必要。それまでは最終値の可視化が中心になる。
 
-## 4. 関連
+## 4. 出力 API（提案）
+
+> 提案であり、**まだ実装していない**。`io.Writer` と形式を受け取る形にする。
+
+```
+*Report ─▶ Write(w, format) ─▶ Text / JSON / HTML ─▶ w（ファイル / 標準出力 / HTTP / バッファ）
+```
+
+### 基本形
+
+```go
+// 形式を表す型
+type Format string
+
+const (
+    FormatText Format = "text"
+    FormatJSON Format = "json"
+    FormatHTML Format = "html"
+)
+
+// 出力の入口。w は os.File でも bytes.Buffer でも http.ResponseWriter でもよい
+func (r *Report) Write(w io.Writer, f Format) error {
+    switch f {
+    case FormatText:
+        return r.writeText(w)
+    case FormatJSON:
+        return r.writeJSON(w)
+    case FormatHTML:
+        return r.writeHTML(w)
+    default:
+        return fmt.Errorf("unknown format: %q", f)
+    }
+}
+```
+
+| 項目 | 内容 |
+|---|---|
+| 責務 | `Report` は集計結果を持つ。`Write` は形式に応じて書く |
+| 依存 | 標準の `io` / `encoding/json` / `html/template` のみ |
+| メリット | 出力先が自由で、テストしやすい（`bytes.Buffer` で検証できる） |
+| デメリット | 形式を足すたびに `switch` を直す（開放閉鎖の原則に少し反する） |
+
+### 形式が増える場合
+
+利用者が独自の形式を足したくなったら、インターフェースに切り替える。
+
+```go
+// 形式ごとの書き手をインターフェースにする
+type Writer interface {
+    Write(w io.Writer, r *Report) error
+}
+
+// 使う側
+jotaro.JSON{}.Write(os.Stdout, rep)
+```
+
+| 案 | 向いている場面 |
+|---|---|
+| `Write(w, Format)` | 形式が少なく、CLI のフラグ（`-format json`）から選ぶ |
+| `Writer` インターフェース | 利用者が独自の形式を足したい |
+
+**推奨**: まず `Write(w, Format)` で始め、需要が出たらインターフェースへ移る。
+
+### 注意点
+
+- 現状のコンソール出力（`report_print.go`）は `writeText` に寄せる。既存の出力は変えない。
+- 生データ（JSON Lines）は件数が多いので、`Report` ではなく `Collector` の記録を1行ずつ書く別の API にする。`Report.Write` には含めない。
+- HTML は `html/template` で、JSON をページに埋め込む形が簡単。外部依存はいらない。
+- 書き込みの途中で失敗した場合は `error` を返す。部分的に書かれたファイルが残る点は、呼び出し側が扱う。
+
+## 5. 関連
 
 - 設計の全体像: [`DESIGN.md`](../DESIGN.md)（計測は 5 章、未決は 8 章）
 - 実装: `record.go` / `report.go` / `report_print.go`
