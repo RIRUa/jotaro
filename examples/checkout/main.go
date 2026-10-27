@@ -5,6 +5,7 @@
 //	go run ./examples/checkout -rate 50   # 毎秒 50 シナリオ（オープン）
 //	go run ./examples/checkout -rate 100 -ramp 8s -duration 12s  # 0 から 100 へ 8 秒かけて増やす
 //	go run ./examples/checkout -rate 100 -duration 12s -stages    # 上げる → 保つ → 下げる
+//	go run ./examples/checkout -raw raw.jsonl                      # 生データ（JSON Lines）も書き出す
 package main
 
 import (
@@ -77,6 +78,7 @@ func main() {
 	duration := flag.Duration("duration", 3*time.Second, "実行時間")
 	format := flag.String("format", "text", "結果の形式 (text, json, html)")
 	out := flag.String("o", "", "結果の書き出し先。空なら標準出力")
+	rawOut := flag.String("raw", "", "生データ（JSON Lines）の書き出し先。空なら出さない")
 	flag.Parse()
 
 	f, err := jotaro.ParseFormat(*format)
@@ -111,6 +113,14 @@ func main() {
 			jotaro.Stage{Arrival: jotaro.Rate(*rate, time.Second), For: 2 * q},
 			jotaro.Stage{Arrival: jotaro.Ramp(*rate, 0, time.Second, q), For: q},
 		)
+	}
+	if *rawOut != "" {
+		file, err := os.Create(*rawOut)
+		if err != nil {
+			log.Fatal(err)
+		}
+		defer file.Close()
+		plan.Raw = file
 	}
 	rep, err := jotaro.Run(ctx, plan)
 	if err != nil {

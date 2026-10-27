@@ -3,6 +3,8 @@ package jotaro
 import (
 	"context"
 	"errors"
+	"fmt"
+	"io"
 	"net/http"
 	"net/http/cookiejar"
 	"sync"
@@ -41,6 +43,10 @@ type Plan struct {
 	// Grace は Duration 経過後、実行中のイテレーションの完了を待つ時間。
 	// 超えたものは中断して ErrCanceled として記録する。0 なら 30 秒。
 	Grace time.Duration
+
+	// Raw が nil でなければ、Run が終わったときに生データを JSON Lines で書き出す（WriteRaw）。
+	// 書き出しに失敗しても、集計した Report は返す（error も同時に返す）。
+	Raw io.Writer
 }
 
 func (p Plan) validate() error {
@@ -111,11 +117,22 @@ func Run(ctx context.Context, p Plan) (*Report, error) {
 	healthPoints := health.stop()
 
 	reqs, steps, iters := r.col.Snapshot()
-	rep := BuildReport(reqs, steps, iters, elapsed)
-	rep.StartedAt = wallUTC(start)
-	rep.Open = p.Arrival != nil
-	rep.Dropped = r.col.Dropped()
-	rep.Health = healthPoints
+	raw := &Raw{
+		Open:       p.Arrival != nil,
+		Dropped:    r.col.Dropped(),
+		StartedAt:  start,
+		Elapsed:    elapsed,
+		Requests:   reqs,
+		Steps:      steps,
+		Iterations: iters,
+		Health:     healthPoints,
+	}
+	rep := raw.Report()
+	if p.Raw != nil {
+		if err := WriteRaw(p.Raw, raw); err != nil {
+			return rep, fmt.Errorf("jotaro: 生データの書き出しに失敗: %w", err)
+		}
+	}
 	return rep, nil
 }
 

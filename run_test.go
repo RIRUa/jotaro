@@ -1,9 +1,11 @@
 package jotaro
 
 import (
+	"bytes"
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -157,5 +159,49 @@ func TestRunStopsOnParentCancel(t *testing.T) {
 	}
 	if took := time.Since(start); took > 3*time.Second {
 		t.Fatalf("親 ctx のキャンセルで止まらなかった: %v", took)
+	}
+}
+
+func TestRunWritesRaw(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{}`))
+	}))
+	defer srv.Close()
+
+	sc := NewScenario("s", func(ctx context.Context, u *User) error {
+		return u.Step("get", func(s *Step) error { return s.Get("/").Do().ExpectStatus(200) })
+	})
+	var buf bytes.Buffer
+	rep, err := Run(context.Background(), Plan{
+		Scenario: sc, BaseURL: srv.URL, Users: 2, Duration: 200 * time.Millisecond, Raw: &buf,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	raw, err := ReadRaw(&buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(raw.Requests) != rep.Requests.Count || len(raw.Requests) == 0 {
+		t.Fatalf("リクエスト数: raw = %d, rep = %d", len(raw.Requests), rep.Requests.Count)
+	}
+	// 生データから集計し直した結果が、Run の結果と一致する。
+	if again := raw.Report(); !reflect.DeepEqual(again, rep) {
+		t.Errorf("再集計の結果が Run の結果と違う:\n got %+v\nwant %+v", again, rep)
+	}
+}
+
+func TestRunRawWriteErrorStillReturnsReport(t *testing.T) {
+	sc := NewScenario("s", func(ctx context.Context, u *User) error {
+		u.Think(5 * time.Millisecond)
+		return nil
+	})
+	rep, err := Run(context.Background(), Plan{Scenario: sc, Users: 1, Duration: 50 * time.Millisecond, Raw: failWriter{}})
+	if err == nil {
+		t.Error("書き出しの失敗が error にならない")
+	}
+	if rep == nil || len(rep.Scenarios) == 0 {
+		t.Errorf("書き出しに失敗しても集計は返すはず: %+v", rep)
 	}
 }
