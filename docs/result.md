@@ -91,6 +91,24 @@ if err := rep.WriteJSON(f); err != nil {
 - 空の集合は `null` ではなく `[]` / `{}` で出す（読む側が分岐しなくて済む）。
 - 追加で `rps` を出す（`Requests.Count / Elapsed`）。リクエストの集計は `latency` / `ttfb` / `corrected` の 3 つを持つ。
 
+### HTML レポート（実装済み）
+
+`Report.WriteHTML(w io.Writer) error` で、外部に依存しない 1 枚の HTML を書き出せる（`report_html.go` / `report.html.tmpl`）。
+
+```go
+f, _ := os.Create("report.html")
+defer f.Close()
+if err := rep.WriteHTML(f); err != nil {
+    log.Fatal(err)
+}
+```
+
+- `html/template` で生成するので、シナリオ名やステップ名は自動でエスケープされる。
+- CSS は埋め込み、JS と外部リソースは使わない。ライト／ダークは OS の設定に従う。
+- 内容: サマリー、ステータス・エラーの内訳、レイテンシ（p50〜max の棒）、`corrected`（`Rate` のときのみ）、TTFB、シナリオ別のイテレーション時間とステップ別の表。
+- 表示用の値は `Print` と同じ書式（`fmtDur`）。ナノ秒の無損失な値は JSON を使う。
+- サンプル: `go run ./examples/checkout -html report.html`（`-rate 30` で `Rate` モデル）。
+
 ## 2. 未実装（提案）
 
 > 以下は提案であり、**まだ決まっていない**。JSON 出力の項目は 1 章の実装を正とする。`DESIGN.md` の「未決」にある vegeta 互換の程度の判断が前提になる。

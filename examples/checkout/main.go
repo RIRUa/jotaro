@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"math/rand/v2"
 	"net/http"
@@ -70,6 +71,7 @@ var checkout = jotaro.NewScenario("checkout", func(ctx context.Context, u *jotar
 func main() {
 	rate := flag.Int("rate", 0, "毎秒のシナリオ開始数。0 なら Users モデル")
 	out := flag.String("o", "", "結果を JSON で書き出すファイル。空なら書き出さない")
+	htmlOut := flag.String("html", "", "結果を HTML レポートで書き出すファイル。空なら書き出さない")
 	flag.Parse()
 
 	srv := httptest.NewServer(mockShop())
@@ -95,18 +97,24 @@ func main() {
 	rep.Print(os.Stdout)
 
 	if *out != "" {
-		if err := writeJSONFile(rep, *out); err != nil {
+		if err := writeFile(*out, rep.WriteJSON); err != nil {
+			log.Fatal(err)
+		}
+	}
+	if *htmlOut != "" {
+		if err := writeFile(*htmlOut, rep.WriteHTML); err != nil {
 			log.Fatal(err)
 		}
 	}
 }
 
-func writeJSONFile(rep *jotaro.Report, path string) error {
+// writeFile は path を作って write の出力を書き込む。
+func writeFile(path string, write func(io.Writer) error) error {
 	f, err := os.Create(path)
 	if err != nil {
 		return err
 	}
-	if err := rep.WriteJSON(f); err != nil {
+	if err := write(f); err != nil {
 		f.Close()
 		return err
 	}

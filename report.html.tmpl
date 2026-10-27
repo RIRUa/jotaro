@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>jotaro report</title>
+<style>
+:root {
+  --bg: #ffffff; --fg: #1f2328; --muted: #656d76; --line: #d0d7de;
+  --card: #f6f8fa; --bar: #2f81f7; --bad: #cf222e;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0d1117; --fg: #e6edf3; --muted: #8b949e; --line: #30363d;
+    --card: #161b22; --bar: #58a6ff; --bad: #ff7b72;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0 auto; max-width: 960px; padding: 24px 16px;
+  background: var(--bg); color: var(--fg);
+  font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+h1 { font-size: 22px; margin: 0 0 4px; }
+h2 { font-size: 17px; margin: 32px 0 8px; border-bottom: 1px solid var(--line); padding-bottom: 4px; }
+h3 { font-size: 14px; margin: 20px 0 6px; color: var(--muted); }
+.meta { color: var(--muted); margin-bottom: 16px; }
+.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px; }
+.card .k { color: var(--muted); font-size: 12px; }
+.card .v { font-size: 20px; font-weight: 600; }
+.bad { color: var(--bad); }
+table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
+th, td { text-align: right; padding: 4px 8px; border-bottom: 1px solid var(--line); }
+th:first-child, td:first-child { text-align: left; }
+th { color: var(--muted); font-weight: 600; }
+.scroll { overflow-x: auto; }
+.bars { display: grid; grid-template-columns: 40px 1fr 80px; gap: 4px 8px; align-items: center; }
+.bars .track { background: var(--card); border: 1px solid var(--line); border-radius: 3px; height: 14px; }
+.bars .fill { background: var(--bar); height: 100%; border-radius: 2px; }
+.bars .val { text-align: right; font-variant-numeric: tabular-nums; }
+.cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
+footer { margin-top: 32px; color: var(--muted); font-size: 12px; }
+</style>
+</head>
+<body>
+<h1>jotaro report</h1>
+<div class="meta">{{.Model}} · elapsed {{.Elapsed}}</div>
+
+<div class="cards">
+  <div class="card"><div class="k">requests</div><div class="v">{{.Requests}}</div></div>
+  <div class="card"><div class="k">requests / s</div><div class="v">{{.RPS}}</div></div>
+  <div class="card"><div class="k">bytes</div><div class="v" style="font-size:14px">{{.Bytes}}</div></div>
+  {{if .Open}}<div class="card"><div class="k">dropped</div><div class="v{{if .Dropped}} bad{{end}}">{{.Dropped}}</div></div>{{end}}
+</div>
+
+<h2>Requests</h2>
+<div class="cols">
+  <div>
+    <h3>status</h3>
+    {{if .Status}}<table>{{range .Status}}<tr><td>{{.Name}}</td><td>{{.Count}}</td></tr>{{end}}</table>{{else}}<p class="meta">-</p>{{end}}
+  </div>
+  <div>
+    <h3>errors</h3>
+    {{if .Errors}}<table>{{range .Errors}}<tr><td>{{.Name}}</td><td class="bad">{{.Count}}</td></tr>{{end}}</table>{{else}}<p class="meta">-</p>{{end}}
+  </div>
+</div>
+
+<div class="cols">
+  <div>
+    <h3>latency</h3>
+    {{if .Latency}}<div class="bars">{{range .Latency}}<span>{{.Label}}</span><span class="track"><span class="fill" style="display:block;width:{{printf "%.1f" .Pct}}%"></span></span><span class="val">{{.Value}}</span>{{end}}</div>{{else}}<p class="meta">-</p>{{end}}
+  </div>
+  {{if .Open}}
+  <div>
+    <h3>corrected (from scheduled start)</h3>
+    {{if .Corrected}}<div class="bars">{{range .Corrected}}<span>{{.Label}}</span><span class="track"><span class="fill" style="display:block;width:{{printf "%.1f" .Pct}}%"></span></span><span class="val">{{.Value}}</span>{{end}}</div>{{else}}<p class="meta">-</p>{{end}}
+  </div>
+  {{end}}
+  <div>
+    <h3>ttfb</h3>
+    {{if .TTFB}}<div class="bars">{{range .TTFB}}<span>{{.Label}}</span><span class="track"><span class="fill" style="display:block;width:{{printf "%.1f" .Pct}}%"></span></span><span class="val">{{.Value}}</span>{{end}}</div>{{else}}<p class="meta">-</p>{{end}}
+  </div>
+</div>
+
+{{$hdr := .LatencyHeaders}}
+{{range .Scenarios}}
+<h2>Scenario: {{.Name}}</h2>
+<div class="cards">
+  <div class="card"><div class="k">iterations</div><div class="v">{{.Iterations}}</div></div>
+  <div class="card"><div class="k">iterations / s</div><div class="v">{{.PerSecond}}</div></div>
+  <div class="card"><div class="k">failed</div><div class="v{{if .Failed}} bad{{end}}">{{.Failed}}</div></div>
+  <div class="card"><div class="k">errors</div><div class="v" style="font-size:14px">{{.Errors}}</div></div>
+</div>
+
+<h3>iteration time</h3>
+<div class="scroll"><table>
+  <tr><th></th>{{range $hdr}}<th>{{.}}</th>{{end}}</tr>
+  {{range .Latency}}<tr><td>{{.Label}}</td>{{range .Cells}}<td>{{.}}</td>{{end}}</tr>{{end}}
+</table></div>
+
+{{if .Steps}}
+<h3>steps (duration)</h3>
+<div class="scroll"><table>
+  <tr><th>step</th><th>count</th><th>fail</th>{{range $hdr}}<th>{{.}}</th>{{end}}</tr>
+  {{range .Steps}}<tr><td>{{.Name}}</td><td>{{.Count}}</td><td{{if .Failed}} class="bad"{{end}}>{{.Failed}}</td>{{range .Duration}}<td>{{.}}</td>{{end}}</tr>{{end}}
+</table></div>
+
+<h3>steps (requests)</h3>
+<div class="scroll"><table>
+  <tr><th>step</th><th>reqs</th><th>status</th><th>errors</th><th>p50</th><th>p95</th><th>p99</th><th>ttfb p50</th><th>ttfb p95</th></tr>
+  {{range .Steps}}<tr><td>{{.Name}}</td><td>{{.Requests}}</td><td>{{.Status}}</td><td>{{.Errors}}</td><td>{{.P50}}</td><td>{{.P95}}</td><td>{{.P99}}</td><td>{{.TTFBP50}}</td><td>{{.TTFBP95}}</td></tr>{{end}}
+</table></div>
+{{end}}
+{{end}}
+
+<footer>generated by jotaro · schema v{{.Version}}</footer>
+</body>
+</html>
