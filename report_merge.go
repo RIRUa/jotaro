@@ -87,6 +87,7 @@ func MergeReports(reps ...*Report) (*Report, error) {
 			offset = int((r.StartedAt.Sub(first) + SeriesInterval/2) / SeriesInterval)
 		}
 		out.Series = mergeSeries(out.Series, r.Series, offset)
+		out.Health = mergeHealth(out.Health, r.Health, offset)
 	}
 	for _, sc := range scenarios {
 		out.Scenarios = append(out.Scenarios, *sc)

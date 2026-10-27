@@ -177,3 +177,87 @@ func TestCheckUsageErrors(t *testing.T) {
 		t.Errorf("ファイルが開けないとき code = %d, want 1", code)
 	}
 }
+
+// writeSampleRaw は writeSample と同じ内容を、生データ（JSON Lines）として path に書く。
+func writeSampleRaw(t *testing.T, path string) {
+	t.Helper()
+	t0 := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	raw := &jotaro.Raw{
+		StartedAt: t0, Elapsed: time.Second,
+		Requests:   []jotaro.Record{{Scenario: "checkout", Step: "login", Code: 200, Start: t0, Latency: 12 * time.Millisecond}},
+		Steps:      []jotaro.StepRecord{{Scenario: "checkout", Step: "login", Start: t0, Duration: 15 * time.Millisecond}},
+		Iterations: []jotaro.IterationRecord{{Scenario: "checkout", Start: t0, Duration: 20 * time.Millisecond}},
+	}
+	var buf bytes.Buffer
+	if err := jotaro.WriteRaw(&buf, raw); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, buf.Bytes(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestReportRaw(t *testing.T) {
+	in := filepath.Join(t.TempDir(), "raw.jsonl")
+	writeSampleRaw(t, in)
+
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"report", "-raw", "-format", "text", in}, nil, &stdout, &stderr); code != 0 {
+		t.Fatalf("code = %d, stderr = %s", code, stderr.String())
+	}
+	if out := stdout.String(); !strings.Contains(out, "requests:   1 ") || !strings.Contains(out, "checkout") {
+		t.Errorf("生データから集計できていない:\n%s", out)
+	}
+
+	// -raw を付けずに生データを渡すと、集計済み JSON ではないのでエラーになる。
+	stdout.Reset()
+	stderr.Reset()
+	if code := run([]string{"report", in}, nil, &stdout, &stderr); code != 1 {
+		t.Errorf("-raw 無しで code = %d, want 1", code)
+	}
+}
+
+func TestReportRawStdinToJSONThenCheck(t *testing.T) {
+	in := filepath.Join(t.TempDir(), "raw.jsonl")
+	writeSampleRaw(t, in)
+	data, _ := os.ReadFile(in)
+
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"report", "-raw", "-format", "json", "-"}, bytes.NewReader(data), &stdout, &stderr); code != 0 {
+		t.Fatalf("code = %d, stderr = %s", code, stderr.String())
+	}
+	// 生データ → 集計済み JSON → しきい値判定、と続けられる。
+	var out bytes.Buffer
+	if code := run([]string{"check", "-t", "p95<100ms", "-"}, &stdout, &out, &stderr); code != 0 {
+		t.Fatalf("check: code = %d, stdout = %s, stderr = %s", code, out.String(), stderr.String())
+	}
+}
+
+func TestCheckAndMergeRaw(t *testing.T) {
+	in := filepath.Join(t.TempDir(), "raw.jsonl")
+	writeSampleRaw(t, in)
+
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"check", "-raw", "-t", "p95<1ms", in}, nil, &stdout, &stderr); code != 1 || !strings.Contains(stdout.String(), "FAIL  p95<1ms") {
+		t.Errorf("check -raw: code = %d, stdout = %s", code, stdout.String())
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	if code := run([]string{"merge", "-raw", "-format", "text", in, in}, nil, &stdout, &stderr); code != 0 || !strings.Contains(stdout.String(), "requests:   2 ") {
+		t.Errorf("merge -raw: code = %d, stdout = %s, stderr = %s", code, stdout.String(), stderr.String())
+	}
+}
+
+func TestReadErrorsHaveSinglePrefix(t *testing.T) {
+	bad := filepath.Join(t.TempDir(), "bad.json")
+	os.WriteFile(bad, []byte(`{"x"`), 0o644)
+
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"report", bad}, nil, &stdout, &stderr); code != 1 {
+		t.Fatalf("code = %d", code)
+	}
+	if strings.Contains(stderr.String(), "jotaro: jotaro:") {
+		t.Errorf("接頭辞が二重: %s", stderr.String())
+	}
+}

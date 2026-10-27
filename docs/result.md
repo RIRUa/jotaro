@@ -4,7 +4,7 @@ jotaro の実行結果に関する仕様メモ。**実装済みの部分**と**�
 
 ## 1. 現状（実装済み）
 
-結果は **メモリ上の `Report` 構造体**と**コンソール出力**のみ。ファイルへの書き出しは未実装。
+結果は **メモリ上の `Report` 構造体**で、コンソール表示・JSON・HTML に書き出せる（4 章）。生データは JSON Lines に書き出せる（下の「生データ」）。
 
 ```
 Run() ─▶ Collector ─▶ BuildReport() ─▶ *Report ─▶ report_print.go ─▶ コンソール
@@ -134,10 +134,41 @@ jotaro merge -format html -o report.html a.json b.json
 - **ヒストグラム**: 各 `latency` に対数バケット（DDSketch 方式、相対誤差 1%）を持たせた（JSON の `buckets`: バケット番号 → 件数）。バケットは足し算で結合できるので、何台分でも順序に関係なく同じ結果になる。1 つのレポートの `P50`〜`P99` は従来どおり nearest-rank の正確な値で、結合したときだけ近似になる。
 - **サイズ**: バケットの数は分布の広がりで決まる（件数には比例しない）。10 万件・裾の重い分布で 1 つの `latency` あたり数百バケット。
 - **接続の内訳 (`requests` と各ステップの `requests`、version 3)**: `dns` / `connect`（TCP）/ `tls` は、その区間が実際に起きたリクエストだけのレイテンシ分布（`buckets` つき）。接続を再利用したリクエストや、http の TLS は含まない。`conn_new` / `conn_reused` は接続を新しく張った / 再利用したリクエストの数で、再利用率は `conn_reused / (conn_new + conn_reused)`。接続を得る前に失敗したリクエストはどちらにも数えない。version 1・2 の JSON には無い（0・空として読める）。
-- **時系列 (`series`、version 3)**: `started_at` からの 1 秒ごとの配列。要素は `second` / `requests` / `errors`（通信エラー。HTTP 4xx/5xx は含まない）/ `http_5xx`（HTTP 5xx の数。`errors` とは重ならない。無ければ 0）/ `latency`（`buckets` つき）/ `concurrency`（その秒の実行中イテレーション数の最大）。`started_at` が無いと空。結合では `started_at` の差だけ秒をずらして足し、`concurrency` は合計（上限の見積り）。version 1・2 の JSON には無い。
+- **時系列 (`series`、version 3)**: `started_at` からの 1 秒ごとの配列。要素は `second` / `requests` / `errors`（通信エラー。HTTP 4xx/5xx は含まない）/ `http_5xx`（HTTP 5xx の数。`errors` とは重ならない。無ければ 0）/ `latency`（`buckets` つき）/ `conn_new` / `conn_reused`（その秒に開始したリクエストのうち、接続を新しく張った / 再利用した数）/ `dns` / `connect` / `tls`（その区間が起きたリクエストだけの分布。`buckets` つき。`requests` の同名のフィールドと同じ範囲）/ `concurrency`（その秒の実行中イテレーション数の最大）。`started_at` が無いと空。結合では `started_at` の差だけ秒をずらして足し、`concurrency` は合計（上限の見積り）。version 1・2 の JSON には無い。`conn_new` 以降は version 3 に後から足した項目で、無い JSON は 0・空として読む（互換を壊さないので版は上げていない）。
+- **負荷生成側の健全性 (`health`、version 3)**: `jotaro.Run` を動かしているプロセスの、`started_at` からの 1 秒ごとの配列。要素は `second` / `goroutines`（その秒の終わりのゴルーチン数）/ `cpu`（その秒に使った CPU 時間の割合。GOMAXPROCS 個の CPU 全体に対して 0〜1。取得できない環境では -1）。`BuildReport` だけで作った結果や、古い JSON には無い（空）。結合では秒をずらして重ね、`goroutines` は合計、`cpu` は最大（負荷生成側が複数あるときは、一番詰まっているものを見る）。
+  - CPU は `getrusage`（Unix 系）の CPU 時間から求める。Windows など取得できない環境では -1 で、グラフや平均には含めない。`runtime/metrics` の `/cpu/classes/*` は GC のたびにしか更新されないため使っていない。
+  - 負荷をかける対象を同じプロセスで動かしている（`examples/checkout` など）と、その分も含む。
+  - CPU の最大が 90% 以上のとき、テキストと HTML のサマリーに「負荷生成側が詰まって測定値が悪く出ている疑い」の警告を出す。
 - **version 1 の JSON との互換**: 読める。`buckets` と `started_at` が無いので、それが混じる結合では次のフォールバックになる。
   - `P50`〜`P99` は件数で重み付けした平均（誤差が大きい）。
   - `Elapsed` は最大値（同時に実行した前提）。
+
+### 生データ（JSON Lines）（実装済み）
+
+集計前の記録を 1 行 1 レコードで書き出し、後から再集計したり、他のツールで可視化したりできる（`raw_json.go`）。集計結果（`Report`）は件数が増えても大きさが変わらないが、生データは件数に比例して大きくなる。
+
+```go
+f, _ := os.Create("raw.jsonl")
+defer f.Close()
+rep, err := jotaro.Run(ctx, jotaro.Plan{ /* ... */ Raw: f }) // 終了時に書き出す
+```
+
+```
+go run ./examples/checkout -raw raw.jsonl
+jotaro report -raw -format html -o report.html raw.jsonl     # 生データから再集計
+jotaro report -raw -format json raw.jsonl | jotaro check -t 'p95<200ms' -   # 集計済み JSON を経由して判定
+jotaro check -raw -t 'p95<200ms' raw.jsonl                    # 直接判定もできる
+```
+
+ライブラリでは `WriteRaw(w, *Raw)` / `ReadRaw(r) (*Raw, error)` / `(*Raw).Report()`。`Run` の結果も `Raw.Report()` を通すので、書き出した生データから再集計した結果は `Run` が返した `Report` と一致する。`report` / `merge` / `check` の `-raw` で読める。
+
+- 先頭の行は実行全体の情報（`type` が `meta`）。`version`（`RawVersion`、現在 `1`）/ `open` / `dropped` / `started_at` / `elapsed_ns`。そのあとに `request` / `step` / `iteration` / `health` の行が続く。
+- 時間は集計の JSON と同じく**ナノ秒の整数**（`_ns`）。時刻は UTC の RFC 3339。0・空のフィールドは省く（`code`、`err`、`dns_ns`、`scheduled` など。読むときは 0・空に戻る）。
+- `request` は `Record` と同じ内容: `scenario` / `step` / `user_id` / `iteration` / `method` / `url` / `code` / `err` / `scheduled` / `start` / `latency_ns` / `conn` / `dns_ns` / `connect_ns` / `tls_ns` / `ttfb_ns` / `bytes_out` / `bytes_in`。`step` は `StepRecord`、`iteration` は `IterationRecord`、`health` は `HealthPoint` と同じ。
+- `ReadRaw` は知らない `type` の行を読み飛ばす（新しい版が行を足しても、古い読み手が壊れない）。`meta` が無くても読める（実行時間は記録から求める）。
+- 集計済みの JSON（`ReadJSON`）に生データを渡すと、先頭の `meta` 行が `version: 1` の JSON として読めてしまう。`ReadJSON` は JSON の後ろに別のデータが続くとエラーにするので、`-raw` の付け忘れは「生データなら `-raw` を使う」というエラーになる。
+- 生データは `Run` が終わってからまとめて書く（記録はもともとメモリに溜めているため）。実行中に少しずつ書く（メモリを使わない）形にはなっていない。
+- 書き出しに失敗しても、`Run` は集計した `Report` を返す（`error` も同時に返す）。
 
 ## 2. 未実装（提案）
 
@@ -148,10 +179,10 @@ jotaro merge -format html -o report.html a.json b.json
 | 形式 | 内容 | メリット | デメリット |
 |---|---|---|---|
 | JSON（集計） | `Report` をそのまま出力 | 実装が小さい。CI で閾値判定しやすい | 生データは残らない |
-| JSON Lines / CSV（生データ） | `Record` を1行ずつ出力 | 後から再集計・可視化できる | ファイルが大きくなる |
+| JSON Lines（生データ。**実装済み**） | `Record` などを1行ずつ出力 | 後から再集計・可視化できる | ファイルが大きくなる |
 | vegeta 互換 | vegeta の `Result` 形式 | 既存の `vegeta report` / `plot` が使える | シナリオ・ステップの情報が落ちる |
 
-**推奨**: まず JSON（集計）。次に生データ（JSON Lines）を追加する。vegeta 互換は需要が出てから。
+**推奨**: まず JSON（集計）。次に生データ（JSON Lines）を追加する（どちらも実装済み）。vegeta 互換は需要が出てから。
 
 ### JSON 化の際に決めること
 
@@ -212,7 +243,7 @@ Run ─(任意)─▶ /metrics ─▶ Prometheus ─▶ Grafana
 ### 実装の順序
 
 1. **JSON 出力**（集計結果）: すべての土台。`version` を持たせ、他ツールが形式の変更で壊れないようにする。
-2. **JSON Lines 出力**（生データ）: 他ツールでの再集計・可視化用。
+2. **JSON Lines 出力**（生データ。実装済み）: 他ツールでの再集計・可視化用。
 3. **静的 HTML レポート**: `jotaro report result.json -o report.html` のように JSON から1ファイルを生成する。サーバー不要で、CI の成果物にも添付できる。
 4. **`/metrics`**（Prometheus）: 実行中の推移を見たくなったら追加する。
 
@@ -292,7 +323,7 @@ type Writer interface {
 
 ### 注意点
 
-- 生データ（JSON Lines）は件数が多いので、`Report` ではなく `Collector` の記録を1行ずつ書く別の API にする。`Report.Write` には含めない。
+- 生データ（JSON Lines）は件数が多いので、`Report.Write` には含めず、別の API（`WriteRaw`、`Plan.Raw`）にした。
 
 ## 5. しきい値判定（実装済み）
 

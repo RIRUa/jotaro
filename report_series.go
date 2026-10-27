@@ -18,8 +18,17 @@ type SeriesPoint struct {
 	Errors int
 	// HTTP5xx はそのうち HTTP 5xx を返した数（Errors とは重ならない）。
 	HTTP5xx int
+	// NewConns / ReusedConns は、この区間に開始したリクエストのうち、
+	// 接続を新しく張ったものと再利用したものの数。接続を得る前に失敗したものはどちらにも数えない。
+	NewConns    int
+	ReusedConns int
 	// Latency はこの区間に開始したリクエストのレイテンシ分布。
 	Latency Latency
+	// DNS / Connect / TLS は、この区間に開始したリクエストのうち、その区間が実際に起きたものの分布
+	// （RequestStats の同名のフィールドと同じ範囲）。
+	DNS     Latency
+	Connect Latency
+	TLS     Latency
 	// Concurrency はこの区間に実行中だったイテレーション数の最大値。
 	Concurrency int
 }
@@ -44,7 +53,13 @@ func buildSeries(origin time.Time, reqs []Record, iters []IterationRecord) []Ser
 		return nil
 	}
 
-	lats := make([][]time.Duration, n)
+	// 1 秒ごとの時間の記録。あとで分布にする。
+	var (
+		lats     = make([][]time.Duration, n)
+		dnss     = make([][]time.Duration, n)
+		connects = make([][]time.Duration, n)
+		tlss     = make([][]time.Duration, n)
+	)
 	pts := make([]SeriesPoint, n)
 	for i := range pts {
 		pts[i].Second = i
@@ -58,10 +73,26 @@ func buildSeries(origin time.Time, reqs []Record, iters []IterationRecord) []Ser
 		if r.Code >= 500 {
 			pts[i].HTTP5xx++
 		}
+		switch r.Conn {
+		case ConnNew:
+			pts[i].NewConns++
+		case ConnReused:
+			pts[i].ReusedConns++
+		}
 		lats[i] = append(lats[i], r.Latency)
+		if r.DNS > 0 {
+			dnss[i] = append(dnss[i], r.DNS)
+		}
+		if r.Connect > 0 {
+			connects[i] = append(connects[i], r.Connect)
+		}
+		if r.TLS > 0 {
+			tlss[i] = append(tlss[i], r.TLS)
+		}
 	}
 	for i := range pts {
 		pts[i].Latency = newLatency(lats[i])
+		pts[i].DNS, pts[i].Connect, pts[i].TLS = newLatency(dnss[i]), newLatency(connects[i]), newLatency(tlss[i])
 	}
 
 	// 同時実行数は、開始 (+1) と終了 (-1) の順に走査して区間ごとの最大値を求める。
@@ -110,7 +141,12 @@ func mergeSeries(a, b []SeriesPoint, offset int) []SeriesPoint {
 		q.Requests += p.Requests
 		q.Errors += p.Errors
 		q.HTTP5xx += p.HTTP5xx
+		q.NewConns += p.NewConns
+		q.ReusedConns += p.ReusedConns
 		q.Latency = mergeLatency(q.Latency, p.Latency)
+		q.DNS = mergeLatency(q.DNS, p.DNS)
+		q.Connect = mergeLatency(q.Connect, p.Connect)
+		q.TLS = mergeLatency(q.TLS, p.TLS)
 		q.Concurrency += p.Concurrency
 	}
 	slices.SortFunc(out, func(x, y SeriesPoint) int { return x.Second - y.Second })

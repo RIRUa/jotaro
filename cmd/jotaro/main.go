@@ -1,8 +1,10 @@
 // jotaro は結果ファイルを扱う CLI。
 //
-//	jotaro report [-format html|text|json] [-o 出力先] <result.json | ->
-//	jotaro merge  [-format html|text|json] [-o 出力先] <result.json>...
-//	jotaro check  -t <しきい値> [-t <しきい値>]... <result.json | ->
+//	jotaro report [-raw] [-format html|text|json] [-o 出力先] <result.json | ->
+//	jotaro merge  [-raw] [-format html|text|json] [-o 出力先] <result.json>...
+//	jotaro check  [-raw] -t <しきい値> [-t <しきい値>]... <result.json | ->
+//
+// -raw を付けると、入力を JSON Lines の生データ（Plan.Raw の出力）として読み、集計し直す。
 package main
 
 import (
@@ -10,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/RIRUa/jotaro"
 )
@@ -36,7 +39,7 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	case "report":
 		return runReport(args[1:], stdin, stdout, stderr)
 	case "merge":
-		return runMerge(args[1:], stdout, stderr)
+		return runMerge(args[1:], stdin, stdout, stderr)
 	case "check":
 		return runCheck(args[1:], stdin, stdout, stderr)
 	case "-h", "-help", "--help", "help":
@@ -52,11 +55,12 @@ func runReport(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("report", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.Usage = func() {
-		fmt.Fprintln(stderr, "usage: jotaro report [-format html|text|json] [-o 出力先] <result.json | ->")
+		fmt.Fprintln(stderr, "usage: jotaro report [-raw] [-format html|text|json] [-o 出力先] <result.json | ->")
 		fs.PrintDefaults()
 	}
 	format := fs.String("format", "html", "出力の形式 (text, json, html)")
 	out := fs.String("o", "", "出力先のファイル。空なら標準出力")
+	raw := fs.Bool("raw", false, rawUsage)
 	if err := fs.Parse(args); err != nil {
 		if err == flag.ErrHelp {
 			return 0
@@ -74,19 +78,9 @@ func runReport(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return 2
 	}
 
-	in := stdin
-	if path := fs.Arg(0); path != "-" {
-		file, err := os.Open(path)
-		if err != nil {
-			fmt.Fprintln(stderr, "jotaro:", err)
-			return 1
-		}
-		defer file.Close()
-		in = file
-	}
-	rep, err := jotaro.ReadJSON(in)
+	rep, err := readReport(fs.Arg(0), *raw, stdin)
 	if err != nil {
-		fmt.Fprintln(stderr, err)
+		fmt.Fprintln(stderr, "jotaro:", errMessage(err))
 		return 1
 	}
 
@@ -109,15 +103,16 @@ func emit(rep *jotaro.Report, f jotaro.Format, out string, stdout, stderr io.Wri
 	return 0
 }
 
-func runMerge(args []string, stdout, stderr io.Writer) int {
+func runMerge(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("merge", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.Usage = func() {
-		fmt.Fprintln(stderr, "usage: jotaro merge [-format html|text|json] [-o 出力先] <result.json>...")
+		fmt.Fprintln(stderr, "usage: jotaro merge [-raw] [-format html|text|json] [-o 出力先] <result.json>...")
 		fs.PrintDefaults()
 	}
 	format := fs.String("format", "json", "出力の形式 (text, json, html)")
 	out := fs.String("o", "", "出力先のファイル。空なら標準出力")
+	raw := fs.Bool("raw", false, rawUsage)
 	if err := fs.Parse(args); err != nil {
 		if err == flag.ErrHelp {
 			return 0
@@ -137,9 +132,9 @@ func runMerge(args []string, stdout, stderr io.Writer) int {
 
 	reps := make([]*jotaro.Report, 0, fs.NArg())
 	for _, path := range fs.Args() {
-		rep, err := readReport(path)
+		rep, err := readReport(path, *raw, stdin)
 		if err != nil {
-			fmt.Fprintf(stderr, "jotaro: %s: %v\n", path, err)
+			fmt.Fprintf(stderr, "jotaro: %s: %s\n", path, errMessage(err))
 			return 1
 		}
 		reps = append(reps, rep)
@@ -170,12 +165,13 @@ func runCheck(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("check", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.Usage = func() {
-		fmt.Fprintln(stderr, "usage: jotaro check -t <しきい値> [-t <しきい値>]... <result.json | ->")
+		fmt.Fprintln(stderr, "usage: jotaro check [-raw] -t <しきい値> [-t <しきい値>]... <result.json | ->")
 		fmt.Fprintln(stderr, "  例: jotaro check -t 'p95<200ms' -t 'error_rate<1%' -t 'p99{step=login}<100ms' result.json")
 		fs.PrintDefaults()
 	}
 	var ts thresholdFlags
 	fs.Var(&ts, "t", "しきい値。繰り返し指定できる（例: p95<200ms）")
+	raw := fs.Bool("raw", false, rawUsage)
 	if err := fs.Parse(args); err != nil {
 		if err == flag.ErrHelp {
 			return 0
@@ -187,19 +183,9 @@ func runCheck(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return 2
 	}
 
-	in := stdin
-	if path := fs.Arg(0); path != "-" {
-		file, err := os.Open(path)
-		if err != nil {
-			fmt.Fprintln(stderr, "jotaro:", err)
-			return 1
-		}
-		defer file.Close()
-		in = file
-	}
-	rep, err := jotaro.ReadJSON(in)
+	rep, err := readReport(fs.Arg(0), *raw, stdin)
 	if err != nil {
-		fmt.Fprintln(stderr, err)
+		fmt.Fprintln(stderr, "jotaro:", errMessage(err))
 		return 1
 	}
 
@@ -211,13 +197,32 @@ func runCheck(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	return 0
 }
 
-func readReport(path string) (*jotaro.Report, error) {
-	file, err := os.Open(path)
-	if err != nil {
-		return nil, err
+// errMessage は、ライブラリのエラーが持つ "jotaro: " の接頭辞を外す。CLI が自分で付けるので二重にしない。
+func errMessage(err error) string {
+	return strings.TrimPrefix(err.Error(), "jotaro: ")
+}
+
+const rawUsage = "入力を JSON Lines の生データとして読み、集計し直す"
+
+// readReport は path（"-" なら stdin）から結果を読む。raw なら生データを集計する。
+func readReport(path string, raw bool, stdin io.Reader) (*jotaro.Report, error) {
+	in := stdin
+	if path != "-" {
+		file, err := os.Open(path)
+		if err != nil {
+			return nil, err
+		}
+		defer file.Close()
+		in = file
 	}
-	defer file.Close()
-	return jotaro.ReadJSON(file)
+	if raw {
+		r, err := jotaro.ReadRaw(in)
+		if err != nil {
+			return nil, err
+		}
+		return r.Report(), nil
+	}
+	return jotaro.ReadJSON(in)
 }
 
 // writeFile は書き込みに失敗したとき、途中まで書かれたファイルを消す。

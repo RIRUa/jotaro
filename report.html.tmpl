@@ -63,8 +63,11 @@ footer { margin-top: 32px; color: var(--muted); font-size: 12px; }
   <div class="card"><div class="k">requests / s</div><div class="v">{{.RPS}}</div></div>
   <div class="card"><div class="k">bytes</div><div class="v" style="font-size:14px">{{.Bytes}}</div></div>
   {{if .Conns}}<div class="card"><div class="k">connection reuse</div><div class="v" style="font-size:14px">{{.Conns}}</div></div>{{end}}
+  {{if .LoadGen}}<div class="card"><div class="k">load generator</div><div class="v{{if .LoadWarn}} bad{{end}}" style="font-size:14px">{{.LoadGen}}</div></div>{{end}}
   {{if .Open}}<div class="card"><div class="k">dropped</div><div class="v{{if .Dropped}} bad{{end}}">{{.Dropped}}</div></div>{{end}}
 </div>
+
+{{if .LoadWarn}}<p class="bad">⚠ {{.LoadWarn}}</p>{{end}}
 
 <h2>Requests</h2>
 <div class="cols">

@@ -11,7 +11,9 @@ import (
 // JSONVersion は WriteJSON が出力するスキーマの版。互換を壊す変更のたびに上げる。
 // ReadJSON は 1 以降のすべての版を読める。
 //
-//	3: series（1 秒ごとの時系列）と、requests の dns / connect / tls / conn_new / conn_reused を追加
+//	3: series（1 秒ごとの時系列）と、requests の dns / connect / tls / conn_new / conn_reused を追加。
+//	   series の conn_new / conn_reused / dns / connect / tls と、health（負荷生成側の健全性）は後から足した
+//	   （無い JSON は 0・空として読む）
 //	2: started_at と、latency の buckets (ヒストグラム) を追加
 //	1: 初版
 const JSONVersion = 3
@@ -77,8 +79,19 @@ type jsonSeriesPoint struct {
 	Requests    int         `json:"requests"`
 	Errors      int         `json:"errors"`
 	HTTP5xx     int         `json:"http_5xx"`
+	ConnNew     int         `json:"conn_new"`
+	ConnReused  int         `json:"conn_reused"`
 	Latency     jsonLatency `json:"latency"`
+	DNS         jsonLatency `json:"dns"`
+	Connect     jsonLatency `json:"connect"`
+	TLS         jsonLatency `json:"tls"`
 	Concurrency int         `json:"concurrency"`
+}
+
+type jsonHealthPoint struct {
+	Second     int     `json:"second"`
+	Goroutines int     `json:"goroutines"`
+	CPU        float64 `json:"cpu"` // 0〜1。取得できなかったときは -1
 }
 
 type jsonReport struct {
@@ -91,6 +104,7 @@ type jsonReport struct {
 	Requests  jsonRequests      `json:"requests"`
 	Scenarios []jsonScenario    `json:"scenarios"`
 	Series    []jsonSeriesPoint `json:"series"`
+	Health    []jsonHealthPoint `json:"health"`
 }
 
 // WriteJSON はレポートを JSON として w に書き出す。時間はナノ秒の整数。
@@ -111,6 +125,7 @@ func (r *Report) toJSON() jsonReport {
 		Requests:  toJSONRequests(r.Requests),
 		Scenarios: []jsonScenario{}, // null ではなく [] にする
 		Series:    []jsonSeriesPoint{},
+		Health:    []jsonHealthPoint{},
 	}
 	for _, sc := range r.Scenarios {
 		js := jsonScenario{
@@ -142,9 +157,17 @@ func (r *Report) toJSON() jsonReport {
 			Requests:    p.Requests,
 			Errors:      p.Errors,
 			HTTP5xx:     p.HTTP5xx,
+			ConnNew:     p.NewConns,
+			ConnReused:  p.ReusedConns,
 			Latency:     toJSONLatency(p.Latency),
+			DNS:         toJSONLatency(p.DNS),
+			Connect:     toJSONLatency(p.Connect),
+			TLS:         toJSONLatency(p.TLS),
 			Concurrency: p.Concurrency,
 		})
+	}
+	for _, p := range r.Health {
+		out.Health = append(out.Health, jsonHealthPoint{Second: p.Second, Goroutines: p.Goroutines, CPU: p.CPU})
 	}
 	return out
 }
@@ -198,11 +221,16 @@ func errCounts(m map[ErrKind]int) map[string]int {
 func ns(d time.Duration) int64 { return d.Nanoseconds() }
 
 // ReadJSON は WriteJSON が書いた JSON を Report に戻す。
-// version が対応していないときは error を返す。
+// version が対応していないとき、または JSON の後ろに別のデータが続くときは error を返す。
+// 後者は、生データ（JSON Lines。WriteRaw の出力）を渡してしまった場合に当たる。
 func ReadJSON(r io.Reader) (*Report, error) {
 	var in jsonReport
-	if err := json.NewDecoder(r).Decode(&in); err != nil {
+	dec := json.NewDecoder(r)
+	if err := dec.Decode(&in); err != nil {
 		return nil, fmt.Errorf("jotaro: read report: %w", err)
+	}
+	if _, err := dec.Token(); err != io.EOF {
+		return nil, fmt.Errorf("jotaro: read report: JSON の後ろに別のデータが続いている（生データなら ReadRaw / -raw を使う）")
 	}
 	if in.Version < 1 || in.Version > JSONVersion {
 		return nil, fmt.Errorf("jotaro: unsupported report version %d (want 1..%d)", in.Version, JSONVersion)
@@ -248,9 +276,17 @@ func (j jsonReport) toReport() *Report {
 			Requests:    p.Requests,
 			Errors:      p.Errors,
 			HTTP5xx:     p.HTTP5xx,
+			NewConns:    p.ConnNew,
+			ReusedConns: p.ConnReused,
 			Latency:     fromJSONLatency(p.Latency),
+			DNS:         fromJSONLatency(p.DNS),
+			Connect:     fromJSONLatency(p.Connect),
+			TLS:         fromJSONLatency(p.TLS),
 			Concurrency: p.Concurrency,
 		})
+	}
+	for _, p := range j.Health {
+		rep.Health = append(rep.Health, HealthPoint{Second: p.Second, Goroutines: p.Goroutines, CPU: p.CPU})
 	}
 	return rep
 }
