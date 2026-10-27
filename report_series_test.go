@@ -3,6 +3,7 @@ package jotaro
 import (
 	"bytes"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 )
@@ -180,5 +181,46 @@ func TestMergeSeriesConnPhases(t *testing.T) {
 	}
 	if p.Connect.Count != 2 || p.Connect.Max != 60*ms || p.TLS.Count != 2 || p.TLS.Max != 90*ms {
 		t.Errorf("Connect = %+v, TLS = %+v", p.Connect, p.TLS)
+	}
+}
+
+func TestSeriesConnJSONRoundTrip(t *testing.T) {
+	t0 := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	ms := time.Millisecond
+	reqs := []Record{
+		{Start: t0, Latency: 50 * ms, Code: 200, Conn: ConnNew, DNS: 5 * ms, Connect: 10 * ms, TLS: 20 * ms},
+		{Start: t0.Add(100 * ms), Latency: 10 * ms, Code: 200, Conn: ConnReused},
+		{Start: t0.Add(1100 * ms), Latency: 12 * ms, Code: 200, Conn: ConnReused},
+	}
+	rep := BuildReport(reqs, nil, nil, 0)
+
+	var buf bytes.Buffer
+	if err := rep.WriteJSON(&buf); err != nil {
+		t.Fatal(err)
+	}
+	got, err := ReadJSON(&buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got.Series, rep.Series) {
+		t.Errorf("series differs:\n got %+v\nwant %+v", got.Series, rep.Series)
+	}
+	if s0 := got.Series[0]; s0.NewConns != 1 || s0.ReusedConns != 1 || s0.TLS.Max != 20*ms {
+		t.Errorf("s0 = %+v", s0)
+	}
+}
+
+// 接続内訳の無い（後から足す前の）series も読める。
+func TestReadJSONSeriesWithoutConns(t *testing.T) {
+	const in = `{"version":3,"started_at":"2026-01-01T00:00:00Z","elapsed_ns":1000000000,
+"requests":{},"scenarios":[],
+"series":[{"second":0,"requests":2,"errors":0,"http_5xx":0,"latency":{"count":2},"concurrency":1}]}`
+	rep, err := ReadJSON(strings.NewReader(in))
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := rep.Series[0]
+	if p.Requests != 2 || p.NewConns != 0 || p.ReusedConns != 0 || p.DNS.Count != 0 || p.TLS.Count != 0 {
+		t.Errorf("p = %+v", p)
 	}
 }

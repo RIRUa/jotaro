@@ -11,7 +11,8 @@ import (
 // JSONVersion は WriteJSON が出力するスキーマの版。互換を壊す変更のたびに上げる。
 // ReadJSON は 1 以降のすべての版を読める。
 //
-//	3: series（1 秒ごとの時系列）と、requests の dns / connect / tls / conn_new / conn_reused を追加
+//	3: series（1 秒ごとの時系列）と、requests の dns / connect / tls / conn_new / conn_reused を追加。
+//	   series の conn_new / conn_reused / dns / connect / tls は後から足した（無い JSON は 0・空として読む）
 //	2: started_at と、latency の buckets (ヒストグラム) を追加
 //	1: 初版
 const JSONVersion = 3
@@ -77,7 +78,12 @@ type jsonSeriesPoint struct {
 	Requests    int         `json:"requests"`
 	Errors      int         `json:"errors"`
 	HTTP5xx     int         `json:"http_5xx"`
+	ConnNew     int         `json:"conn_new"`
+	ConnReused  int         `json:"conn_reused"`
 	Latency     jsonLatency `json:"latency"`
+	DNS         jsonLatency `json:"dns"`
+	Connect     jsonLatency `json:"connect"`
+	TLS         jsonLatency `json:"tls"`
 	Concurrency int         `json:"concurrency"`
 }
 
@@ -142,7 +148,12 @@ func (r *Report) toJSON() jsonReport {
 			Requests:    p.Requests,
 			Errors:      p.Errors,
 			HTTP5xx:     p.HTTP5xx,
+			ConnNew:     p.NewConns,
+			ConnReused:  p.ReusedConns,
 			Latency:     toJSONLatency(p.Latency),
+			DNS:         toJSONLatency(p.DNS),
+			Connect:     toJSONLatency(p.Connect),
+			TLS:         toJSONLatency(p.TLS),
 			Concurrency: p.Concurrency,
 		})
 	}
@@ -248,7 +259,12 @@ func (j jsonReport) toReport() *Report {
 			Requests:    p.Requests,
 			Errors:      p.Errors,
 			HTTP5xx:     p.HTTP5xx,
+			NewConns:    p.ConnNew,
+			ReusedConns: p.ConnReused,
 			Latency:     fromJSONLatency(p.Latency),
+			DNS:         fromJSONLatency(p.DNS),
+			Connect:     fromJSONLatency(p.Connect),
+			TLS:         fromJSONLatency(p.TLS),
 			Concurrency: p.Concurrency,
 		})
 	}
