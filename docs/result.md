@@ -224,6 +224,32 @@ if err := rep.Write(os.Stdout, f); err != nil {
 - `Print` / `WriteJSON` / `WriteHTML` も公開したまま残す。形式が決まっているなら直接呼べる。
 - サンプル: `go run ./examples/checkout -format json -o result.json`（`-o` を省くと標準出力）。
 
+### `ReadJSON` と `report` サブコマンド（実装済み）
+
+保存した JSON から、あとでレポートを作り直せる。
+
+```go
+rep, err := jotaro.ReadJSON(f) // WriteJSON が書いた JSON を Report に戻す
+```
+
+- `version` が対応していないときは `error` を返す（`JSONVersion` と一致しないもの）。
+- 往復しても `Report` は同じになる（空の map / スライスは `nil` に戻す。テストで `reflect.DeepEqual` を確認）。
+- 時間はナノ秒の整数なので、読み戻しで丸めは起きない。
+
+```bash
+go run ./examples/checkout -format json -o result.json   # 実行して JSON を保存
+go run ./cmd/jotaro report -o report.html result.json    # JSON から HTML を生成
+go run ./cmd/jotaro report -format text result.json      # テキストで見る
+cat result.json | go run ./cmd/jotaro report -           # 標準入力から読む
+```
+
+| フラグ | 既定 | 内容 |
+|---|---|---|
+| `-format` | `html` | `text` / `json` / `html` |
+| `-o` | 標準出力 | 出力先のファイル。書き込みに失敗したら、途中のファイルを消す |
+
+終了コードは、成功 `0`、使い方の誤り（引数なし・未知の形式など）`2`、読み書きの失敗・未対応の `version` が `1`。実装は `cmd/jotaro/main.go`。
+
 ### 形式が増える場合（将来）
 
 利用者が独自の形式を足したくなったら、`Format` の `switch` の代わりにインターフェースへ移る。需要が出るまでは今の形のままにする。

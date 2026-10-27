@@ -2,6 +2,7 @@ package jotaro
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"time"
 )
@@ -151,3 +152,91 @@ func errCounts(m map[ErrKind]int) map[string]int {
 }
 
 func ns(d time.Duration) int64 { return d.Nanoseconds() }
+
+// ReadJSON は WriteJSON が書いた JSON を Report に戻す。
+// version が対応していないときは error を返す。
+func ReadJSON(r io.Reader) (*Report, error) {
+	var in jsonReport
+	if err := json.NewDecoder(r).Decode(&in); err != nil {
+		return nil, fmt.Errorf("jotaro: read report: %w", err)
+	}
+	if in.Version != JSONVersion {
+		return nil, fmt.Errorf("jotaro: unsupported report version %d (want %d)", in.Version, JSONVersion)
+	}
+	return in.toReport(), nil
+}
+
+// toReport は toJSON の逆。空の map / スライスは nil に戻す（BuildReport の結果と同じ形）。
+func (j jsonReport) toReport() *Report {
+	rep := &Report{
+		Open:     j.Open,
+		Dropped:  j.Dropped,
+		Elapsed:  time.Duration(j.ElapsedNS),
+		Requests: fromJSONRequests(j.Requests),
+	}
+	for _, js := range j.Scenarios {
+		sc := ScenarioReport{
+			Name: js.Name,
+			Iterations: IterationStats{
+				Count:  js.Iterations.Count,
+				Failed: js.Iterations.Failed,
+				Active: fromJSONLatency(js.Iterations.Active),
+				Total:  fromJSONLatency(js.Iterations.Total),
+				Errors: fromErrCounts(js.Iterations.Errors),
+			},
+		}
+		for _, s := range js.Steps {
+			sc.Steps = append(sc.Steps, StepStats{
+				Name:     s.Name,
+				Count:    s.Count,
+				Failed:   s.Failed,
+				Duration: fromJSONLatency(s.Duration),
+				Errors:   fromErrCounts(s.Errors),
+				Requests: fromJSONRequests(s.Requests),
+			})
+		}
+		rep.Scenarios = append(rep.Scenarios, sc)
+	}
+	return rep
+}
+
+func fromJSONRequests(q jsonRequests) RequestStats {
+	var status map[string]int
+	if len(q.Status) > 0 {
+		status = q.Status
+	}
+	return RequestStats{
+		Count:     q.Count,
+		Latency:   fromJSONLatency(q.Latency),
+		TTFB:      fromJSONLatency(q.TTFB),
+		Corrected: fromJSONLatency(q.Corrected),
+		Status:    status,
+		Errors:    fromErrCounts(q.Errors),
+		BytesIn:   q.BytesIn,
+		BytesOut:  q.BytesOut,
+	}
+}
+
+func fromJSONLatency(l jsonLatency) Latency {
+	return Latency{
+		Count: l.Count,
+		Min:   time.Duration(l.MinNS),
+		Mean:  time.Duration(l.MeanNS),
+		P50:   time.Duration(l.P50NS),
+		P90:   time.Duration(l.P90NS),
+		P95:   time.Duration(l.P95NS),
+		P99:   time.Duration(l.P99NS),
+		Max:   time.Duration(l.MaxNS),
+	}
+}
+
+func fromErrCounts(m map[string]int) map[ErrKind]int {
+	if len(m) == 0 {
+		return nil
+	}
+	out := make(map[ErrKind]int, len(m))
+	for k, v := range m {
+		out[ErrKind(k)] = v
+	}
+	return out
+}

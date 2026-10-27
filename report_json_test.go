@@ -3,6 +3,8 @@ package jotaro
 import (
 	"bytes"
 	"encoding/json"
+	"reflect"
+	"strings"
 	"testing"
 	"time"
 )
@@ -71,5 +73,51 @@ func TestWriteJSONEmpty(t *testing.T) {
 	req := got["requests"].(map[string]any)
 	if m, ok := req["errors"].(map[string]any); !ok || len(m) != 0 {
 		t.Fatalf("errors = %v", req["errors"])
+	}
+}
+
+func TestReadJSONRoundTrip(t *testing.T) {
+	for _, open := range []bool{false, true} {
+		want := sampleReport(open)
+		want.Dropped = 3
+
+		var buf bytes.Buffer
+		if err := want.WriteJSON(&buf); err != nil {
+			t.Fatal(err)
+		}
+		got, err := ReadJSON(&buf)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("open=%v: 往復で変わった\ngot  %+v\nwant %+v", open, got, want)
+		}
+	}
+}
+
+func TestReadJSONEmptyRoundTrip(t *testing.T) {
+	want := BuildReport(nil, nil, nil, 0)
+	var buf bytes.Buffer
+	if err := want.WriteJSON(&buf); err != nil {
+		t.Fatal(err)
+	}
+	got, err := ReadJSON(&buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %+v, want %+v", got, want)
+	}
+}
+
+func TestReadJSONErrors(t *testing.T) {
+	for name, in := range map[string]string{
+		"壊れた JSON":     `{`,
+		"version が無い":  `{}`,
+		"未対応の version": `{"version": 999}`,
+	} {
+		if _, err := ReadJSON(strings.NewReader(in)); err == nil {
+			t.Errorf("%s: error になること", name)
+		}
 	}
 }
