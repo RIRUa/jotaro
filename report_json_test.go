@@ -155,3 +155,23 @@ func TestReadJSONVersion1(t *testing.T) {
 		t.Fatalf("%+v", rep)
 	}
 }
+
+func TestReadJSONRejectsTrailingData(t *testing.T) {
+	var buf bytes.Buffer
+	if err := WriteRaw(&buf, sampleRaw()); err != nil {
+		t.Fatal(err)
+	}
+	// 生データの先頭行（meta）は version 1 の JSON として読めてしまうので、後ろのデータで弾く。
+	if _, err := ReadJSON(&buf); err == nil || !strings.Contains(err.Error(), "ReadRaw") {
+		t.Errorf("err = %v、生データを渡したことが分かるはず", err)
+	}
+
+	var ok bytes.Buffer
+	if err := sampleReport(false).WriteJSON(&ok); err != nil {
+		t.Fatal(err)
+	}
+	ok.WriteString("\n\n  ") // 末尾の空白・改行は構わない
+	if _, err := ReadJSON(&ok); err != nil {
+		t.Errorf("末尾の空白で失敗した: %v", err)
+	}
+}

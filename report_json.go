@@ -221,11 +221,16 @@ func errCounts(m map[ErrKind]int) map[string]int {
 func ns(d time.Duration) int64 { return d.Nanoseconds() }
 
 // ReadJSON は WriteJSON が書いた JSON を Report に戻す。
-// version が対応していないときは error を返す。
+// version が対応していないとき、または JSON の後ろに別のデータが続くときは error を返す。
+// 後者は、生データ（JSON Lines。WriteRaw の出力）を渡してしまった場合に当たる。
 func ReadJSON(r io.Reader) (*Report, error) {
 	var in jsonReport
-	if err := json.NewDecoder(r).Decode(&in); err != nil {
+	dec := json.NewDecoder(r)
+	if err := dec.Decode(&in); err != nil {
 		return nil, fmt.Errorf("jotaro: read report: %w", err)
+	}
+	if _, err := dec.Token(); err != io.EOF {
+		return nil, fmt.Errorf("jotaro: read report: JSON の後ろに別のデータが続いている（生データなら ReadRaw / -raw を使う）")
 	}
 	if in.Version < 1 || in.Version > JSONVersion {
 		return nil, fmt.Errorf("jotaro: unsupported report version %d (want 1..%d)", in.Version, JSONVersion)
