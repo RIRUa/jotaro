@@ -60,8 +60,10 @@ func seriesCharts(pts []SeriesPoint) []htmlChart {
 	ms := func(d time.Duration) float64 { return float64(d) / float64(time.Millisecond) }
 
 	return []htmlChart{
-		build("requests / s", []string{"requests", "errors"}, always,
-			func(p SeriesPoint) []float64 { return []float64{float64(p.Requests), float64(p.Errors)} }),
+		build("requests / s", []string{"requests", "errors", "5xx"}, always,
+			func(p SeriesPoint) []float64 {
+				return []float64{float64(p.Requests), float64(p.Errors), float64(p.HTTP5xx)}
+			}),
 		build("latency (ms, by request start)", []string{"p50", "p95", "p99"}, hasReq,
 			func(p SeriesPoint) []float64 {
 				return []float64{ms(p.Latency.P50), ms(p.Latency.P95), ms(p.Latency.P99)}

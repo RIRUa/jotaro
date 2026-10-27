@@ -16,6 +16,8 @@ type SeriesPoint struct {
 	Requests int
 	// Errors はそのうち通信エラー（Err が空でない）になった数。HTTP 4xx/5xx は含まない。
 	Errors int
+	// HTTP5xx はそのうち HTTP 5xx を返した数（Errors とは重ならない）。
+	HTTP5xx int
 	// Latency はこの区間に開始したリクエストのレイテンシ分布。
 	Latency Latency
 	// Concurrency はこの区間に実行中だったイテレーション数の最大値。
@@ -52,6 +54,9 @@ func buildSeries(origin time.Time, reqs []Record, iters []IterationRecord) []Ser
 		pts[i].Requests++
 		if r.Err != ErrNone {
 			pts[i].Errors++
+		}
+		if r.Code >= 500 {
+			pts[i].HTTP5xx++
 		}
 		lats[i] = append(lats[i], r.Latency)
 	}
@@ -104,6 +109,7 @@ func mergeSeries(a, b []SeriesPoint, offset int) []SeriesPoint {
 		q := &out[i]
 		q.Requests += p.Requests
 		q.Errors += p.Errors
+		q.HTTP5xx += p.HTTP5xx
 		q.Latency = mergeLatency(q.Latency, p.Latency)
 		q.Concurrency += p.Concurrency
 	}

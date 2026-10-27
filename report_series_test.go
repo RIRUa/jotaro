@@ -12,7 +12,7 @@ func seriesRecords(t0 time.Time) ([]Record, []IterationRecord) {
 	reqs := []Record{
 		{Start: t0, Latency: 10 * ms, Code: 200},
 		{Start: t0.Add(500 * ms), Latency: 30 * ms, Err: ErrTimeout},
-		{Start: t0.Add(2100 * ms), Latency: 20 * ms, Code: 200}, // 1 秒目は空
+		{Start: t0.Add(2100 * ms), Latency: 20 * ms, Code: 503}, // 1 秒目は空
 	}
 	iters := []IterationRecord{
 		{Start: t0, Duration: 1500 * ms},
@@ -40,6 +40,9 @@ func TestBuildSeries(t *testing.T) {
 	// 1 秒目: 0 秒開始のイテレーションが 1.5 秒まで続き、1.5 秒に次が始まる（重ねない）。
 	if s1.Requests != 0 || s1.Concurrency != 1 {
 		t.Errorf("s1 = %+v", s1)
+	}
+	if s0.HTTP5xx != 0 || s2.HTTP5xx != 1 || s2.Errors != 0 {
+		t.Errorf("5xx: s0 = %+v, s2 = %+v", s0, s2)
 	}
 	if s2.Requests != 1 || s2.Concurrency != 1 {
 		t.Errorf("s2 = %+v", s2)
@@ -87,7 +90,7 @@ func TestMergeSeriesOffset(t *testing.T) {
 	}
 	// 2 秒目は a の 2 秒目と b の 0 秒目が重なる。
 	s2 := got.Series[2]
-	if s2.Requests != 1+2 || s2.Errors != 1 || s2.Latency.Count != 3 || s2.Concurrency != 1+2 {
+	if s2.Requests != 1+2 || s2.Errors != 1 || s2.HTTP5xx != 1 || s2.Latency.Count != 3 || s2.Concurrency != 1+2 {
 		t.Errorf("s2 = %+v", s2)
 	}
 	if got.Series[4].Requests != 1 {

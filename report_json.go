@@ -70,6 +70,7 @@ type jsonSeriesPoint struct {
 	Second      int         `json:"second"`
 	Requests    int         `json:"requests"`
 	Errors      int         `json:"errors"`
+	HTTP5xx     int         `json:"http_5xx"`
 	Latency     jsonLatency `json:"latency"`
 	Concurrency int         `json:"concurrency"`
 }
@@ -134,6 +135,7 @@ func (r *Report) toJSON() jsonReport {
 			Second:      p.Second,
 			Requests:    p.Requests,
 			Errors:      p.Errors,
+			HTTP5xx:     p.HTTP5xx,
 			Latency:     toJSONLatency(p.Latency),
 			Concurrency: p.Concurrency,
 		})
@@ -234,6 +236,7 @@ func (j jsonReport) toReport() *Report {
 			Second:      p.Second,
 			Requests:    p.Requests,
 			Errors:      p.Errors,
+			HTTP5xx:     p.HTTP5xx,
 			Latency:     fromJSONLatency(p.Latency),
 			Concurrency: p.Concurrency,
 		})
