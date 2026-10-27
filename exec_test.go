@@ -203,3 +203,26 @@ func TestJSONEncodeErrorIsNotRecorded(t *testing.T) {
 		t.Fatalf("送信していないので記録は残らないはず: %d", len(*recs))
 	}
 }
+
+// 同じクライアントの 2 回目以降は接続を再利用し、DNS / Connect / TLS は計測されない。
+func TestConnReuse(t *testing.T) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	defer srv.Close()
+
+	e, recs := testExec(t, srv.URL, srv.Client())
+	for i := 0; i < 2; i++ {
+		if err := newRequest(e, "GET", "/").Do().ExpectStatus(200); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got := *recs
+	if len(got) != 2 {
+		t.Fatalf("records = %d", len(got))
+	}
+	if got[0].Conn != ConnNew || got[0].Connect <= 0 || got[0].TLS <= 0 {
+		t.Errorf("1 回目は新規接続で Connect/TLS を持つはず: %+v", got[0])
+	}
+	if got[1].Conn != ConnReused || got[1].Connect != 0 || got[1].TLS != 0 || got[1].DNS != 0 {
+		t.Errorf("2 回目は再利用で区間を持たないはず: %+v", got[1])
+	}
+}

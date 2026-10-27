@@ -101,6 +101,7 @@ type tracer struct {
 	conStart, conEnd time.Time
 	tlsStart, tlsEnd time.Time
 	firstByte        time.Time
+	conn             ConnKind
 }
 
 func (t *tracer) clientTrace() *httptrace.ClientTrace {
@@ -108,10 +109,18 @@ func (t *tracer) clientTrace() *httptrace.ClientTrace {
 		DNSStart: func(httptrace.DNSStartInfo) { t.set(&t.dnsStart, false) },
 		DNSDone:  func(httptrace.DNSDoneInfo) { t.set(&t.dnsEnd, true) },
 		// 複数アドレスへ順に接続する場合は、最初の開始から最後の完了までを測る。
-		ConnectStart:         func(_, _ string) { t.set(&t.conStart, false) },
-		ConnectDone:          func(_, _ string, _ error) { t.set(&t.conEnd, true) },
-		TLSHandshakeStart:    func() { t.set(&t.tlsStart, false) },
-		TLSHandshakeDone:     func(tls.ConnectionState, error) { t.set(&t.tlsEnd, true) },
+		ConnectStart:      func(_, _ string) { t.set(&t.conStart, false) },
+		ConnectDone:       func(_, _ string, _ error) { t.set(&t.conEnd, true) },
+		TLSHandshakeStart: func() { t.set(&t.tlsStart, false) },
+		TLSHandshakeDone:  func(tls.ConnectionState, error) { t.set(&t.tlsEnd, true) },
+		GotConn: func(info httptrace.GotConnInfo) {
+			t.mu.Lock()
+			defer t.mu.Unlock()
+			t.conn = ConnNew
+			if info.Reused {
+				t.conn = ConnReused
+			}
+		},
 		GotFirstResponseByte: func() { t.set(&t.firstByte, true) },
 	}
 }
@@ -128,6 +137,7 @@ func (t *tracer) set(dst *time.Time, overwrite bool) {
 func (t *tracer) fill(rec *Record) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	rec.Conn = t.conn
 	rec.DNS = span(t.dnsStart, t.dnsEnd)
 	rec.Connect = span(t.conStart, t.conEnd)
 	rec.TLS = span(t.tlsStart, t.tlsEnd)

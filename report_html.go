@@ -71,6 +71,10 @@ type htmlView struct {
 	Latency   []htmlBar // リクエストのレイテンシ分布
 	Corrected []htmlBar // Open のときだけ
 	TTFB      []htmlBar
+	Conns     string // 接続の記録があるときだけ
+	DNS       []htmlBar
+	Connect   []htmlBar
+	TLS       []htmlBar
 	Charts    []htmlChart // 時系列。無ければ nil
 	Scenarios []htmlScenario
 }
@@ -97,6 +101,12 @@ func (r *Report) toHTMLView() htmlView {
 		Latency:  latencyBars(r.Requests.Latency),
 		TTFB:     latencyBars(r.Requests.TTFB),
 		Charts:   seriesCharts(r.Series),
+		DNS:      latencyBars(r.Requests.DNS),
+		Connect:  latencyBars(r.Requests.Connect),
+		TLS:      latencyBars(r.Requests.TLS),
+	}
+	if q := r.Requests; q.NewConns+q.ReusedConns > 0 {
+		v.Conns = fmt.Sprintf("%.1f%% reused (new %d / reused %d)", q.ReuseRate()*100, q.NewConns, q.ReusedConns)
 	}
 	if r.Open {
 		v.Model = "open (Rate)"

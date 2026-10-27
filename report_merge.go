@@ -117,13 +117,18 @@ func mergeIterations(a, b IterationStats) IterationStats {
 
 func mergeRequests(a, b RequestStats) RequestStats {
 	out := RequestStats{
-		Count:     a.Count + b.Count,
-		Latency:   mergeLatency(a.Latency, b.Latency),
-		TTFB:      mergeLatency(a.TTFB, b.TTFB),
-		Corrected: mergeLatency(a.Corrected, b.Corrected),
-		Errors:    mergeErrs(a.Errors, b.Errors),
-		BytesIn:   a.BytesIn + b.BytesIn,
-		BytesOut:  a.BytesOut + b.BytesOut,
+		Count:       a.Count + b.Count,
+		Latency:     mergeLatency(a.Latency, b.Latency),
+		TTFB:        mergeLatency(a.TTFB, b.TTFB),
+		Corrected:   mergeLatency(a.Corrected, b.Corrected),
+		DNS:         mergeLatency(a.DNS, b.DNS),
+		Connect:     mergeLatency(a.Connect, b.Connect),
+		TLS:         mergeLatency(a.TLS, b.TLS),
+		NewConns:    a.NewConns + b.NewConns,
+		ReusedConns: a.ReusedConns + b.ReusedConns,
+		Errors:      mergeErrs(a.Errors, b.Errors),
+		BytesIn:     a.BytesIn + b.BytesIn,
+		BytesOut:    a.BytesOut + b.BytesOut,
 	}
 	for _, m := range []map[string]int{a.Status, b.Status} {
 		for k, v := range m {

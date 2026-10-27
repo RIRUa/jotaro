@@ -56,6 +56,14 @@ type RequestStats struct {
 	Count   int
 	Latency Latency // 通信エラーのリクエストも含む
 	TTFB    Latency // 応答を受け取れたリクエストのみ
+	// DNS / Connect / TLS は、その区間が実際に起きたリクエストのみ
+	// （接続を再利用したリクエストや、http の TLS は含まれない）。
+	DNS     Latency
+	Connect Latency
+	TLS     Latency
+	// NewConns / ReusedConns は、接続を新しく張ったリクエストと再利用したリクエストの数。
+	NewConns    int
+	ReusedConns int
 	// Corrected は予定開始時刻からの時間（Coordinated Omission の補正後）。
 	// Users モデルでは Latency と同じ。
 	Corrected Latency
@@ -65,6 +73,14 @@ type RequestStats struct {
 
 	BytesIn  int64
 	BytesOut int64
+}
+
+// ReuseRate は接続を再利用したリクエストの割合（0〜1）。接続の記録が無ければ 0。
+func (q RequestStats) ReuseRate() float64 {
+	if n := q.NewConns + q.ReusedConns; n > 0 {
+		return float64(q.ReusedConns) / float64(n)
+	}
+	return 0
 }
 
 // StepStats は u.Step 単位の集計。
@@ -211,12 +227,26 @@ func BuildReport(reqs []Record, steps []StepRecord, iters []IterationRecord, ela
 
 func requestStats(reqs []Record) RequestStats {
 	st := RequestStats{Count: len(reqs)}
-	var lat, ttfb, corrected []time.Duration
+	var lat, ttfb, corrected, dns, connect, tlsd []time.Duration
 	for _, r := range reqs {
 		lat = append(lat, r.Latency)
 		corrected = append(corrected, r.Corrected())
 		if r.TTFB > 0 {
 			ttfb = append(ttfb, r.TTFB)
+		}
+		for _, p := range []struct {
+			d   time.Duration
+			dst *[]time.Duration
+		}{{r.DNS, &dns}, {r.Connect, &connect}, {r.TLS, &tlsd}} {
+			if p.d > 0 {
+				*p.dst = append(*p.dst, p.d)
+			}
+		}
+		switch r.Conn {
+		case ConnNew:
+			st.NewConns++
+		case ConnReused:
+			st.ReusedConns++
 		}
 		if r.Code > 0 {
 			if st.Status == nil {
@@ -233,6 +263,7 @@ func requestStats(reqs []Record) RequestStats {
 	st.Latency = newLatency(lat)
 	st.TTFB = newLatency(ttfb)
 	st.Corrected = newLatency(corrected)
+	st.DNS, st.Connect, st.TLS = newLatency(dns), newLatency(connect), newLatency(tlsd)
 	return st
 }
 

@@ -62,6 +62,7 @@ footer { margin-top: 32px; color: var(--muted); font-size: 12px; }
   <div class="card"><div class="k">requests</div><div class="v">{{.Requests}}</div></div>
   <div class="card"><div class="k">requests / s</div><div class="v">{{.RPS}}</div></div>
   <div class="card"><div class="k">bytes</div><div class="v" style="font-size:14px">{{.Bytes}}</div></div>
+  {{if .Conns}}<div class="card"><div class="k">connection reuse</div><div class="v" style="font-size:14px">{{.Conns}}</div></div>{{end}}
   {{if .Open}}<div class="card"><div class="k">dropped</div><div class="v{{if .Dropped}} bad{{end}}">{{.Dropped}}</div></div>{{end}}
 </div>
 
@@ -109,6 +110,15 @@ footer { margin-top: 32px; color: var(--muted); font-size: 12px; }
     <div class="legend">{{range .Lines}}<span><i class="{{.Class}}"></i>{{.Name}}</span>{{end}}</div>
   </div>
 {{end}}
+</div>
+{{end}}
+
+{{if or .DNS .Connect .TLS}}
+<h3>connection setup (new connections only)</h3>
+<div class="cols">
+  {{if .DNS}}<div><h3>dns</h3><div class="bars">{{range .DNS}}<span>{{.Label}}</span><span class="track"><span class="fill" style="display:block;width:{{printf "%.1f" .Pct}}%"></span></span><span class="val">{{.Value}}</span>{{end}}</div></div>{{end}}
+  {{if .Connect}}<div><h3>connect (tcp)</h3><div class="bars">{{range .Connect}}<span>{{.Label}}</span><span class="track"><span class="fill" style="display:block;width:{{printf "%.1f" .Pct}}%"></span></span><span class="val">{{.Value}}</span>{{end}}</div></div>{{end}}
+  {{if .TLS}}<div><h3>tls</h3><div class="bars">{{range .TLS}}<span>{{.Label}}</span><span class="track"><span class="fill" style="display:block;width:{{printf "%.1f" .Pct}}%"></span></span><span class="val">{{.Value}}</span>{{end}}</div></div>{{end}}
 </div>
 {{end}}
 
