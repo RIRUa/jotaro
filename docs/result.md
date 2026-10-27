@@ -294,7 +294,51 @@ type Writer interface {
 
 - 生データ（JSON Lines）は件数が多いので、`Report` ではなく `Collector` の記録を1行ずつ書く別の API にする。`Report.Write` には含めない。
 
-## 5. 関連
+## 5. しきい値判定（実装済み）
+
+結果が条件を満たすかを確かめ、CI で「遅くなったら失敗」にする（`threshold.go`）。k6 の `thresholds` に近い。実行後の `Report` に対して判定する（実行中に打ち切る `abortOnFail` 相当は無い）。
+
+```go
+th, _ := jotaro.ParseThreshold("p95<200ms")
+checks := rep.Check(th)  // Checks
+checks.Print(os.Stdout)
+if !checks.Passed() { os.Exit(1) }
+```
+
+```
+jotaro check -t 'p95<200ms' -t 'error_rate<1%' -t 'p99{step=login}<100ms' result.json
+```
+
+満たさないものが 1 つでもあれば終了コード 1。しきい値の書き方が誤り、またはファイルが読めないときは 2 / 1。
+
+### 書き方
+
+`指標[{scenario=名前,step=名前}] 演算子 値`。演算子は `<` `<=` `>` `>=`。
+
+| 指標 | 意味 | 値 | 絞り込み |
+|---|---|---|---|
+| `min` `mean` `p50` `p90` `p95` `p99` `max` | リクエストのレイテンシ | 時間（`200ms`、`1.5s`） | `{step=...}` |
+| 上の頭に `corrected_` `ttfb_` `dns_` `connect_` `tls_` | CO 補正後 / TTFB / DNS / TCP / TLS（例: `corrected_p99`） | 時間 | `{step=...}` |
+| `error_rate` | 通信エラーと Expect 不一致の割合（リクエスト数に対して） | `1%` または `0.01` | `{step=...}` |
+| `http_4xx_rate` `http_5xx_rate` | HTTP 4xx / 5xx の割合 | 割合 | `{step=...}` |
+| `iteration_fail_rate` | 失敗したイテレーションの割合 | 割合 | `{scenario=...}` |
+| `requests` | リクエスト数 | 数 | `{step=...}` |
+| `rps` `dropped` | 1 秒あたりのリクエスト数 / ドロップされた到着の数 | 数 | 全体のみ |
+
+### 決めたこと
+
+- `{step=...}` が複数のシナリオにある同名のステップに当たるときは、それぞれを別の結果として確かめる（`scenario=` を足せば 1 つに絞れる）。
+- **対象が無い・データが無いときは満たさなかった扱い**にする（ステップ名のタイポ、リクエストが 0 件、`ttfb_` の記録が無い、など）。設定の間違いや、動かなかった試験を成功にしないため。
+- `error_rate` は HTTP 4xx/5xx を含まない（`ExpectStatus` を付けたステップの不一致は `ErrExpect` として含まれる）。4xx/5xx は `http_4xx_rate` / `http_5xx_rate` で別に見る。
+- シナリオ単位のレイテンシは無い（シナリオ全体のリクエスト分布は持っていないため）。ステップ単位か全体で見る。
+
+### 未対応
+
+- 実行中に判定して早く止める（`abortOnFail`）。
+- 結果ファイルへの判定結果の書き込み。`report` / `merge` の `-t`。
+- 時系列（1 秒ごと）に対する条件。
+
+## 6. 関連
 
 - 設計の全体像: [`DESIGN.md`](../DESIGN.md)（計測は 5 章、未決は 8 章）
 - 実装: `record.go` / `report.go` / `report_print.go`

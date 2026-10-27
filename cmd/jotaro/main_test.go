@@ -132,3 +132,48 @@ func TestMergeErrors(t *testing.T) {
 		}
 	}
 }
+
+func TestCheck(t *testing.T) {
+	in := filepath.Join(t.TempDir(), "result.json")
+	writeSample(t, in)
+
+	tests := []struct {
+		name string
+		args []string
+		code int
+		want string
+	}{
+		{"満たす", []string{"-t", "p95<100ms", "-t", "error_rate<1%", in}, 0, "OK: 2 件すべて満たした"},
+		{"満たさない", []string{"-t", "p95<1ms", "-t", "error_rate<1%", in}, 1, "FAIL  p95<1ms"},
+		{"ステップを絞る", []string{"-t", "p95{step=login}<100ms", in}, 0, "[checkout/login]"},
+		{"ステップがない", []string{"-t", "p95{step=nothing}<100ms", in}, 1, "対象のステップがない"},
+	}
+	for _, tt := range tests {
+		var stdout, stderr bytes.Buffer
+		code := run(append([]string{"check"}, tt.args...), nil, &stdout, &stderr)
+		if code != tt.code || !strings.Contains(stdout.String(), tt.want) {
+			t.Errorf("%s: code = %d (want %d), stdout = %s, stderr = %s", tt.name, code, tt.code, stdout.String(), stderr.String())
+		}
+	}
+}
+
+func TestCheckUsageErrors(t *testing.T) {
+	in := filepath.Join(t.TempDir(), "result.json")
+	writeSample(t, in)
+
+	for name, args := range map[string][]string{
+		"しきい値がない":   {in},
+		"結果ファイルがない": {"-t", "p95<1s"},
+		"しきい値が読めない": {"-t", "p95", in},
+	} {
+		var stdout, stderr bytes.Buffer
+		if code := run(append([]string{"check"}, args...), nil, &stdout, &stderr); code != 2 {
+			t.Errorf("%s: code = %d, want 2 (stderr = %s)", name, code, stderr.String())
+		}
+	}
+
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"check", "-t", "p95<1s", filepath.Join(t.TempDir(), "none.json")}, nil, &stdout, &stderr); code != 1 {
+		t.Errorf("ファイルが開けないとき code = %d, want 1", code)
+	}
+}
