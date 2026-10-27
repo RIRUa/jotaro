@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"math/rand/v2"
 	"net/http"
@@ -69,7 +70,14 @@ var checkout = jotaro.NewScenario("checkout", func(ctx context.Context, u *jotar
 
 func main() {
 	rate := flag.Int("rate", 0, "毎秒のシナリオ開始数。0 なら Users モデル")
+	format := flag.String("format", "text", "結果の形式 (text, json, html)")
+	out := flag.String("o", "", "結果の書き出し先。空なら標準出力")
 	flag.Parse()
+
+	f, err := jotaro.ParseFormat(*format)
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	srv := httptest.NewServer(mockShop())
 	defer srv.Close()
@@ -91,7 +99,19 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	rep.Print(os.Stdout)
+
+	w := io.Writer(os.Stdout)
+	if *out != "" {
+		file, err := os.Create(*out)
+		if err != nil {
+			log.Fatal(err)
+		}
+		defer file.Close()
+		w = file
+	}
+	if err := rep.Write(w, f); err != nil {
+		log.Fatal(err)
+	}
 }
 
 // mockShop は少し遅くて、ときどき注文に失敗する API。

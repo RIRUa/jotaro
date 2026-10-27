@@ -1,0 +1,88 @@
+package main
+
+import (
+	"bytes"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/RIRUa/jotaro"
+)
+
+// writeSample は小さな結果を JSON にして path に書く。
+func writeSample(t *testing.T, path string) {
+	t.Helper()
+	rep := jotaro.BuildReport(
+		[]jotaro.Record{{Scenario: "checkout", Step: "login", Code: 200, Latency: 12 * time.Millisecond}},
+		[]jotaro.StepRecord{{Scenario: "checkout", Step: "login", Duration: 15 * time.Millisecond}},
+		[]jotaro.IterationRecord{{Scenario: "checkout", Duration: 20 * time.Millisecond}},
+		time.Second,
+	)
+	var buf bytes.Buffer
+	if err := rep.WriteJSON(&buf); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, buf.Bytes(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestReportToFile(t *testing.T) {
+	dir := t.TempDir()
+	in, out := filepath.Join(dir, "result.json"), filepath.Join(dir, "report.html")
+	writeSample(t, in)
+
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"report", "-o", out, in}, nil, &stdout, &stderr); code != 0 {
+		t.Fatalf("code = %d, stderr = %s", code, stderr.String())
+	}
+	b, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), "<!doctype html>") || !strings.Contains(string(b), "checkout") {
+		t.Fatalf("HTML になっていない: %.200s", b)
+	}
+}
+
+func TestReportStdinToStdout(t *testing.T) {
+	in := filepath.Join(t.TempDir(), "result.json")
+	writeSample(t, in)
+	data, _ := os.ReadFile(in)
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"report", "-format", "text", "-"}, bytes.NewReader(data), &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("code = %d, stderr = %s", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "=== Summary ===") {
+		t.Fatalf("text になっていない: %s", stdout.String())
+	}
+}
+
+func TestReportErrors(t *testing.T) {
+	dir := t.TempDir()
+	bad := filepath.Join(dir, "bad.json")
+	os.WriteFile(bad, []byte(`{"version": 999}`), 0o644)
+
+	tests := []struct {
+		name string
+		args []string
+		want int
+	}{
+		{"引数なし", nil, 2},
+		{"未知のコマンド", []string{"nope"}, 2},
+		{"入力なし", []string{"report"}, 2},
+		{"未知の形式", []string{"report", "-format", "csv", bad}, 2},
+		{"ファイルが無い", []string{"report", filepath.Join(dir, "none.json")}, 1},
+		{"未対応の version", []string{"report", bad}, 1},
+	}
+	for _, tt := range tests {
+		var stdout, stderr bytes.Buffer
+		if code := run(tt.args, strings.NewReader(""), &stdout, &stderr); code != tt.want {
+			t.Errorf("%s: code = %d, want %d (stderr: %s)", tt.name, code, tt.want, stderr.String())
+		}
+	}
+}
