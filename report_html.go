@@ -71,6 +71,7 @@ type htmlView struct {
 	Latency   []htmlBar // リクエストのレイテンシ分布
 	Corrected []htmlBar // Open のときだけ
 	TTFB      []htmlBar
+	Charts    []htmlChart // 時系列。無ければ nil
 	Scenarios []htmlScenario
 }
 
@@ -95,6 +96,7 @@ func (r *Report) toHTMLView() htmlView {
 		Errors:   sortedCounts(errCounts(r.Requests.Errors)),
 		Latency:  latencyBars(r.Requests.Latency),
 		TTFB:     latencyBars(r.Requests.TTFB),
+		Charts:   seriesCharts(r.Series),
 	}
 	if r.Open {
 		v.Model = "open (Rate)"
