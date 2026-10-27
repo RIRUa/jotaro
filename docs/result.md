@@ -73,9 +73,27 @@ HTTP 4xx/5xx は `ErrKind` ではなくステータス（`Status`）として記
 - `RPS()` は `Requests.Count / Elapsed`。
 - 集計は全記録をソートして求める。長時間・高負荷でメモリが問題になったら、ヒストグラムに置き換える予定。
 
+### JSON 出力（実装済み）
+
+`Report.WriteJSON(w io.Writer) error` で、集計結果を JSON として書き出せる（`report_json.go`）。
+
+```go
+f, _ := os.Create("result.json")
+defer f.Close()
+if err := rep.WriteJSON(f); err != nil {
+    log.Fatal(err)
+}
+```
+
+- 時間はすべて**ナノ秒の整数**（フィールド名は `_ns` で終わる）。
+- トップレベルに `version`（現在 `1`、定数 `JSONVersion`）を持つ。互換を壊す変更のたびに上げる。
+- 内部の `Report` とは別の出力用の型を持つので、`Report` を変えても JSON の形は変わらない。
+- 空の集合は `null` ではなく `[]` / `{}` で出す（読む側が分岐しなくて済む）。
+- 追加で `rps` を出す（`Requests.Count / Elapsed`）。リクエストの集計は `latency` / `ttfb` / `corrected` の 3 つを持つ。
+
 ## 2. 未実装（提案）
 
-> 以下は提案であり、**まだ決まっていない**。`DESIGN.md` の「未決」にある vegeta 互換の程度の判断が前提になる。
+> 以下は提案であり、**まだ決まっていない**。JSON 出力の項目は 1 章の実装を正とする。`DESIGN.md` の「未決」にある vegeta 互換の程度の判断が前提になる。
 
 ### 出力形式の候補
 
