@@ -12,7 +12,8 @@ import (
 // ReadJSON は 1 以降のすべての版を読める。
 //
 //	3: series（1 秒ごとの時系列）と、requests の dns / connect / tls / conn_new / conn_reused を追加。
-//	   series の conn_new / conn_reused / dns / connect / tls は後から足した（無い JSON は 0・空として読む）
+//	   series の conn_new / conn_reused / dns / connect / tls と、health（負荷生成側の健全性）は後から足した
+//	   （無い JSON は 0・空として読む）
 //	2: started_at と、latency の buckets (ヒストグラム) を追加
 //	1: 初版
 const JSONVersion = 3
@@ -87,6 +88,12 @@ type jsonSeriesPoint struct {
 	Concurrency int         `json:"concurrency"`
 }
 
+type jsonHealthPoint struct {
+	Second     int     `json:"second"`
+	Goroutines int     `json:"goroutines"`
+	CPU        float64 `json:"cpu"` // 0〜1。取得できなかったときは -1
+}
+
 type jsonReport struct {
 	Version   int               `json:"version"`
 	Open      bool              `json:"open"`
@@ -97,6 +104,7 @@ type jsonReport struct {
 	Requests  jsonRequests      `json:"requests"`
 	Scenarios []jsonScenario    `json:"scenarios"`
 	Series    []jsonSeriesPoint `json:"series"`
+	Health    []jsonHealthPoint `json:"health"`
 }
 
 // WriteJSON はレポートを JSON として w に書き出す。時間はナノ秒の整数。
@@ -117,6 +125,7 @@ func (r *Report) toJSON() jsonReport {
 		Requests:  toJSONRequests(r.Requests),
 		Scenarios: []jsonScenario{}, // null ではなく [] にする
 		Series:    []jsonSeriesPoint{},
+		Health:    []jsonHealthPoint{},
 	}
 	for _, sc := range r.Scenarios {
 		js := jsonScenario{
@@ -156,6 +165,9 @@ func (r *Report) toJSON() jsonReport {
 			TLS:         toJSONLatency(p.TLS),
 			Concurrency: p.Concurrency,
 		})
+	}
+	for _, p := range r.Health {
+		out.Health = append(out.Health, jsonHealthPoint{Second: p.Second, Goroutines: p.Goroutines, CPU: p.CPU})
 	}
 	return out
 }
@@ -267,6 +279,9 @@ func (j jsonReport) toReport() *Report {
 			TLS:         fromJSONLatency(p.TLS),
 			Concurrency: p.Concurrency,
 		})
+	}
+	for _, p := range j.Health {
+		rep.Health = append(rep.Health, HealthPoint{Second: p.Second, Goroutines: p.Goroutines, CPU: p.CPU})
 	}
 	return rep
 }

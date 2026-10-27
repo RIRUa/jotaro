@@ -1,7 +1,10 @@
 package jotaro
 
 import (
+	"bytes"
 	"context"
+	"reflect"
+	"strings"
 	"testing"
 	"time"
 )
@@ -72,5 +75,48 @@ func TestRunRecordsHealth(t *testing.T) {
 	}
 	if p := rep.Health[0]; p.Second != 0 || p.Goroutines < 1 {
 		t.Errorf("Health[0] = %+v", p)
+	}
+}
+
+func TestHealthJSONRoundTrip(t *testing.T) {
+	rep := BuildReport([]Record{{Latency: time.Millisecond}}, nil, nil, time.Second)
+	rep.Health = []HealthPoint{{Second: 0, Goroutines: 12, CPU: 0.25}, {Second: 1, Goroutines: 40, CPU: -1}}
+
+	var buf bytes.Buffer
+	if err := rep.WriteJSON(&buf); err != nil {
+		t.Fatal(err)
+	}
+	got, err := ReadJSON(&buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got.Health, rep.Health) {
+		t.Errorf("health differs:\n got %+v\nwant %+v", got.Health, rep.Health)
+	}
+}
+
+func TestReadJSONWithoutHealth(t *testing.T) {
+	rep, err := ReadJSON(strings.NewReader(`{"version":3,"requests":{},"scenarios":[]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.Health != nil {
+		t.Errorf("Health = %+v、無い JSON は nil として読む", rep.Health)
+	}
+}
+
+func TestMergeHealth(t *testing.T) {
+	t0 := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	a := &Report{StartedAt: t0, Elapsed: 2 * time.Second, Health: []HealthPoint{{0, 10, 0.2}, {1, 12, 0.9}}}
+	b := &Report{StartedAt: t0.Add(time.Second), Elapsed: 2 * time.Second, Health: []HealthPoint{{0, 5, 0.5}, {1, 6, -1}}}
+
+	got, err := MergeReports(a, b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// b は 1 秒遅れて始まったので、b の 0 秒目は a の 1 秒目と重なる。
+	want := []HealthPoint{{0, 10, 0.2}, {1, 12 + 5, 0.9}, {2, 6, -1}}
+	if !reflect.DeepEqual(got.Health, want) {
+		t.Errorf("Health = %+v\nwant     %+v", got.Health, want)
 	}
 }

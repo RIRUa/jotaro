@@ -2,6 +2,7 @@ package jotaro
 
 import (
 	"runtime"
+	"slices"
 	"time"
 )
 
@@ -67,4 +68,23 @@ func (h *healthSampler) run() {
 func (h *healthSampler) stop() []HealthPoint {
 	close(h.done)
 	return <-h.points
+}
+
+// mergeHealth は offset 秒ずらした b を a に足し込む。
+// ゴルーチン数は合計し、CPU は最大を取る（負荷生成側が複数あるときは、一番詰まっているものを見るため）。
+func mergeHealth(a, b []HealthPoint, offset int) []HealthPoint {
+	out := slices.Clone(a)
+	for _, p := range b {
+		sec := p.Second + offset
+		i := slices.IndexFunc(out, func(q HealthPoint) bool { return q.Second == sec })
+		if i < 0 {
+			p.Second = sec
+			out = append(out, p)
+			continue
+		}
+		out[i].Goroutines += p.Goroutines
+		out[i].CPU = max(out[i].CPU, p.CPU)
+	}
+	slices.SortFunc(out, func(x, y HealthPoint) int { return x.Second - y.Second })
+	return out
 }
