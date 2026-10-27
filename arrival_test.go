@@ -181,3 +181,60 @@ func TestRunRamp(t *testing.T) {
 		t.Fatalf("Iterations = %d, 約 100 のはず", n)
 	}
 }
+
+func TestStagesAt(t *testing.T) {
+	// 0〜2 秒: 10/s (20 回)、2〜4 秒: 20/s (40 回)。
+	s := Stages(
+		Stage{Rate(10, time.Second), 2 * time.Second},
+		Stage{Rate(20, time.Second), 2 * time.Second},
+	)
+	if err := s.validate(); err != nil {
+		t.Fatal(err)
+	}
+	for i, want := range map[int]time.Duration{0: 0, 19: 1900 * time.Millisecond, 20: 2 * time.Second, 22: 2100 * time.Millisecond, 59: 3950 * time.Millisecond} {
+		if got, ok := s.at(i); !ok || got != want {
+			t.Errorf("at(%d) = %v, %v, want %v", i, got, ok, want)
+		}
+	}
+	if _, ok := s.at(60); ok {
+		t.Error("全段階のあとは到着しないはず")
+	}
+}
+
+func TestStagesRampHoldDown(t *testing.T) {
+	// 0→10/s を 4 秒 (20 回)、10/s を 2 秒 (20 回)、10→0/s を 4 秒 (20 回)。
+	s := Stages(
+		Stage{Ramp(0, 10, time.Second, 4*time.Second), 4 * time.Second},
+		Stage{Rate(10, time.Second), 2 * time.Second},
+		Stage{Ramp(10, 0, time.Second, 4*time.Second), 4 * time.Second},
+	)
+	n := 0
+	prev := time.Duration(-1)
+	for ; ; n++ {
+		got, ok := s.at(n)
+		if !ok {
+			break
+		}
+		if got < prev || got >= 10*time.Second {
+			t.Fatalf("at(%d) = %v (前: %v)", n, got, prev)
+		}
+		prev = got
+	}
+	if n < 59 || n > 61 {
+		t.Errorf("到着数 = %d, 約 60 のはず", n)
+	}
+}
+
+func TestStagesValidate(t *testing.T) {
+	bad := map[string]Arrival{
+		"空":          Stages(),
+		"For が 0":    Stages(Stage{Rate(1, time.Second), 0}),
+		"Arrival なし": Stages(Stage{nil, time.Second}),
+		"段階が不正":      Stages(Stage{Rate(0, time.Second), time.Second}),
+	}
+	for name, a := range bad {
+		if a.validate() == nil {
+			t.Errorf("%s: エラーになるはず", name)
+		}
+	}
+}

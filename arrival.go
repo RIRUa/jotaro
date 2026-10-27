@@ -2,6 +2,7 @@ package jotaro
 
 import (
 	"errors"
+	"fmt"
 	"math"
 	"time"
 )
@@ -99,4 +100,97 @@ func (r ramp) at(i int) (time.Duration, bool) {
 		t = over + (n-inRamp)/to
 	}
 	return time.Duration(t * float64(time.Second)), true
+}
+
+// Stage は Stages の 1 段階。Arrival を For の間だけ続ける。
+type Stage struct {
+	Arrival Arrival
+	For     time.Duration
+}
+
+// Stages は複数の段階を順に実行する。
+// 各段階の Arrival は、その段階の開始を 0 として動く（Ramp の傾斜もそこから始まる）。
+// 例えば、30 秒かけて 50/s まで上げ、60 秒保ち、10 秒で 0 まで下げる:
+//
+//	Stages(
+//		Stage{Ramp(0, 50, time.Second, 30*time.Second), 30 * time.Second},
+//		Stage{Rate(50, time.Second), 60 * time.Second},
+//		Stage{Ramp(50, 0, time.Second, 10*time.Second), 10 * time.Second},
+//	)
+//
+// 全段階が終わると到着は止まる。実行全体の長さは Plan.Duration で決まるので、
+// 各段階の For の合計に合わせる。
+func Stages(stages ...Stage) Arrival {
+	s := stagedArrival{stages: stages}
+	var start time.Duration
+	for _, st := range stages {
+		s.starts = append(s.starts, start)
+		s.counts = append(s.counts, st.count())
+		start += st.For
+	}
+	return s
+}
+
+type stagedArrival struct {
+	stages []Stage
+	starts []time.Duration // 各段階の開始時刻
+	counts []int           // 各段階の到着数
+}
+
+// count は段階の中の到着数（到着時刻が For より前のもの）。
+func (st Stage) count() int {
+	if st.Arrival == nil || st.For <= 0 || st.Arrival.validate() != nil {
+		return 0
+	}
+	in := func(i int) bool {
+		off, ok := st.Arrival.at(i)
+		return ok && off < st.For
+	}
+	// at は単調に増えるので、in が偽になる最初の i を二分探索で求める。
+	hi := 1
+	for in(hi) && hi < 1<<40 {
+		hi *= 2
+	}
+	lo := 0
+	if !in(0) {
+		return 0
+	}
+	for lo+1 < hi { // in(lo) は真、in(hi) は偽
+		mid := lo + (hi-lo)/2
+		if in(mid) {
+			lo = mid
+		} else {
+			hi = mid
+		}
+	}
+	return lo + 1
+}
+
+func (s stagedArrival) validate() error {
+	if len(s.stages) == 0 {
+		return errors.New("jotaro: Stages には 1 つ以上の段階が必要")
+	}
+	for i, st := range s.stages {
+		switch {
+		case st.Arrival == nil:
+			return fmt.Errorf("jotaro: Stages の %d 番目の Arrival が未設定", i+1)
+		case st.For <= 0:
+			return fmt.Errorf("jotaro: Stages の %d 番目の For は正の値にする必要がある", i+1)
+		}
+		if err := st.Arrival.validate(); err != nil {
+			return fmt.Errorf("stages[%d]: %w", i+1, err)
+		}
+	}
+	return nil
+}
+
+func (s stagedArrival) at(i int) (time.Duration, bool) {
+	for k, st := range s.stages {
+		if i < s.counts[k] {
+			off, ok := st.Arrival.at(i)
+			return s.starts[k] + off, ok
+		}
+		i -= s.counts[k]
+	}
+	return 0, false
 }

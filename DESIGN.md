@@ -152,7 +152,7 @@ Feeder はシナリオの外で作り、クロージャで共有する（`User` 
 | `scenario.go` `user.go` `step.go` | `Scenario` / `User` / `Step`（`Think`、panic の回復を含む） |
 | `report.go` `report_print.go` | 集計と出力 |
 | `run.go` | `Plan` / `Run`（`Users` / `Arrival` の両モデル） |
-| `arrival.go` | `Arrival` / `Rate` / `Ramp` |
+| `arrival.go` | `Arrival` / `Rate` / `Ramp` / `Stages` |
 | `feeder.go` | `Feeder` / `LoadCSV` |
 
 実装中に決めたこと:
@@ -164,7 +164,7 @@ Feeder はシナリオの外で作り、クロージャで共有する（`User` 
 
 ## 8. 未決
 
-- ~~`Pacer` に近い抽象を自前で持つか、vegeta の `lib` を import するか。~~ → 自前の `Arrival` を持つことにした（依存を増やさず、シナリオ単位で制御するため）。可変レートは `Arrival` の実装を増やして対応する（`Ramp` で直線的なランプアップを実装済み。段階的な `Stages` は未）。
+- ~~`Pacer` に近い抽象を自前で持つか、vegeta の `lib` を import するか。~~ → 自前の `Arrival` を持つことにした（依存を増やさず、シナリオ単位で制御するため）。可変レートは `Arrival` の実装を増やして対応する（`Ramp` で直線的なランプアップ、`Stages` で段階的な負荷を実装済み）。
 - vegeta 互換の程度（`Result` の JSON/CSV 出力だけか、`lib` の型を直接使うか）。結果の現状と出力形式の案は [`docs/result.md`](docs/result.md) にまとめた。
 - 値の受け渡しを型安全に保つ範囲（A は Go の変数なので問題ないが、B・YAML では文字列キーになる）。
 - 思考時間を含むシナリオ時間を、併記するか。
