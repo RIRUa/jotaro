@@ -107,7 +107,7 @@ if err := rep.WriteHTML(f); err != nil {
 - CSS は埋め込み、JS と外部リソースは使わない。ライト／ダークは OS の設定に従う。
 - 内容: サマリー、ステータス・エラーの内訳、レイテンシ（p50〜max の棒）、`corrected`（`Rate` のときのみ）、TTFB、シナリオ別のイテレーション時間とステップ別の表。
 - 表示用の値は `Print` と同じ書式（`fmtDur`）。ナノ秒の無損失な値は JSON を使う。
-- サンプル: `go run ./examples/checkout -html report.html`（`-rate 30` で `Rate` モデル）。
+- サンプル: `go run ./examples/checkout -format html -o report.html`（`-rate 30` で `Rate` モデル）。
 
 ## 2. 未実装（提案）
 
@@ -198,75 +198,45 @@ Run ─(任意)─▶ /metrics ─▶ Prometheus ─▶ Grafana
 - 静的 HTML のグラフは、JS ライブラリを埋め込むと容量が増える。最初は表と簡単な SVG の棒グラフで足りるかもしれない。
 - 時系列を見るには、`DESIGN.md` のフェーズ3（1秒ごとの集計）が先に必要。それまでは最終値の可視化が中心になる。
 
-## 4. 出力 API（提案）
+## 4. 出力 API（実装済み）
 
-> 提案であり、**まだ実装していない**。`io.Writer` と形式を受け取る形にする。
+`Report.Write(w io.Writer, f Format) error` が出力の入口（`report_write.go`）。出力先は `io.Writer` なので、ファイル、標準出力、`bytes.Buffer`、`http.ResponseWriter` のどれでもよい。
 
 ```
-*Report ─▶ Write(w, format) ─▶ Text / JSON / HTML ─▶ w（ファイル / 標準出力 / HTTP / バッファ）
+*Report ─▶ Write(w, format) ─▶ Text / JSON / HTML ─▶ w
 ```
-
-### 基本形
 
 ```go
-// 形式を表す型
-type Format string
-
-const (
-    FormatText Format = "text"
-    FormatJSON Format = "json"
-    FormatHTML Format = "html"
-)
-
-// 出力の入口。w は os.File でも bytes.Buffer でも http.ResponseWriter でもよい
-func (r *Report) Write(w io.Writer, f Format) error {
-    switch f {
-    case FormatText:
-        return r.writeText(w)
-    case FormatJSON:
-        return r.writeJSON(w)
-    case FormatHTML:
-        return r.writeHTML(w)
-    default:
-        return fmt.Errorf("unknown format: %q", f)
-    }
+f, _ := jotaro.ParseFormat("json") // CLI のフラグ文字列から
+if err := rep.Write(os.Stdout, f); err != nil {
+    log.Fatal(err)
 }
 ```
 
-| 項目 | 内容 |
-|---|---|
-| 責務 | `Report` は集計結果を持つ。`Write` は形式に応じて書く |
-| 依存 | 標準の `io` / `encoding/json` / `html/template` のみ |
-| メリット | 出力先が自由で、テストしやすい（`bytes.Buffer` で検証できる） |
-| デメリット | 形式を足すたびに `switch` を直す（開放閉鎖の原則に少し反する） |
+| `Format` | 内容 | 実体 |
+|---|---|---|
+| `FormatText` | 人が読める表 | `Print`（書き込みの失敗は `Write` が `error` で返す） |
+| `FormatJSON` | 時間はナノ秒の整数 | `WriteJSON` |
+| `FormatHTML` | 外部に依存しない 1 枚の HTML | `WriteHTML` |
 
-### 形式が増える場合
+- 未知の形式は、何も書かずに `error` を返す。`ParseFormat` は文字列から `Format` を作り、未知なら `error` を返す。
+- 書き込みの途中で失敗した場合は `error` を返す。途中まで書かれた内容は `w` に残るので、ファイルに書くときは呼び出し側が扱う。
+- `Print` / `WriteJSON` / `WriteHTML` も公開したまま残す。形式が決まっているなら直接呼べる。
+- サンプル: `go run ./examples/checkout -format json -o result.json`（`-o` を省くと標準出力）。
 
-利用者が独自の形式を足したくなったら、インターフェースに切り替える。
+### 形式が増える場合（将来）
+
+利用者が独自の形式を足したくなったら、`Format` の `switch` の代わりにインターフェースへ移る。需要が出るまでは今の形のままにする。
 
 ```go
-// 形式ごとの書き手をインターフェースにする
 type Writer interface {
     Write(w io.Writer, r *Report) error
 }
-
-// 使う側
-jotaro.JSON{}.Write(os.Stdout, rep)
 ```
-
-| 案 | 向いている場面 |
-|---|---|
-| `Write(w, Format)` | 形式が少なく、CLI のフラグ（`-format json`）から選ぶ |
-| `Writer` インターフェース | 利用者が独自の形式を足したい |
-
-**推奨**: まず `Write(w, Format)` で始め、需要が出たらインターフェースへ移る。
 
 ### 注意点
 
-- 現状のコンソール出力（`report_print.go`）は `writeText` に寄せる。既存の出力は変えない。
 - 生データ（JSON Lines）は件数が多いので、`Report` ではなく `Collector` の記録を1行ずつ書く別の API にする。`Report.Write` には含めない。
-- HTML は `html/template` で、JSON をページに埋め込む形が簡単。外部依存はいらない。
-- 書き込みの途中で失敗した場合は `error` を返す。部分的に書かれたファイルが残る点は、呼び出し側が扱う。
 
 ## 5. 関連
 

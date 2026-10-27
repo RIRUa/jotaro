@@ -70,9 +70,14 @@ var checkout = jotaro.NewScenario("checkout", func(ctx context.Context, u *jotar
 
 func main() {
 	rate := flag.Int("rate", 0, "毎秒のシナリオ開始数。0 なら Users モデル")
-	out := flag.String("o", "", "結果を JSON で書き出すファイル。空なら書き出さない")
-	htmlOut := flag.String("html", "", "結果を HTML レポートで書き出すファイル。空なら書き出さない")
+	format := flag.String("format", "text", "結果の形式 (text, json, html)")
+	out := flag.String("o", "", "結果の書き出し先。空なら標準出力")
 	flag.Parse()
+
+	f, err := jotaro.ParseFormat(*format)
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	srv := httptest.NewServer(mockShop())
 	defer srv.Close()
@@ -94,31 +99,19 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	rep.Print(os.Stdout)
 
+	w := io.Writer(os.Stdout)
 	if *out != "" {
-		if err := writeFile(*out, rep.WriteJSON); err != nil {
+		file, err := os.Create(*out)
+		if err != nil {
 			log.Fatal(err)
 		}
+		defer file.Close()
+		w = file
 	}
-	if *htmlOut != "" {
-		if err := writeFile(*htmlOut, rep.WriteHTML); err != nil {
-			log.Fatal(err)
-		}
+	if err := rep.Write(w, f); err != nil {
+		log.Fatal(err)
 	}
-}
-
-// writeFile は path を作って write の出力を書き込む。
-func writeFile(path string, write func(io.Writer) error) error {
-	f, err := os.Create(path)
-	if err != nil {
-		return err
-	}
-	if err := write(f); err != nil {
-		f.Close()
-		return err
-	}
-	return f.Close()
 }
 
 // mockShop は少し遅くて、ときどき注文に失敗する API。
