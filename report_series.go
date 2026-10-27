@@ -18,6 +18,10 @@ type SeriesPoint struct {
 	Errors int
 	// HTTP5xx はそのうち HTTP 5xx を返した数（Errors とは重ならない）。
 	HTTP5xx int
+	// NewConns / ReusedConns は、この区間に開始したリクエストのうち、
+	// 接続を新しく張ったものと再利用したものの数。接続を得る前に失敗したものはどちらにも数えない。
+	NewConns    int
+	ReusedConns int
 	// Latency はこの区間に開始したリクエストのレイテンシ分布。
 	Latency Latency
 	// Concurrency はこの区間に実行中だったイテレーション数の最大値。
@@ -57,6 +61,12 @@ func buildSeries(origin time.Time, reqs []Record, iters []IterationRecord) []Ser
 		}
 		if r.Code >= 500 {
 			pts[i].HTTP5xx++
+		}
+		switch r.Conn {
+		case ConnNew:
+			pts[i].NewConns++
+		case ConnReused:
+			pts[i].ReusedConns++
 		}
 		lats[i] = append(lats[i], r.Latency)
 	}
@@ -110,6 +120,8 @@ func mergeSeries(a, b []SeriesPoint, offset int) []SeriesPoint {
 		q.Requests += p.Requests
 		q.Errors += p.Errors
 		q.HTTP5xx += p.HTTP5xx
+		q.NewConns += p.NewConns
+		q.ReusedConns += p.ReusedConns
 		q.Latency = mergeLatency(q.Latency, p.Latency)
 		q.Concurrency += p.Concurrency
 	}

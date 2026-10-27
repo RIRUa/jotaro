@@ -97,3 +97,43 @@ func TestMergeSeriesOffset(t *testing.T) {
 		t.Errorf("s4 = %+v", got.Series[4])
 	}
 }
+
+func TestBuildSeriesConns(t *testing.T) {
+	t0 := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	ms := time.Millisecond
+	reqs := []Record{
+		{Start: t0, Latency: 10 * ms, Code: 200, Conn: ConnNew},
+		{Start: t0.Add(300 * ms), Latency: 10 * ms, Code: 200, Conn: ConnReused},
+		{Start: t0.Add(600 * ms), Latency: 10 * ms, Code: 200, Conn: ConnReused},
+		{Start: t0.Add(700 * ms), Latency: 10 * ms, Err: ErrDNS}, // 接続を得る前に失敗
+		{Start: t0.Add(1200 * ms), Latency: 10 * ms, Code: 200, Conn: ConnNew},
+	}
+	rep := BuildReport(reqs, nil, nil, 0)
+
+	if len(rep.Series) != 2 {
+		t.Fatalf("len = %d, want 2: %+v", len(rep.Series), rep.Series)
+	}
+	s0, s1 := rep.Series[0], rep.Series[1]
+	if s0.Requests != 4 || s0.NewConns != 1 || s0.ReusedConns != 2 {
+		t.Errorf("s0 = %+v", s0)
+	}
+	if s1.NewConns != 1 || s1.ReusedConns != 0 {
+		t.Errorf("s1 = %+v", s1)
+	}
+}
+
+func TestMergeSeriesConns(t *testing.T) {
+	a := []SeriesPoint{{Second: 0, NewConns: 1, ReusedConns: 2}, {Second: 1, NewConns: 3}}
+	b := []SeriesPoint{{Second: 0, NewConns: 4, ReusedConns: 5}}
+
+	got := mergeSeries(a, b, 1) // b を 1 秒ずらす → a の 1 秒目と重なる
+	if len(got) != 2 {
+		t.Fatalf("len = %d, want 2: %+v", len(got), got)
+	}
+	if got[0].NewConns != 1 || got[0].ReusedConns != 2 {
+		t.Errorf("got[0] = %+v", got[0])
+	}
+	if got[1].NewConns != 3+4 || got[1].ReusedConns != 5 {
+		t.Errorf("got[1] = %+v", got[1])
+	}
+}
