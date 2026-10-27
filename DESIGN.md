@@ -71,13 +71,20 @@ var checkout = jotaro.NewScenario("checkout", func(ctx context.Context, u *jotar
 jotaro.Run(ctx, jotaro.Plan{
     Scenario: checkout,
     Users:    50,                          // クローズド: 固定同時ユーザー数
-    // Arrival: jotaro.Rate(10, time.Second) // オープン: 毎秒10シナリオ（フェーズ2）
+    // Arrival: jotaro.Rate(10, time.Second) // オープン: 毎秒10シナリオ（Users とは排他）
     Duration: time.Minute,
 })
 ```
 
 - `Users`（クローズド）: N 個の goroutine が逐次実行する。**実装済み**。
-- `Rate`（オープン）: 到着レート固定。vegeta の強みをシナリオ単位で再現する。フェーズ2。
+- `Rate`（オープン）: 到着レート固定。vegeta の強みをシナリオ単位で再現する。**実装済み**。
+
+`Rate` モデルの動き:
+
+- 到着時刻は開始時刻からの累積（`i × 間隔`）で決める。ディスパッチャが遅れても間隔はずれず、遅れた分はまとめて起動する。
+- 同時実行数が `MaxUsers`（既定 1000）に達しているときの到着は、実行せず**ドロップ**として数える（`Report.Dropped`）。
+- イテレーションの最初のリクエストの `Scheduled` に予定到着時刻を入れる。`Record.Corrected()`（予定時刻から応答完了まで）が Coordinated Omission の補正後の値で、`RequestStats.Corrected` に集計する。2 つ目以降のリクエストは `Scheduled = Start`（前のリクエストの遅れは実際の遅延なので補正しない）。
+- 到着ごとに別のユーザーとして扱う（`User.ID` は到着の通し番号、`Iteration` は 0）。終了の仕方は `Users` と同じ（`Duration` / `Grace`）。
 
 `Users` モデルの終了の仕方:
 
@@ -105,7 +112,7 @@ jotaro.Run(ctx, jotaro.Plan{
 | フェーズ | 内容 |
 |---|---|
 | 1 (MVP, `Users`) | パーセンタイル（p50/p90/p95/p99/max）、エラー内訳（タイムアウト／接続拒否／DNS／TLS／HTTP 4xx・5xx／`Expect` 不一致、ステップ別）、スループット（実 RPS・イテレーション/秒）、TTFB、送受信バイト数、思考時間を除いたシナリオ時間 |
-| 2 (`Rate`) | ドロップされたイテレーション数、Coordinated Omission の補正（予定開始時刻からの遅延で測る） |
+| 2 (`Rate`) | ドロップされたイテレーション数、Coordinated Omission の補正（予定開始時刻からの遅延で測る）。**実装済み** |
 | 3 | 時系列（1 秒ごと）、同時実行数の推移、接続の再利用率と DNS/TCP/TLS 時間、負荷生成側の健全性（CPU・ゴルーチン数） |
 
 ## 6. MVP の範囲
@@ -116,7 +123,7 @@ jotaro.Run(ctx, jotaro.Plan{
 
 ## 7. 実装状況
 
-フェーズ1（MVP）は実装済み。`go run ./examples/checkout` で動作を確認できる。
+フェーズ1（MVP）とフェーズ2（`Rate`）は実装済み。`go run ./examples/checkout` で動作を確認できる。
 
 | ファイル | 内容 |
 |---|---|
@@ -124,7 +131,8 @@ jotaro.Run(ctx, jotaro.Plan{
 | `request.go` `response.go` `exec.go` | リクエスト記述とビルダー、`httptrace` つきの実行、エラー分類 |
 | `scenario.go` `user.go` `step.go` | `Scenario` / `User` / `Step`（`Think`、panic の回復を含む） |
 | `report.go` `report_print.go` | 集計と出力 |
-| `run.go` | `Plan` / `Run`（`Users` モデル） |
+| `run.go` | `Plan` / `Run`（`Users` / `Arrival` の両モデル） |
+| `arrival.go` | `Arrival` / `Rate` |
 
 実装中に決めたこと:
 
@@ -135,7 +143,7 @@ jotaro.Run(ctx, jotaro.Plan{
 
 ## 8. 未決
 
-- `Pacer` に近い抽象を自前で持つか、vegeta の `lib` を import するか。
+- ~~`Pacer` に近い抽象を自前で持つか、vegeta の `lib` を import するか。~~ → 自前の `Arrival` を持つことにした（依存を増やさず、シナリオ単位で制御するため）。可変レート（ランプアップなど）は `Arrival` の実装を増やして対応する。
 - vegeta 互換の程度（`Result` の JSON/CSV 出力だけか、`lib` の型を直接使うか）。
 - 値の受け渡しを型安全に保つ範囲（A は Go の変数なので問題ないが、B・YAML では文字列キーになる）。
 - 思考時間を含むシナリオ時間を、併記するか。

@@ -52,6 +52,9 @@ type RequestStats struct {
 	Count   int
 	Latency Latency // 通信エラーのリクエストも含む
 	TTFB    Latency // 応答を受け取れたリクエストのみ
+	// Corrected は予定開始時刻からの時間（Coordinated Omission の補正後）。
+	// Users モデルでは Latency と同じ。
+	Corrected Latency
 
 	Status map[string]int  // "2xx" のようなステータスクラスごとの件数
 	Errors map[ErrKind]int // 通信エラーの内訳
@@ -88,6 +91,11 @@ type ScenarioReport struct {
 
 // Report は実行全体の集計結果。
 type Report struct {
+	// Open は Arrival（オープンモデル）で実行したか。
+	Open bool
+	// Dropped は、同時実行数の上限のために実行しなかった到着の数。
+	Dropped int
+
 	Elapsed   time.Duration
 	Requests  RequestStats
 	Scenarios []ScenarioReport // 最初に実行された順
@@ -194,9 +202,10 @@ func BuildReport(reqs []Record, steps []StepRecord, iters []IterationRecord, ela
 
 func requestStats(reqs []Record) RequestStats {
 	st := RequestStats{Count: len(reqs)}
-	var lat, ttfb []time.Duration
+	var lat, ttfb, corrected []time.Duration
 	for _, r := range reqs {
 		lat = append(lat, r.Latency)
+		corrected = append(corrected, r.Corrected())
 		if r.TTFB > 0 {
 			ttfb = append(ttfb, r.TTFB)
 		}
@@ -214,6 +223,7 @@ func requestStats(reqs []Record) RequestStats {
 	}
 	st.Latency = newLatency(lat)
 	st.TTFB = newLatency(ttfb)
+	st.Corrected = newLatency(corrected)
 	return st
 }
 

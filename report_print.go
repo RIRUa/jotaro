@@ -17,6 +17,10 @@ func (r *Report) Print(w io.Writer) {
 	fmt.Fprintf(w, "status:     %s\n", fmtStatus(r.Requests.Status))
 	fmt.Fprintf(w, "errors:     %s\n", fmtErrors(r.Requests.Errors))
 	fmt.Fprintf(w, "latency:    %s\n", fmtPercentiles(r.Requests.Latency))
+	if r.Open {
+		fmt.Fprintf(w, "corrected:  %s (from scheduled start)\n", fmtPercentiles(r.Requests.Corrected))
+		fmt.Fprintf(w, "dropped:    %d\n", r.Dropped)
+	}
 	fmt.Fprintf(w, "ttfb:       %s\n", fmtPercentiles(r.Requests.TTFB))
 	fmt.Fprintf(w, "bytes:      in %s, out %s\n", fmtBytes(r.Requests.BytesIn), fmtBytes(r.Requests.BytesOut))
 

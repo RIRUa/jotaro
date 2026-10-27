@@ -12,18 +12,27 @@ import (
 const (
 	defaultTimeout = 30 * time.Second
 	defaultGrace   = 30 * time.Second
+
+	defaultMaxUsers = 1000
 )
 
 // Plan は負荷のかけ方。
 //
-// 現状は Users（固定同時ユーザー数）だけに対応している。
-// 各ユーザーは Duration が過ぎるまでシナリオを繰り返す。
+// Users（クローズド）か Arrival（オープン）のどちらか一方を指定する。
+//
+//   - Users: 固定数のユーザーが Duration が過ぎるまでシナリオを繰り返す。
+//   - Arrival: シナリオの所要時間に関わらず、一定の割合でシナリオを開始する。
 type Plan struct {
 	Scenario *Scenario
 	BaseURL  string
 
 	// Users は同時に動かす仮想ユーザー数。
 	Users int
+	// Arrival は到着のしかた（例: Rate(10, time.Second)）。Users とは同時に指定できない。
+	Arrival Arrival
+	// MaxUsers は Arrival のときの同時実行数の上限。0 なら 1000。
+	// 上限に達しているときに到着した分は、実行せずドロップとして数える。
+	MaxUsers int
 	// Duration を過ぎると、新しいイテレーションを始めなくなる。
 	Duration time.Duration
 
@@ -38,12 +47,30 @@ func (p Plan) validate() error {
 	switch {
 	case p.Scenario == nil || p.Scenario.Fn == nil:
 		return errors.New("jotaro: Plan.Scenario が未設定")
-	case p.Users <= 0:
-		return errors.New("jotaro: Plan.Users は 1 以上にする必要がある")
+	case p.Users > 0 && p.Arrival != nil:
+		return errors.New("jotaro: Plan.Users と Plan.Arrival は同時に指定できない")
+	case p.Users <= 0 && p.Arrival == nil:
+		return errors.New("jotaro: Plan.Users は 1 以上にする必要がある（または Plan.Arrival を指定する）")
+	case p.MaxUsers < 0:
+		return errors.New("jotaro: Plan.MaxUsers は 0 以上にする必要がある")
 	case p.Duration <= 0:
 		return errors.New("jotaro: Plan.Duration は正の値にする必要がある")
 	}
+	if p.Arrival != nil {
+		return p.Arrival.validate()
+	}
 	return nil
+}
+
+// maxConcurrency は同時に動きうるイテレーション数の上限。
+func (p Plan) maxConcurrency() int {
+	if p.Arrival == nil {
+		return p.Users
+	}
+	if p.MaxUsers > 0 {
+		return p.MaxUsers
+	}
+	return defaultMaxUsers
 }
 
 // Run は Plan に従って負荷をかけ、結果を集計して返す。
@@ -58,8 +85,8 @@ func Run(ctx context.Context, p Plan) (*Report, error) {
 	grace := cmpOr(p.Grace, defaultGrace)
 
 	tr := http.DefaultTransport.(*http.Transport).Clone()
-	tr.MaxIdleConns = p.Users * 2
-	tr.MaxIdleConnsPerHost = p.Users
+	tr.MaxIdleConns = p.maxConcurrency() * 2
+	tr.MaxIdleConnsPerHost = p.maxConcurrency()
 	defer tr.CloseIdleConnections()
 
 	// stopCtx: 新しいイテレーションを始めてよいか。
@@ -72,28 +99,99 @@ func Run(ctx context.Context, p Plan) (*Report, error) {
 	defer cancel()
 	defer time.AfterFunc(p.Duration+grace, cancel).Stop()
 
-	col := NewCollector()
+	r := &runner{p: p, tr: tr, timeout: timeout, col: NewCollector(), stopCtx: stopCtx, runCtx: runCtx}
 	start := time.Now()
+	if p.Arrival != nil {
+		r.runOpen()
+	} else {
+		r.runClosed()
+	}
+	elapsed := time.Since(start)
 
+	reqs, steps, iters := r.col.Snapshot()
+	rep := BuildReport(reqs, steps, iters, elapsed)
+	rep.Open = p.Arrival != nil
+	rep.Dropped = r.col.Dropped()
+	return rep, nil
+}
+
+// runner は 1 回の Run の間の状態。
+type runner struct {
+	p       Plan
+	tr      http.RoundTripper
+	timeout time.Duration
+	col     *Collector
+
+	stopCtx context.Context
+	runCtx  context.Context
+}
+
+// runClosed は Users 個のユーザーが、Duration が過ぎるまでシナリオを繰り返す。
+func (r *runner) runClosed() {
 	var wg sync.WaitGroup
-	for id := 0; id < p.Users; id++ {
+	for id := 0; id < r.p.Users; id++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			for iter := 0; stopCtx.Err() == nil; iter++ {
-				u, err := newUser(runCtx, p, id, iter, tr, timeout, col)
+			for iter := 0; r.stopCtx.Err() == nil; iter++ {
+				u, err := newUser(r.runCtx, r.p, id, iter, r.tr, r.timeout, r.col)
 				if err != nil {
 					return
 				}
-				p.Scenario.run(u)
+				r.p.Scenario.run(u)
 			}
 		}()
 	}
 	wg.Wait()
-	elapsed := time.Since(start)
+}
 
-	reqs, steps, iters := col.Snapshot()
-	return BuildReport(reqs, steps, iters, elapsed), nil
+// runOpen は Arrival の間隔でイテレーションを開始する。
+//
+// 到着時刻は開始時刻からの累積で決めるので、ディスパッチャが遅れても
+// 間隔はずれない。遅れた分はまとめて起動し、予定時刻を Scheduled に残す。
+// 同時実行数が上限に達しているときの到着はドロップする。
+func (r *runner) runOpen() {
+	iv := r.p.Arrival.interval()
+	slots := make(chan struct{}, r.p.maxConcurrency())
+
+	var wg sync.WaitGroup
+	defer wg.Wait()
+
+	t0 := time.Now()
+	timer := time.NewTimer(0)
+	defer timer.Stop()
+	<-timer.C
+
+	for i := 0; r.stopCtx.Err() == nil; i++ {
+		at := t0.Add(time.Duration(i) * iv)
+		if wait := time.Until(at); wait > 0 {
+			timer.Reset(wait)
+			select {
+			case <-timer.C:
+			case <-r.stopCtx.Done():
+				return
+			}
+		}
+
+		select {
+		case slots <- struct{}{}:
+		default:
+			r.col.AddDropped()
+			continue
+		}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			defer func() { <-slots }()
+			// オープンモデルでは到着ごとに別のユーザーとして扱う。
+			u, err := newUser(r.runCtx, r.p, i, 0, r.tr, r.timeout, r.col)
+			if err != nil {
+				return
+			}
+			u.scheduled = at
+			r.p.Scenario.run(u)
+		}()
+	}
 }
 
 // newUser はイテレーション 1 回分のユーザーを作る。Cookie jar は毎回新しい。

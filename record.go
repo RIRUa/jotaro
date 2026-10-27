@@ -32,7 +32,8 @@ type Record struct {
 	Err    ErrKind // 通信エラーの種類。HTTP 4xx/5xx は Code で表す
 
 	// Scheduled は予定開始時刻。Users モデルでは Start と同じ値になる。
-	// Rate モデルでは Coordinated Omission の補正に使う。
+	// Arrival モデルでは、イテレーションの最初のリクエストだけ予定到着時刻になる。
+	// Coordinated Omission の補正に使う。
 	Scheduled time.Time
 	Start     time.Time
 	Latency   time.Duration
@@ -45,6 +46,15 @@ type Record struct {
 
 	BytesOut int64
 	BytesIn  int64
+}
+
+// Corrected は予定開始時刻から応答を受け取り終えるまでの時間。
+// 予定より遅れて始まった分も含むので、Coordinated Omission の補正になる。
+func (r Record) Corrected() time.Duration {
+	if r.Scheduled.IsZero() {
+		return r.Latency
+	}
+	return r.Start.Add(r.Latency).Sub(r.Scheduled)
 }
 
 // StepRecord は u.Step 1 回分の記録。
@@ -82,6 +92,7 @@ type Collector struct {
 	requests   []Record
 	steps      []StepRecord
 	iterations []IterationRecord
+	dropped    int
 }
 
 func NewCollector() *Collector {
@@ -104,6 +115,20 @@ func (c *Collector) AddIteration(r IterationRecord) {
 	c.mu.Lock()
 	c.iterations = append(c.iterations, r)
 	c.mu.Unlock()
+}
+
+// AddDropped は、同時実行数の上限のために実行しなかった到着を 1 回数える。
+func (c *Collector) AddDropped() {
+	c.mu.Lock()
+	c.dropped++
+	c.mu.Unlock()
+}
+
+// Dropped はドロップした到着の数。
+func (c *Collector) Dropped() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.dropped
 }
 
 // Snapshot はその時点の記録のコピーを返す。
