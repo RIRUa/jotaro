@@ -19,7 +19,7 @@ func TestHealthSampler(t *testing.T) {
 			select {
 			case <-stop:
 				return
-			default:
+			default: //nolint:staticcheck // CPU を使わせるために、わざと回し続ける
 			}
 		}
 	}()

@@ -234,7 +234,7 @@ func writeFile(path string, rep *report.Report, f report.Format) error {
 	}
 	if err := rep.Write(file, f); err != nil {
 		file.Close()
-		os.Remove(path)
+		_ = os.Remove(path) // 書き込みのエラーを返すのが先。消せなくてもそれは伝えない
 		return err
 	}
 	return file.Close()

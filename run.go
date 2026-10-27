@@ -162,7 +162,7 @@ func (r *runner) runClosed() {
 				if err != nil {
 					return
 				}
-				r.p.Scenario.run(u)
+				_ = r.p.Scenario.run(u) // エラーは IterationRecord に残る
 			}
 		}()
 	}
@@ -216,7 +216,7 @@ func (r *runner) runOpen() {
 				return
 			}
 			u.scheduled = at
-			r.p.Scenario.run(u)
+			_ = r.p.Scenario.run(u) // エラーは IterationRecord に残る
 		}()
 	}
 }

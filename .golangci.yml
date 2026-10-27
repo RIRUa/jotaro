@@ -1,0 +1,29 @@
+version: "2"
+
+linters:
+  # 既定（errcheck / govet / ineffassign / staticcheck / unused）のまま使う。
+  default: standard
+  settings:
+    errcheck:
+      # 書き込み先（io.Writer）へのエラーは無視する設計。読み込み側の Close も慣用的に無視する。
+      exclude-functions:
+        - fmt.Fprint
+        - fmt.Fprintf
+        - fmt.Fprintln
+        - (*text/tabwriter.Writer).Flush
+        - (*os.File).Close
+        - (io.Closer).Close
+        - (io.ReadCloser).Close
+  exclusions:
+    rules:
+      # テストとサンプルでは、戻り値の確認を求めない。
+      - path: _test\.go
+        linters:
+          - errcheck
+      - path: ^examples/
+        linters:
+          - errcheck
+
+formatters:
+  enable:
+    - gofmt
