@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"slices"
 	"time"
+
+	"github.com/RIRUa/jotaro/internal/histogram"
 )
 
 // Latency は時間の分布。
@@ -18,7 +20,7 @@ type Latency struct {
 	Max   time.Duration
 
 	// hist は分布のヒストグラム。MergeReports がパーセンタイルを求め直すために使う。
-	hist histogram
+	hist histogram.H
 }
 
 func newLatency(ds []time.Duration) Latency {
@@ -41,7 +43,7 @@ func newLatency(ds []time.Duration) Latency {
 		P95:   percentile(s, 95),
 		P99:   percentile(s, 99),
 		Max:   s[len(s)-1],
-		hist:  newHistogram(s),
+		hist:  histogram.New(s),
 	}
 }
 

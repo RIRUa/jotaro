@@ -3,6 +3,7 @@ package jotaro
 import (
 	"errors"
 	"fmt"
+	"github.com/RIRUa/jotaro/internal/histogram"
 	"math"
 	"time"
 )
@@ -174,10 +175,10 @@ func mergeLatency(a, b Latency) Latency {
 		Max:   max(a.Max, b.Max),
 	}
 	// ヒストグラムが両方にあり、件数と合っているときだけ、分布からパーセンタイルを求める。
-	if a.hist.total() == a.Count && b.hist.total() == b.Count {
-		out.hist = mergeHistograms(a.hist, b.hist)
+	if a.hist.Total() == a.Count && b.hist.Total() == b.Count {
+		out.hist = histogram.Merge(a.hist, b.hist)
 		// 代表値は範囲の外に出うるので、実測の Min / Max に収める。
-		pct := func(p int) time.Duration { return min(max(out.hist.percentile(p), out.Min), out.Max) }
+		pct := func(p int) time.Duration { return min(max(out.hist.Percentile(p), out.Min), out.Max) }
 		out.P50, out.P90, out.P95, out.P99 = pct(50), pct(90), pct(95), pct(99)
 		return out
 	}

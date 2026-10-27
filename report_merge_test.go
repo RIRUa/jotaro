@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/RIRUa/jotaro/internal/histogram"
 )
 
 func mergeSample(open bool, lat time.Duration, n int, elapsed time.Duration, extraStep string) *Report {
@@ -47,7 +49,7 @@ func TestMergeReports(t *testing.T) {
 		t.Fatalf("latency: %+v", l)
 	}
 	// P50 はヒストグラムから求める。半分以上が 30ms なので 30ms 付近（重み付き平均の 25ms にはならない）
-	if !within(l.P50, 30*time.Millisecond, histAlpha) {
+	if !within(l.P50, 30*time.Millisecond, histogram.Alpha) {
 		t.Fatalf("P50 = %v, want ≈30ms", l.P50)
 	}
 	if len(got.Scenarios) != 1 || got.Scenarios[0].Iterations.Count != 4 {
@@ -111,7 +113,7 @@ func TestMergeReportsPercentilesMatchWhole(t *testing.T) {
 	for name, pair := range map[string][2]time.Duration{
 		"P50": {g.P50, w.P50}, "P90": {g.P90, w.P90}, "P95": {g.P95, w.P95}, "P99": {g.P99, w.P99},
 	} {
-		if !within(pair[0], pair[1], 2*histAlpha) {
+		if !within(pair[0], pair[1], 2*histogram.Alpha) {
 			t.Errorf("%s = %v, want ≈%v (誤差 %.2f%%)", name, pair[0], pair[1], 100*(float64(pair[0])/float64(pair[1])-1))
 		}
 	}

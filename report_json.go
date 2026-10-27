@@ -3,6 +3,7 @@ package jotaro
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/RIRUa/jotaro/internal/histogram"
 	"io"
 	"maps"
 	"time"
@@ -339,14 +340,14 @@ func fromErrCounts(m map[string]int) map[ErrKind]int {
 }
 
 // bucketsOrEmpty は nil でも空の map を返す。
-func bucketsOrEmpty(h histogram) map[int]int {
+func bucketsOrEmpty(h histogram.H) map[int]int {
 	if h == nil {
 		return map[int]int{}
 	}
 	return h
 }
 
-func nilIfEmpty(m map[int]int) histogram {
+func nilIfEmpty(m map[int]int) histogram.H {
 	if len(m) == 0 {
 		return nil
 	}
