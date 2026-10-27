@@ -1,4 +1,4 @@
-package jotaro
+package report
 
 import (
 	"fmt"
@@ -142,8 +142,8 @@ func perSecond(n int, elapsed time.Duration) float64 {
 	return float64(n) / elapsed.Seconds()
 }
 
-// ReportFromRaw は生データを集計する。Run が返す Report と同じ集計になる。
-func ReportFromRaw(raw *record.Raw) *Report {
+// FromRaw は生データを集計する。Run が返す Report と同じ集計になる。
+func FromRaw(raw *record.Raw) *Report {
 	rep := BuildReport(raw.Requests, raw.Steps, raw.Iterations, raw.Elapsed)
 	rep.Open = raw.Open
 	rep.Dropped = raw.Dropped

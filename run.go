@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/RIRUa/jotaro/record"
+	"github.com/RIRUa/jotaro/report"
 )
 
 const (
@@ -85,7 +86,7 @@ func (p Plan) maxConcurrency() int {
 //
 // ctx が終わると、実行中のイテレーションも含めてすぐに止まり、
 // そこまでの結果を返す。Report.Elapsed は、全ユーザーが止まるまでの実時間。
-func Run(ctx context.Context, p Plan) (*Report, error) {
+func Run(ctx context.Context, p Plan) (*report.Report, error) {
 	if err := p.validate(); err != nil {
 		return nil, err
 	}
@@ -109,7 +110,7 @@ func Run(ctx context.Context, p Plan) (*Report, error) {
 
 	r := &runner{p: p, tr: tr, timeout: timeout, col: record.NewCollector(), stopCtx: stopCtx, runCtx: runCtx}
 	start := time.Now()
-	health := startHealthSampler(SeriesInterval)
+	health := startHealthSampler(report.SeriesInterval)
 	if p.Arrival != nil {
 		r.runOpen()
 	} else {
@@ -129,7 +130,7 @@ func Run(ctx context.Context, p Plan) (*Report, error) {
 		Iterations: iters,
 		Health:     healthPoints,
 	}
-	rep := ReportFromRaw(raw)
+	rep := report.FromRaw(raw)
 	if p.Raw != nil {
 		if err := record.WriteRaw(p.Raw, raw); err != nil {
 			return rep, fmt.Errorf("jotaro: 生データの書き出しに失敗: %w", err)

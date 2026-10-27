@@ -1,4 +1,4 @@
-package jotaro
+package report
 
 import (
 	"slices"

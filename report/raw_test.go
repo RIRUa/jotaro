@@ -1,4 +1,4 @@
-package jotaro
+package report
 
 import (
 	"bytes"
@@ -33,7 +33,7 @@ func rawFixture() *record.Raw {
 	}
 }
 
-func TestReportFromRaw(t *testing.T) {
+func TestFromRaw(t *testing.T) {
 	raw := rawFixture()
 	var buf bytes.Buffer
 	if err := record.WriteRaw(&buf, raw); err != nil {
@@ -44,17 +44,17 @@ func TestReportFromRaw(t *testing.T) {
 		t.Fatal(err)
 	}
 	// 書き出して読み戻した生データから集計しても、元の生データから集計した結果と変わらない。
-	if direct, again := ReportFromRaw(raw), ReportFromRaw(got); !reflect.DeepEqual(direct, again) {
+	if direct, again := FromRaw(raw), FromRaw(got); !reflect.DeepEqual(direct, again) {
 		t.Errorf("生データから集計し直すと変わった:\n got %+v\nwant %+v", again, direct)
 	}
-	rep := ReportFromRaw(got)
+	rep := FromRaw(got)
 	if !rep.Open || rep.Dropped != 2 || rep.Elapsed != 3*time.Second || rep.Requests.Count != 2 || len(rep.Health) != 2 {
 		t.Errorf("rep = %+v", rep)
 	}
 }
 
 // meta が無い生データは、実行時間を記録から求める。
-func TestReportFromRawWithoutMeta(t *testing.T) {
+func TestFromRawWithoutMeta(t *testing.T) {
 	const in = `{"type":"iteration","scenario":"s","start":"2026-01-01T00:00:00Z","duration_ns":1000000}
 {"type":"request","scenario":"s","step":"a","start":"2026-01-01T00:00:00Z","latency_ns":2000000,"code":200}
 `
@@ -62,7 +62,7 @@ func TestReportFromRawWithoutMeta(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if rep := ReportFromRaw(raw); rep.Elapsed != 2*time.Millisecond || rep.Requests.Status["2xx"] != 1 {
+	if rep := FromRaw(raw); rep.Elapsed != 2*time.Millisecond || rep.Requests.Status["2xx"] != 1 {
 		t.Errorf("実行時間は記録から求めるはず: %+v", rep.Elapsed)
 	}
 }

@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/RIRUa/jotaro"
+	"github.com/RIRUa/jotaro/report"
 )
 
 type item struct {
@@ -81,7 +82,7 @@ func main() {
 	rawOut := flag.String("raw", "", "生データ（JSON Lines）の書き出し先。空なら出さない")
 	flag.Parse()
 
-	f, err := jotaro.ParseFormat(*format)
+	f, err := report.ParseFormat(*format)
 	if err != nil {
 		log.Fatal(err)
 	}

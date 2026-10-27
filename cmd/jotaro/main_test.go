@@ -8,14 +8,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/RIRUa/jotaro"
 	"github.com/RIRUa/jotaro/record"
+	"github.com/RIRUa/jotaro/report"
 )
 
 // writeSample は小さな結果を JSON にして path に書く。
 func writeSample(t *testing.T, path string) {
 	t.Helper()
-	rep := jotaro.BuildReport(
+	rep := report.BuildReport(
 		[]record.Record{{Scenario: "checkout", Step: "login", Code: 200, Latency: 12 * time.Millisecond}},
 		[]record.StepRecord{{Scenario: "checkout", Step: "login", Duration: 15 * time.Millisecond}},
 		[]record.IterationRecord{{Scenario: "checkout", Duration: 20 * time.Millisecond}},
@@ -103,7 +103,7 @@ func TestMerge(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer f.Close()
-	rep, err := jotaro.ReadJSON(f)
+	rep, err := report.ReadJSON(f)
 	if err != nil {
 		t.Fatalf("結合結果が JSON として読めない: %v", err)
 	}

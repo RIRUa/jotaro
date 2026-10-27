@@ -3,6 +3,7 @@ package jotaro
 import (
 	"bytes"
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/RIRUa/jotaro/record"
+	"github.com/RIRUa/jotaro/report"
 )
 
 func TestRunValidate(t *testing.T) {
@@ -164,6 +166,10 @@ func TestRunStopsOnParentCancel(t *testing.T) {
 	}
 }
 
+type failWriter struct{}
+
+func (failWriter) Write([]byte) (int, error) { return 0, errors.New("disk full") }
+
 func TestRunWritesRaw(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(`{}`))
@@ -189,7 +195,7 @@ func TestRunWritesRaw(t *testing.T) {
 		t.Fatalf("リクエスト数: raw = %d, rep = %d", len(raw.Requests), rep.Requests.Count)
 	}
 	// 生データから集計し直した結果が、Run の結果と一致する。
-	if again := ReportFromRaw(raw); !reflect.DeepEqual(again, rep) {
+	if again := report.FromRaw(raw); !reflect.DeepEqual(again, rep) {
 		t.Errorf("再集計の結果が Run の結果と違う:\n got %+v\nwant %+v", again, rep)
 	}
 }

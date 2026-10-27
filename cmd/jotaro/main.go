@@ -14,8 +14,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/RIRUa/jotaro"
 	"github.com/RIRUa/jotaro/record"
+	"github.com/RIRUa/jotaro/report"
 )
 
 const usage = `usage: jotaro <command> [flags]
@@ -73,7 +73,7 @@ func runReport(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return 2
 	}
 
-	f, err := jotaro.ParseFormat(*format)
+	f, err := report.ParseFormat(*format)
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 2
@@ -89,7 +89,7 @@ func runReport(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 }
 
 // emit はレポートを out（空なら stdout）に書き出し、終了コードを返す。
-func emit(rep *jotaro.Report, f jotaro.Format, out string, stdout, stderr io.Writer) int {
+func emit(rep *report.Report, f report.Format, out string, stdout, stderr io.Writer) int {
 	if out == "" {
 		if err := rep.Write(stdout, f); err != nil {
 			fmt.Fprintln(stderr, "jotaro:", err)
@@ -125,13 +125,13 @@ func runMerge(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return 2
 	}
 
-	f, err := jotaro.ParseFormat(*format)
+	f, err := report.ParseFormat(*format)
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 2
 	}
 
-	reps := make([]*jotaro.Report, 0, fs.NArg())
+	reps := make([]*report.Report, 0, fs.NArg())
 	for _, path := range fs.Args() {
 		rep, err := readReport(path, *raw, stdin)
 		if err != nil {
@@ -140,7 +140,7 @@ func runMerge(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		}
 		reps = append(reps, rep)
 	}
-	merged, err := jotaro.MergeReports(reps...)
+	merged, err := report.MergeReports(reps...)
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
@@ -149,12 +149,12 @@ func runMerge(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 }
 
 // thresholdFlags は -t を繰り返し指定できるようにする。
-type thresholdFlags []jotaro.Threshold
+type thresholdFlags []report.Threshold
 
 func (t *thresholdFlags) String() string { return "" }
 
 func (t *thresholdFlags) Set(s string) error {
-	th, err := jotaro.ParseThreshold(s)
+	th, err := report.ParseThreshold(s)
 	if err != nil {
 		return err
 	}
@@ -206,7 +206,7 @@ func errMessage(err error) string {
 const rawUsage = "入力を JSON Lines の生データとして読み、集計し直す"
 
 // readReport は path（"-" なら stdin）から結果を読む。raw なら生データを集計する。
-func readReport(path string, raw bool, stdin io.Reader) (*jotaro.Report, error) {
+func readReport(path string, raw bool, stdin io.Reader) (*report.Report, error) {
 	in := stdin
 	if path != "-" {
 		file, err := os.Open(path)
@@ -221,13 +221,13 @@ func readReport(path string, raw bool, stdin io.Reader) (*jotaro.Report, error) 
 		if err != nil {
 			return nil, err
 		}
-		return jotaro.ReportFromRaw(r), nil
+		return report.FromRaw(r), nil
 	}
-	return jotaro.ReadJSON(in)
+	return report.ReadJSON(in)
 }
 
 // writeFile は書き込みに失敗したとき、途中まで書かれたファイルを消す。
-func writeFile(path string, rep *jotaro.Report, f jotaro.Format) error {
+func writeFile(path string, rep *report.Report, f report.Format) error {
 	file, err := os.Create(path)
 	if err != nil {
 		return err
