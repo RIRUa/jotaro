@@ -1,3 +1,7 @@
+// Package report は、負荷試験の結果（Report）の集計と出力。
+//
+// 記録（record.Record など）から集計し（BuildReport / FromRaw）、テキスト・JSON・HTML に書き出し（Write）、
+// 複数の結果を結合し（MergeReports）、しきい値で判定する（Threshold / Report.Check）。
 package report
 
 import (
