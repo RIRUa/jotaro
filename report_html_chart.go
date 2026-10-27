@@ -124,6 +124,28 @@ func connCharts(pts []SeriesPoint, build func(title string, names []string, vali
 		}))
 }
 
+// healthCharts は負荷生成側のゴルーチン数と CPU のグラフ。記録が無ければ nil。
+func healthCharts(pts []HealthPoint) []htmlChart {
+	if len(pts) == 0 {
+		return nil
+	}
+	n := pts[len(pts)-1].Second + 1
+
+	goroutines := make([]seriesCol, 0, len(pts))
+	var cpu []seriesCol
+	for _, p := range pts {
+		goroutines = append(goroutines, seriesCol{p.Second, []float64{float64(p.Goroutines)}})
+		if p.CPU >= 0 {
+			cpu = append(cpu, seriesCol{p.Second, []float64{p.CPU * 100}})
+		}
+	}
+	charts := []htmlChart{lineChart("load generator goroutines", []string{"goroutines"}, n, goroutines)}
+	if len(cpu) > 0 {
+		charts = append(charts, lineChart("load generator CPU (% of GOMAXPROCS)", []string{"cpu"}, n, cpu))
+	}
+	return charts
+}
+
 // seriesCol は 1 秒分の、系列ごとの値。値が無い系列は NaN。
 type seriesCol struct {
 	sec  int

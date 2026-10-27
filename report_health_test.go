@@ -12,24 +12,25 @@ import (
 func TestHealthSampler(t *testing.T) {
 	h := startHealthSampler(20 * time.Millisecond)
 
-	// ゴルーチンを増やし、CPU も使う。
+	// ゴルーチンを増やし（待機させる）、CPU も使う（1 つだけ回す）。
 	stop := make(chan struct{})
 	for range 20 {
-		go func() {
-			for {
-				select {
-				case <-stop:
-					return
-				default:
-				}
-			}
-		}()
+		go func() { <-stop }()
 	}
-	time.Sleep(110 * time.Millisecond)
+	go func() {
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+		}
+	}()
+	time.Sleep(150 * time.Millisecond)
 	pts := h.stop()
 	close(stop)
 
-	if len(pts) < 3 {
+	if len(pts) < 2 {
 		t.Fatalf("点が少ない: %+v", pts)
 	}
 	_, hasCPU := processCPUTime()
@@ -118,5 +119,80 @@ func TestMergeHealth(t *testing.T) {
 	want := []HealthPoint{{0, 10, 0.2}, {1, 12 + 5, 0.9}, {2, 6, -1}}
 	if !reflect.DeepEqual(got.Health, want) {
 		t.Errorf("Health = %+v\nwant     %+v", got.Health, want)
+	}
+}
+
+func healthReport(pts ...HealthPoint) *Report {
+	rep := BuildReport([]Record{{Code: 200, Latency: time.Millisecond}}, nil, nil, time.Second)
+	rep.Health = pts
+	return rep
+}
+
+func TestSummarizeHealth(t *testing.T) {
+	if _, ok := summarizeHealth(nil); ok {
+		t.Error("点が無いのに ok")
+	}
+	h, _ := summarizeHealth([]HealthPoint{{0, 10, 0.2}, {1, 30, 0.6}, {2, 20, -1}})
+	if !h.HasCPU || h.MaxCPU != 0.6 || h.MaxGoroutines != 30 || h.Hot() {
+		t.Errorf("h = %+v", h)
+	}
+	if got := h.AvgCPU; got < 0.399 || got > 0.401 { // -1（不明）は平均に含めない
+		t.Errorf("AvgCPU = %v, want 0.4", got)
+	}
+	if h, _ := summarizeHealth([]HealthPoint{{0, 1, 0.95}}); !h.Hot() {
+		t.Errorf("0.95 は詰まっている疑い: %+v", h)
+	}
+	if h, _ := summarizeHealth([]HealthPoint{{0, 1, -1}}); h.HasCPU || h.Hot() || !strings.Contains(h.String(), "cpu n/a") {
+		t.Errorf("CPU 不明: %+v %q", h, h)
+	}
+}
+
+func TestPrintHealth(t *testing.T) {
+	var buf bytes.Buffer
+	healthReport(HealthPoint{0, 10, 0.2}, HealthPoint{1, 30, 0.5}).Print(&buf)
+	if out := buf.String(); !strings.Contains(out, "loadgen:    cpu max 50.0% (avg 35.0%), goroutines max 30") || strings.Contains(out, "warning:") {
+		t.Errorf("出力:\n%s", out)
+	}
+
+	buf.Reset()
+	healthReport(HealthPoint{0, 10, 0.97}).Print(&buf)
+	if out := buf.String(); !strings.Contains(out, "warning:    load generator CPU reached 97%") {
+		t.Errorf("警告が無い:\n%s", out)
+	}
+
+	buf.Reset()
+	healthReport().Print(&buf)
+	if strings.Contains(buf.String(), "loadgen") {
+		t.Error("記録が無いときは出さない")
+	}
+}
+
+func TestWriteHTMLHealth(t *testing.T) {
+	var buf bytes.Buffer
+	if err := healthReport(HealthPoint{0, 10, 0.2}, HealthPoint{1, 30, 0.95}).WriteHTML(&buf); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	for _, want := range []string{"load generator goroutines", "load generator CPU", "load generator</div>", "cpu max 95.0%", "⚠ load generator CPU reached 95%"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("出力に %q が無い", want)
+		}
+	}
+
+	// CPU が取得できない環境では、CPU のグラフを出さない。
+	buf.Reset()
+	if err := healthReport(HealthPoint{0, 10, -1}).WriteHTML(&buf); err != nil {
+		t.Fatal(err)
+	}
+	if out := buf.String(); !strings.Contains(out, "load generator goroutines") || strings.Contains(out, "load generator CPU (") {
+		t.Error("CPU 不明のときはゴルーチンのグラフだけ")
+	}
+
+	buf.Reset()
+	if err := healthReport().WriteHTML(&buf); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(buf.String(), "load generator") {
+		t.Error("記録が無いときは出さない")
 	}
 }

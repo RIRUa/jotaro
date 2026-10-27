@@ -29,6 +29,12 @@ func (r *Report) Print(w io.Writer) {
 		fmt.Fprintf(w, "tls:        %s\n", fmtPercentiles(q.TLS))
 	}
 	fmt.Fprintf(w, "bytes:      in %s, out %s\n", fmtBytes(r.Requests.BytesIn), fmtBytes(r.Requests.BytesOut))
+	if h, ok := summarizeHealth(r.Health); ok {
+		fmt.Fprintf(w, "loadgen:    %s\n", h)
+		if h.Hot() {
+			fmt.Fprintf(w, "warning:    %s\n", h.warning())
+		}
+	}
 
 	for _, sc := range r.Scenarios {
 		fmt.Fprintf(w, "\n=== Scenario: %s ===\n", sc.Name)

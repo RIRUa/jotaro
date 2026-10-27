@@ -72,6 +72,8 @@ type htmlView struct {
 	Corrected []htmlBar // Open のときだけ
 	TTFB      []htmlBar
 	Conns     string // 接続の記録があるときだけ
+	LoadGen   string // 負荷生成側の健全性。記録があるときだけ
+	LoadWarn  string // 負荷生成側が詰まっている疑いがあるときの注意書き
 	DNS       []htmlBar
 	Connect   []htmlBar
 	TLS       []htmlBar
@@ -108,6 +110,13 @@ func (r *Report) toHTMLView() htmlView {
 	if q := r.Requests; q.NewConns+q.ReusedConns > 0 {
 		v.Conns = fmt.Sprintf("%.1f%% reused (new %d / reused %d)", q.ReuseRate()*100, q.NewConns, q.ReusedConns)
 	}
+	if h, ok := summarizeHealth(r.Health); ok {
+		v.LoadGen = h.String()
+		if h.Hot() {
+			v.LoadWarn = h.warning()
+		}
+	}
+	v.Charts = append(v.Charts, healthCharts(r.Health)...)
 	if r.Open {
 		v.Model = "open (Rate)"
 		v.Corrected = latencyBars(r.Requests.Corrected)
