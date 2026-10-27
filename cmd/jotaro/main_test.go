@@ -86,3 +86,49 @@ func TestReportErrors(t *testing.T) {
 		}
 	}
 }
+
+func TestMerge(t *testing.T) {
+	dir := t.TempDir()
+	a, b, out := filepath.Join(dir, "a.json"), filepath.Join(dir, "b.json"), filepath.Join(dir, "merged.json")
+	writeSample(t, a)
+	writeSample(t, b)
+
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"merge", "-o", out, a, b}, nil, &stdout, &stderr); code != 0 {
+		t.Fatalf("code = %d, stderr = %s", code, stderr.String())
+	}
+	f, err := os.Open(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	rep, err := jotaro.ReadJSON(f)
+	if err != nil {
+		t.Fatalf("結合結果が JSON として読めない: %v", err)
+	}
+	if rep.Requests.Count != 2 || rep.Scenarios[0].Iterations.Count != 2 {
+		t.Fatalf("2 件分が合計されていない: %+v", rep.Requests)
+	}
+}
+
+func TestMergeErrors(t *testing.T) {
+	dir := t.TempDir()
+	ok := filepath.Join(dir, "ok.json")
+	writeSample(t, ok)
+
+	tests := []struct {
+		name string
+		args []string
+		want int
+	}{
+		{"入力なし", []string{"merge"}, 2},
+		{"未知の形式", []string{"merge", "-format", "csv", ok}, 2},
+		{"ファイルが無い", []string{"merge", ok, filepath.Join(dir, "none.json")}, 1},
+	}
+	for _, tt := range tests {
+		var stdout, stderr bytes.Buffer
+		if code := run(tt.args, nil, &stdout, &stderr); code != tt.want {
+			t.Errorf("%s: code = %d, want %d (stderr: %s)", tt.name, code, tt.want, stderr.String())
+		}
+	}
+}

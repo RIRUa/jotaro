@@ -1,6 +1,7 @@
 // jotaro は結果ファイルを扱う CLI。
 //
 //	jotaro report [-format html|text|json] [-o 出力先] <result.json | ->
+//	jotaro merge  [-format html|text|json] [-o 出力先] <result.json>...
 package main
 
 import (
@@ -16,6 +17,7 @@ const usage = `usage: jotaro <command> [flags]
 
 commands:
   report   保存した JSON の結果から、レポートを生成する
+  merge    複数の JSON の結果を 1 つにまとめる
 `
 
 func main() {
@@ -31,6 +33,8 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	switch args[0] {
 	case "report":
 		return runReport(args[1:], stdin, stdout, stderr)
+	case "merge":
+		return runMerge(args[1:], stdout, stderr)
 	case "-h", "-help", "--help", "help":
 		fmt.Fprint(stdout, usage)
 		return 0
@@ -82,18 +86,75 @@ func runReport(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	if *out == "" {
+	return emit(rep, f, *out, stdout, stderr)
+}
+
+// emit はレポートを out（空なら stdout）に書き出し、終了コードを返す。
+func emit(rep *jotaro.Report, f jotaro.Format, out string, stdout, stderr io.Writer) int {
+	if out == "" {
 		if err := rep.Write(stdout, f); err != nil {
 			fmt.Fprintln(stderr, "jotaro:", err)
 			return 1
 		}
 		return 0
 	}
-	if err := writeFile(*out, rep, f); err != nil {
+	if err := writeFile(out, rep, f); err != nil {
 		fmt.Fprintln(stderr, "jotaro:", err)
 		return 1
 	}
 	return 0
+}
+
+func runMerge(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("merge", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	fs.Usage = func() {
+		fmt.Fprintln(stderr, "usage: jotaro merge [-format html|text|json] [-o 出力先] <result.json>...")
+		fs.PrintDefaults()
+	}
+	format := fs.String("format", "json", "出力の形式 (text, json, html)")
+	out := fs.String("o", "", "出力先のファイル。空なら標準出力")
+	if err := fs.Parse(args); err != nil {
+		if err == flag.ErrHelp {
+			return 0
+		}
+		return 2
+	}
+	if fs.NArg() < 1 {
+		fs.Usage()
+		return 2
+	}
+
+	f, err := jotaro.ParseFormat(*format)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 2
+	}
+
+	reps := make([]*jotaro.Report, 0, fs.NArg())
+	for _, path := range fs.Args() {
+		rep, err := readReport(path)
+		if err != nil {
+			fmt.Fprintf(stderr, "jotaro: %s: %v\n", path, err)
+			return 1
+		}
+		reps = append(reps, rep)
+	}
+	merged, err := jotaro.MergeReports(reps...)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	return emit(merged, f, *out, stdout, stderr)
+}
+
+func readReport(path string) (*jotaro.Report, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	return jotaro.ReadJSON(file)
 }
 
 // writeFile は書き込みに失敗したとき、途中まで書かれたファイルを消す。

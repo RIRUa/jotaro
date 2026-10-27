@@ -109,6 +109,29 @@ if err := rep.WriteHTML(f); err != nil {
 - 表示用の値は `Print` と同じ書式（`fmtDur`）。ナノ秒の無損失な値は JSON を使う。
 - サンプル: `go run ./examples/checkout -format html -o report.html`（`-rate 30` で `Rate` モデル）。
 
+### レポートの結合（実装済み）
+
+負荷生成機を分けて同時に実行した結果などを、1 つにまとめる。
+
+```
+jotaro merge -o merged.json a.json b.json c.json
+jotaro merge -format html -o report.html a.json b.json
+```
+
+ライブラリでは `jotaro.MergeReports(reps ...*Report) (*Report, error)`（`report_merge.go`）。`-format` の既定は `json`（結合結果を再び入力にできる）。
+
+| 項目 | 結合の仕方 |
+|---|---|
+| 件数・バイト数・`Dropped`・ステータス・エラー | 合計 |
+| `Elapsed` | **最大値**（同時に実行した前提。RPS = 合計件数 / `Elapsed`） |
+| `Min` / `Max` | 正確（最小 / 最大） |
+| `Mean` / `P50`〜`P99` | **件数で重み付けした平均（近似）** |
+| シナリオ・ステップ | 名前で突き合わせ。並びは最初に現れた順 |
+| `Open` が揃っていない | エラー（モデルが違う結果は混ぜられない） |
+
+- 集計済みの値からは元の分布を復元できないため、パーセンタイルは厳密ではない。厳密にしたい場合は、生データ（JSON Lines、未実装）から再集計する。
+- 順番に実行した結果（時間が連続する）を結合する用途は想定していない。`Elapsed` が最大値になるため、RPS が実際より高く出る。
+
 ## 2. 未実装（提案）
 
 > 以下は提案であり、**まだ決まっていない**。JSON 出力の項目は 1 章の実装を正とする。`DESIGN.md` の「未決」にある vegeta 互換の程度の判断が前提になる。
