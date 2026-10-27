@@ -20,6 +20,8 @@ type User struct {
 	col      *Collector
 
 	think time.Duration
+	// scheduled は予定到着時刻。最初のリクエストが使い切ると 0 に戻る。
+	scheduled time.Time
 }
 
 // Step はシナリオの 1 区間を実行し、その所要時間と成否を記録する。
@@ -37,7 +39,8 @@ func (u *User) Step(name string, fn func(s *Step) error) error {
 				UserID:    u.ID,
 				Iteration: u.Iteration,
 			},
-			sink: u.col.AddRequest,
+			sched: &u.scheduled,
+			sink:  u.col.AddRequest,
 		},
 	}
 

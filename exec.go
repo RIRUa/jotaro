@@ -23,8 +23,11 @@ type executor struct {
 	baseURL string
 
 	// tag は Scenario/Step/UserID/Iteration などを埋めた Record のひな形。
-	tag  Record
-	sink func(Record)
+	tag Record
+	// sched は予定到着時刻の置き場所。最初のリクエストが Scheduled に使って 0 に戻す。
+	// ステップは順に実行されるので、ロックはしない。
+	sched *time.Time
+	sink  func(Record)
 }
 
 func (e *executor) resolve(path string) string {
@@ -49,7 +52,11 @@ func (e *executor) do(r *Request) *Response {
 	rec.BytesOut = int64(len(r.Spec.Body))
 
 	rec.Start = time.Now()
-	if rec.Scheduled.IsZero() {
+	switch {
+	case e.sched != nil && !e.sched.IsZero():
+		rec.Scheduled = *e.sched
+		*e.sched = time.Time{}
+	case rec.Scheduled.IsZero():
 		rec.Scheduled = rec.Start
 	}
 	tr := &tracer{start: rec.Start}

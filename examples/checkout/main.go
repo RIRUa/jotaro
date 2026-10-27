@@ -1,12 +1,14 @@
 // checkout は jotaro の使い方を示すサンプル。
 // 自前のモックサーバーを立てて、ログイン → 商品一覧 → 注文 の流れに負荷をかける。
 //
-//	go run ./examples/checkout
+//	go run ./examples/checkout            # 20 ユーザー固定（クローズド）
+//	go run ./examples/checkout -rate 50   # 毎秒 50 シナリオ（オープン）
 package main
 
 import (
 	"context"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"log"
 	"math/rand/v2"
@@ -25,12 +27,21 @@ type item struct {
 	Price int `json:"price"`
 }
 
+// accounts はユーザーごとに別のアカウントを配る。
+// CSV から読むなら jotaro.LoadCSV(f) の結果をそのまま渡せる。
+var accounts = jotaro.NewFeeder([]map[string]string{
+	{"user": "alice"}, {"user": "bob"}, {"user": "carol"},
+}, jotaro.Circular)
+
 var checkout = jotaro.NewScenario("checkout", func(ctx context.Context, u *jotaro.User) error {
 	var login struct {
 		Token string `json:"token"`
 	}
 	if err := u.Step("login", func(s *jotaro.Step) error {
-		creds := map[string]string{"user": fmt.Sprintf("user-%d", u.ID)}
+		creds, ok := accounts.Next()
+		if !ok {
+			return fmt.Errorf("アカウントが足りない")
+		}
 		if err := s.Post("/login").JSON(creds).Do().Decode(&login); err != nil {
 			return err
 		}
@@ -57,18 +68,26 @@ var checkout = jotaro.NewScenario("checkout", func(ctx context.Context, u *jotar
 })
 
 func main() {
+	rate := flag.Int("rate", 0, "毎秒のシナリオ開始数。0 なら Users モデル")
+	flag.Parse()
+
 	srv := httptest.NewServer(mockShop())
 	defer srv.Close()
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
-	rep, err := jotaro.Run(ctx, jotaro.Plan{
+	plan := jotaro.Plan{
 		Scenario: checkout,
 		BaseURL:  srv.URL,
-		Users:    20,
 		Duration: 3 * time.Second,
-	})
+	}
+	if *rate > 0 {
+		plan.Arrival = jotaro.Rate(*rate, time.Second)
+	} else {
+		plan.Users = 20
+	}
+	rep, err := jotaro.Run(ctx, plan)
 	if err != nil {
 		log.Fatal(err)
 	}
