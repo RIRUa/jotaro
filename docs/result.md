@@ -86,7 +86,9 @@ if err := rep.WriteJSON(f); err != nil {
 ```
 
 - 時間はすべて**ナノ秒の整数**（フィールド名は `_ns` で終わる）。
-- トップレベルに `version`（現在 `1`、定数 `JSONVersion`）を持つ。互換を壊す変更のたびに上げる。
+- トップレベルに `version`（現在 `2`、定数 `JSONVersion`）を持つ。互換を壊す変更のたびに上げる。`ReadJSON` は 1 以降を読める。
+  - `2`: `started_at`（実行の開始時刻、RFC 3339）と、各 `latency` の `buckets`（ヒストグラム）を追加
+  - `1`: 初版
 - 内部の `Report` とは別の出力用の型を持つので、`Report` を変えても JSON の形は変わらない。
 - 空の集合は `null` ではなく `[]` / `{}` で出す（読む側が分岐しなくて済む）。
 - 追加で `rps` を出す（`Requests.Count / Elapsed`）。リクエストの集計は `latency` / `ttfb` / `corrected` の 3 つを持つ。
@@ -108,6 +110,32 @@ if err := rep.WriteHTML(f); err != nil {
 - 内容: サマリー、ステータス・エラーの内訳、レイテンシ（p50〜max の棒）、`corrected`（`Rate` のときのみ）、TTFB、シナリオ別のイテレーション時間とステップ別の表。
 - 表示用の値は `Print` と同じ書式（`fmtDur`）。ナノ秒の無損失な値は JSON を使う。
 - サンプル: `go run ./examples/checkout -format html -o report.html`（`-rate 30` で `Rate` モデル）。
+
+### レポートの結合（実装済み）
+
+負荷生成機を分けて同時に実行した結果などを、1 つにまとめる。
+
+```
+jotaro merge -o merged.json a.json b.json c.json
+jotaro merge -format html -o report.html a.json b.json
+```
+
+ライブラリでは `jotaro.MergeReports(reps ...*Report) (*Report, error)`（`report_merge.go`）。`-format` の既定は `json`（結合結果を再び入力にできる）。
+
+| 項目 | 結合の仕方 |
+|---|---|
+| 件数・バイト数・`Dropped`・ステータス・エラー | 合計 |
+| `StartedAt` / `Elapsed` | 最初の開始〜最後の終了（`StartedAt + Elapsed` の最大）。同時でも順次でも RPS が正しくなる |
+| `Min` / `Max` / `Mean` | 正確 |
+| `P50`〜`P99` | ヒストグラムを足して求め直す（**相対誤差 1% 以内**） |
+| シナリオ・ステップ | 名前で突き合わせ。並びは最初に現れた順 |
+| `Open` が揃っていない | エラー（モデルが違う結果は混ぜられない） |
+
+- **ヒストグラム**: 各 `latency` に対数バケット（DDSketch 方式、相対誤差 1%）を持たせた（JSON の `buckets`: バケット番号 → 件数）。バケットは足し算で結合できるので、何台分でも順序に関係なく同じ結果になる。1 つのレポートの `P50`〜`P99` は従来どおり nearest-rank の正確な値で、結合したときだけ近似になる。
+- **サイズ**: バケットの数は分布の広がりで決まる（件数には比例しない）。10 万件・裾の重い分布で 1 つの `latency` あたり数百バケット。
+- **version 1 の JSON との互換**: 読める。`buckets` と `started_at` が無いので、それが混じる結合では次のフォールバックになる。
+  - `P50`〜`P99` は件数で重み付けした平均（誤差が大きい）。
+  - `Elapsed` は最大値（同時に実行した前提）。
 
 ## 2. 未実装（提案）
 

@@ -16,6 +16,9 @@ type Latency struct {
 	P95   time.Duration
 	P99   time.Duration
 	Max   time.Duration
+
+	// hist は分布のヒストグラム。MergeReports がパーセンタイルを求め直すために使う。
+	hist histogram
 }
 
 func newLatency(ds []time.Duration) Latency {
@@ -38,6 +41,7 @@ func newLatency(ds []time.Duration) Latency {
 		P95:   percentile(s, 95),
 		P99:   percentile(s, 99),
 		Max:   s[len(s)-1],
+		hist:  newHistogram(s),
 	}
 }
 
@@ -96,6 +100,8 @@ type Report struct {
 	// Dropped は、同時実行数の上限のために実行しなかった到着の数。
 	Dropped int
 
+	// StartedAt は実行を始めた時刻 (UTC)。不明なら zero。
+	StartedAt time.Time
 	Elapsed   time.Duration
 	Requests  RequestStats
 	Scenarios []ScenarioReport // 最初に実行された順
@@ -119,7 +125,7 @@ func BuildReport(reqs []Record, steps []StepRecord, iters []IterationRecord, ela
 	if elapsed == 0 {
 		elapsed = observedSpan(reqs, iters)
 	}
-	rep := &Report{Elapsed: elapsed, Requests: requestStats(reqs)}
+	rep := &Report{StartedAt: observedStart(reqs, steps, iters), Elapsed: elapsed, Requests: requestStats(reqs)}
 
 	type stepKey struct{ scenario, step string }
 	var (
@@ -256,4 +262,32 @@ func observedSpan(reqs []Record, iters []IterationRecord) time.Duration {
 		return 0
 	}
 	return last.Sub(first)
+}
+
+// observedStart は記録の中で一番早い開始時刻を返す。記録が無ければ zero。
+func observedStart(reqs []Record, steps []StepRecord, iters []IterationRecord) time.Time {
+	var first time.Time
+	extend := func(t time.Time) {
+		if !t.IsZero() && (first.IsZero() || t.Before(first)) {
+			first = t
+		}
+	}
+	for _, r := range reqs {
+		extend(r.Start)
+	}
+	for _, st := range steps {
+		extend(st.Start)
+	}
+	for _, it := range iters {
+		extend(it.Start)
+	}
+	return wallUTC(first)
+}
+
+// wallUTC は単調時計とタイムゾーンを落とす。JSON を往復しても同じ値になる。
+func wallUTC(t time.Time) time.Time {
+	if t.IsZero() {
+		return time.Time{}
+	}
+	return t.Round(0).UTC()
 }
