@@ -154,6 +154,7 @@ Feeder はシナリオの外で作り、クロージャで共有する（`User` 
 | `run.go` | `Plan` / `Run`（`Users` / `Arrival` の両モデル） |
 | `arrival.go` | `Arrival` / `Rate` / `Ramp` / `Stages` |
 | `feeder.go` | `Feeder` / `LoadCSV` |
+| `raw_json.go` | `Raw` / `WriteRaw` / `ReadRaw`（生データの JSON Lines。`Plan.Raw` で `Run` の終了時に書く） |
 | `report_series.go` `report_health.go` | 時系列（1 秒ごと）と、負荷生成側の健全性（ゴルーチン数・CPU）のサンプリング |
 | `threshold.go` | `Threshold` / `ParseThreshold` / `Report.Check`（しきい値判定。[`docs/result.md`](docs/result.md) 5 章） |
 
