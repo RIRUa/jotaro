@@ -137,3 +137,48 @@ func TestMergeSeriesConns(t *testing.T) {
 		t.Errorf("got[1] = %+v", got[1])
 	}
 }
+
+func TestBuildSeriesConnPhases(t *testing.T) {
+	t0 := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	ms := time.Millisecond
+	reqs := []Record{
+		{Start: t0, Latency: 50 * ms, Conn: ConnNew, DNS: 5 * ms, Connect: 10 * ms, TLS: 20 * ms},
+		{Start: t0.Add(100 * ms), Latency: 10 * ms, Conn: ConnReused},                              // 再利用は 0
+		{Start: t0.Add(200 * ms), Latency: 40 * ms, Conn: ConnNew, DNS: 15 * ms, Connect: 30 * ms}, // http は TLS なし
+		{Start: t0.Add(1100 * ms), Latency: 10 * ms, Conn: ConnReused},
+	}
+	rep := BuildReport(reqs, nil, nil, 0)
+
+	s0, s1 := rep.Series[0], rep.Series[1]
+	if s0.DNS.Count != 2 || s0.DNS.Max != 15*ms || s0.DNS.Min != 5*ms {
+		t.Errorf("s0.DNS = %+v", s0.DNS)
+	}
+	if s0.Connect.Count != 2 || s0.Connect.Max != 30*ms {
+		t.Errorf("s0.Connect = %+v", s0.Connect)
+	}
+	if s0.TLS.Count != 1 || s0.TLS.Max != 20*ms {
+		t.Errorf("s0.TLS = %+v", s0.TLS)
+	}
+	if s1.DNS.Count != 0 || s1.Connect.Count != 0 || s1.TLS.Count != 0 {
+		t.Errorf("再利用だけの秒は空のはず: %+v", s1)
+	}
+}
+
+func TestMergeSeriesConnPhases(t *testing.T) {
+	ms := time.Millisecond
+	pt := func(sec int, d time.Duration) SeriesPoint {
+		return SeriesPoint{Second: sec, DNS: newLatency([]time.Duration{d}), Connect: newLatency([]time.Duration{2 * d}), TLS: newLatency([]time.Duration{3 * d})}
+	}
+	got := mergeSeries([]SeriesPoint{pt(0, 10*ms)}, []SeriesPoint{pt(0, 30*ms)}, 0)
+
+	if len(got) != 1 {
+		t.Fatalf("len = %d: %+v", len(got), got)
+	}
+	p := got[0]
+	if p.DNS.Count != 2 || p.DNS.Min != 10*ms || p.DNS.Max != 30*ms {
+		t.Errorf("DNS = %+v", p.DNS)
+	}
+	if p.Connect.Count != 2 || p.Connect.Max != 60*ms || p.TLS.Count != 2 || p.TLS.Max != 90*ms {
+		t.Errorf("Connect = %+v, TLS = %+v", p.Connect, p.TLS)
+	}
+}
