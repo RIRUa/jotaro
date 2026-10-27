@@ -1,4 +1,5 @@
-package jotaro
+// Package record は、負荷試験の生データ（リクエスト・ステップ・イテレーションの記録）と、その入出力。
+package record
 
 import (
 	"sync"
@@ -151,4 +152,17 @@ func (c *Collector) Snapshot() (requests []Record, steps []StepRecord, iteration
 	steps = append(steps, c.steps...)
 	iterations = append(iterations, c.iterations...)
 	return requests, steps, iterations
+}
+
+// HealthPoint は負荷生成側（jotaro を動かしているプロセス）の、1 秒ごとの健全性。
+// CPU が上限に近いときは、生成側が詰まって測定値が実際より悪く出ている疑いがある。
+type HealthPoint struct {
+	// Second は実行の開始からの経過秒（0 始まり）。区間は [Second, Second+1) 秒。
+	Second int
+	// Goroutines は区間の終わりの時点のゴルーチン数。
+	Goroutines int
+	// CPU は区間の間にプロセスが使った CPU 時間の割合（0〜1）。GOMAXPROCS 個の CPU 全体に対する割合。
+	// 負荷をかける対象を同じプロセスで動かしているときは、その分も含む。
+	// CPU 時間を取得できない環境（Unix 以外）では -1。
+	CPU float64
 }

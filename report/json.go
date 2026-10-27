@@ -1,8 +1,10 @@
-package jotaro
+package report
 
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/RIRUa/jotaro/internal/histogram"
+	"github.com/RIRUa/jotaro/record"
 	"io"
 	"maps"
 	"time"
@@ -210,7 +212,7 @@ func toJSONLatency(l Latency) jsonLatency {
 }
 
 // errCounts は nil でも {} になるよう、空でも必ず map を返す。
-func errCounts(m map[ErrKind]int) map[string]int {
+func errCounts(m map[record.ErrKind]int) map[string]int {
 	out := make(map[string]int, len(m))
 	for k, v := range m {
 		out[string(k)] = v
@@ -222,7 +224,7 @@ func ns(d time.Duration) int64 { return d.Nanoseconds() }
 
 // ReadJSON は WriteJSON が書いた JSON を Report に戻す。
 // version が対応していないとき、または JSON の後ろに別のデータが続くときは error を返す。
-// 後者は、生データ（JSON Lines。WriteRaw の出力）を渡してしまった場合に当たる。
+// 後者は、生データ（JSON Lines。record.WriteRaw の出力）を渡してしまった場合に当たる。
 func ReadJSON(r io.Reader) (*Report, error) {
 	var in jsonReport
 	dec := json.NewDecoder(r)
@@ -230,7 +232,7 @@ func ReadJSON(r io.Reader) (*Report, error) {
 		return nil, fmt.Errorf("jotaro: read report: %w", err)
 	}
 	if _, err := dec.Token(); err != io.EOF {
-		return nil, fmt.Errorf("jotaro: read report: JSON の後ろに別のデータが続いている（生データなら ReadRaw / -raw を使う）")
+		return nil, fmt.Errorf("jotaro: read report: JSON の後ろに別のデータが続いている（生データなら record.ReadRaw / -raw を使う）")
 	}
 	if in.Version < 1 || in.Version > JSONVersion {
 		return nil, fmt.Errorf("jotaro: unsupported report version %d (want 1..%d)", in.Version, JSONVersion)
@@ -286,7 +288,7 @@ func (j jsonReport) toReport() *Report {
 		})
 	}
 	for _, p := range j.Health {
-		rep.Health = append(rep.Health, HealthPoint{Second: p.Second, Goroutines: p.Goroutines, CPU: p.CPU})
+		rep.Health = append(rep.Health, record.HealthPoint{Second: p.Second, Goroutines: p.Goroutines, CPU: p.CPU})
 	}
 	return rep
 }
@@ -327,26 +329,26 @@ func fromJSONLatency(l jsonLatency) Latency {
 	}
 }
 
-func fromErrCounts(m map[string]int) map[ErrKind]int {
+func fromErrCounts(m map[string]int) map[record.ErrKind]int {
 	if len(m) == 0 {
 		return nil
 	}
-	out := make(map[ErrKind]int, len(m))
+	out := make(map[record.ErrKind]int, len(m))
 	for k, v := range m {
-		out[ErrKind(k)] = v
+		out[record.ErrKind(k)] = v
 	}
 	return out
 }
 
 // bucketsOrEmpty は nil でも空の map を返す。
-func bucketsOrEmpty(h histogram) map[int]int {
+func bucketsOrEmpty(h histogram.H) map[int]int {
 	if h == nil {
 		return map[int]int{}
 	}
 	return h
 }
 
-func nilIfEmpty(m map[int]int) histogram {
+func nilIfEmpty(m map[int]int) histogram.H {
 	if len(m) == 0 {
 		return nil
 	}

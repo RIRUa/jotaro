@@ -145,18 +145,25 @@ Feeder はシナリオの外で作り、クロージャで共有する（`User` 
 
 フェーズ 1（MVP）・フェーズ 2（`Rate`）・フェーズ 3（時系列・接続内訳・負荷生成側の健全性）は実装済み。`go run ./examples/checkout` で動作を確認できる。
 
-| ファイル | 内容 |
-|---|---|
-| `record.go` | `Record` / `StepRecord` / `IterationRecord` / `Collector` |
-| `request.go` `response.go` `exec.go` | リクエスト記述とビルダー、`httptrace` つきの実行、エラー分類 |
-| `scenario.go` `user.go` `step.go` | `Scenario` / `User` / `Step`（`Think`、panic の回復を含む） |
-| `report.go` `report_print.go` | 集計と出力 |
-| `run.go` | `Plan` / `Run`（`Users` / `Arrival` の両モデル） |
-| `arrival.go` | `Arrival` / `Rate` / `Ramp` / `Stages` |
-| `feeder.go` | `Feeder` / `LoadCSV` |
-| `raw_json.go` | `Raw` / `WriteRaw` / `ReadRaw`（生データの JSON Lines。`Plan.Raw` で `Run` の終了時に書く） |
-| `report_series.go` `report_health.go` | 時系列（1 秒ごと）と、負荷生成側の健全性（ゴルーチン数・CPU）のサンプリング |
-| `threshold.go` | `Threshold` / `ParseThreshold` / `Report.Check`（しきい値判定。[`docs/result.md`](docs/result.md) 5 章） |
+パッケージは 4 つ。使う人の入口は `jotaro`（負荷をかける側）で、結果を扱う側は `report`、記録は `record` に分けてある。依存は `jotaro` → `report` → `record`（`jotaro` は `record` にも依存する）の一方向で、`internal/histogram` は `report` だけが使う。
+
+| パッケージ | ファイル | 内容 |
+|---|---|---|
+| `jotaro` | `scenario.go` `user.go` `step.go` | `Scenario` / `User` / `Step`（`Think`、panic の回復を含む） |
+| | `request.go` `response.go` `exec.go` | リクエスト記述とビルダー、`httptrace` つきの実行、エラー分類 |
+| | `run.go` | `Plan` / `Run`（`Users` / `Arrival` の両モデル。`Plan.Raw` で生データを書く） |
+| | `arrival.go` | `Arrival` / `Rate` / `Ramp` / `Stages` |
+| | `feeder.go` | `Feeder` / `LoadCSV` |
+| | `health.go` | 負荷生成側の健全性（ゴルーチン数・CPU）を 1 秒ごとにサンプリング |
+| `record` | `record.go` | `Record` / `StepRecord` / `IterationRecord` / `Collector` / `ErrKind` / `ConnKind` / `HealthPoint` |
+| | `raw.go` | `Raw` / `WriteRaw` / `ReadRaw`（生データの JSON Lines） |
+| `report` | `report.go` `series.go` | `Report` / `Latency` と集計、時系列（1 秒ごと） |
+| | `print.go` `json.go` `html.go` `html_chart.go` `write.go` | テキスト・JSON・HTML の出力と、JSON の読み込み |
+| | `merge.go` | `MergeReports` |
+| | `health.go` | 負荷生成側の健全性の要約・結合 |
+| | `threshold.go` | `Threshold` / `ParseThreshold` / `Report.Check`（しきい値判定。[`docs/result.md`](docs/result.md) 5 章） |
+| `internal/histogram` | `histogram.go` | 結合のための対数ヒストグラム |
+| `cmd/jotaro` | `main.go` | CLI（`report` / `merge` / `check`） |
 
 実装中に決めたこと:
 

@@ -1,7 +1,8 @@
-package jotaro
+package record
 
 import (
 	"bytes"
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
@@ -46,25 +47,6 @@ func TestRawRoundTrip(t *testing.T) {
 	}
 }
 
-func TestRawReportMatchesBuildReport(t *testing.T) {
-	raw := sampleRaw()
-	var buf bytes.Buffer
-	if err := WriteRaw(&buf, raw); err != nil {
-		t.Fatal(err)
-	}
-	got, err := ReadRaw(&buf)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if direct, again := raw.Report(), got.Report(); !reflect.DeepEqual(direct, again) {
-		t.Errorf("生データから集計し直すと変わった:\n got %+v\nwant %+v", again, direct)
-	}
-	rep := got.Report()
-	if !rep.Open || rep.Dropped != 2 || rep.Elapsed != 3*time.Second || rep.Requests.Count != 2 || len(rep.Health) != 2 {
-		t.Errorf("rep = %+v", rep)
-	}
-}
-
 func TestWriteRawLines(t *testing.T) {
 	var buf bytes.Buffer
 	if err := WriteRaw(&buf, sampleRaw()); err != nil {
@@ -99,9 +81,6 @@ func TestReadRawLenient(t *testing.T) {
 	if len(raw.Requests) != 1 || len(raw.Iterations) != 1 || raw.Elapsed != 0 || raw.Open {
 		t.Errorf("raw = %+v", raw)
 	}
-	if rep := raw.Report(); rep.Elapsed != 2*time.Millisecond || rep.Requests.Status["2xx"] != 1 {
-		t.Errorf("実行時間は記録から求めるはず: %+v", rep.Elapsed)
-	}
 }
 
 func TestReadRawErrors(t *testing.T) {
@@ -122,6 +101,10 @@ func TestReadRawErrors(t *testing.T) {
 		t.Errorf("err = %v、record 2 を含むはず", err)
 	}
 }
+
+type failWriter struct{}
+
+func (failWriter) Write([]byte) (int, error) { return 0, errors.New("disk full") }
 
 func TestWriteRawError(t *testing.T) {
 	if err := WriteRaw(failWriter{}, sampleRaw()); err == nil {

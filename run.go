@@ -9,6 +9,9 @@ import (
 	"net/http/cookiejar"
 	"sync"
 	"time"
+
+	"github.com/RIRUa/jotaro/record"
+	"github.com/RIRUa/jotaro/report"
 )
 
 const (
@@ -41,10 +44,10 @@ type Plan struct {
 	// Timeout は 1 リクエストあたりの上限。0 なら 30 秒。
 	Timeout time.Duration
 	// Grace は Duration 経過後、実行中のイテレーションの完了を待つ時間。
-	// 超えたものは中断して ErrCanceled として記録する。0 なら 30 秒。
+	// 超えたものは中断して record.ErrCanceled として記録する。0 なら 30 秒。
 	Grace time.Duration
 
-	// Raw が nil でなければ、Run が終わったときに生データを JSON Lines で書き出す（WriteRaw）。
+	// Raw が nil でなければ、Run が終わったときに生データを JSON Lines で書き出す（record.WriteRaw）。
 	// 書き出しに失敗しても、集計した Report は返す（error も同時に返す）。
 	Raw io.Writer
 }
@@ -83,7 +86,7 @@ func (p Plan) maxConcurrency() int {
 //
 // ctx が終わると、実行中のイテレーションも含めてすぐに止まり、
 // そこまでの結果を返す。Report.Elapsed は、全ユーザーが止まるまでの実時間。
-func Run(ctx context.Context, p Plan) (*Report, error) {
+func Run(ctx context.Context, p Plan) (*report.Report, error) {
 	if err := p.validate(); err != nil {
 		return nil, err
 	}
@@ -100,14 +103,14 @@ func Run(ctx context.Context, p Plan) (*Report, error) {
 	stopCtx, stop := context.WithTimeout(ctx, p.Duration)
 	defer stop()
 	// 期限切れではなくキャンセルで止める。DeadlineExceeded だと、
-	// リクエスト自体のタイムアウト(ErrTimeout)と区別できなくなる。
+	// リクエスト自体のタイムアウト(record.ErrTimeout)と区別できなくなる。
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	defer time.AfterFunc(p.Duration+grace, cancel).Stop()
 
-	r := &runner{p: p, tr: tr, timeout: timeout, col: NewCollector(), stopCtx: stopCtx, runCtx: runCtx}
+	r := &runner{p: p, tr: tr, timeout: timeout, col: record.NewCollector(), stopCtx: stopCtx, runCtx: runCtx}
 	start := time.Now()
-	health := startHealthSampler(SeriesInterval)
+	health := startHealthSampler(report.SeriesInterval)
 	if p.Arrival != nil {
 		r.runOpen()
 	} else {
@@ -117,7 +120,7 @@ func Run(ctx context.Context, p Plan) (*Report, error) {
 	healthPoints := health.stop()
 
 	reqs, steps, iters := r.col.Snapshot()
-	raw := &Raw{
+	raw := &record.Raw{
 		Open:       p.Arrival != nil,
 		Dropped:    r.col.Dropped(),
 		StartedAt:  start,
@@ -127,9 +130,9 @@ func Run(ctx context.Context, p Plan) (*Report, error) {
 		Iterations: iters,
 		Health:     healthPoints,
 	}
-	rep := raw.Report()
+	rep := report.FromRaw(raw)
 	if p.Raw != nil {
-		if err := WriteRaw(p.Raw, raw); err != nil {
+		if err := record.WriteRaw(p.Raw, raw); err != nil {
 			return rep, fmt.Errorf("jotaro: 生データの書き出しに失敗: %w", err)
 		}
 	}
@@ -141,7 +144,7 @@ type runner struct {
 	p       Plan
 	tr      http.RoundTripper
 	timeout time.Duration
-	col     *Collector
+	col     *record.Collector
 
 	stopCtx context.Context
 	runCtx  context.Context
@@ -219,7 +222,7 @@ func (r *runner) runOpen() {
 }
 
 // newUser はイテレーション 1 回分のユーザーを作る。Cookie jar は毎回新しい。
-func newUser(ctx context.Context, p Plan, id, iter int, tr http.RoundTripper, timeout time.Duration, col *Collector) (*User, error) {
+func newUser(ctx context.Context, p Plan, id, iter int, tr http.RoundTripper, timeout time.Duration, col *record.Collector) (*User, error) {
 	jar, err := cookiejar.New(nil)
 	if err != nil {
 		return nil, err

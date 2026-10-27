@@ -1,8 +1,10 @@
-package jotaro
+package report
 
 import (
 	"slices"
 	"time"
+
+	"github.com/RIRUa/jotaro/record"
 )
 
 // SeriesInterval は時系列の 1 区間の長さ。
@@ -35,7 +37,7 @@ type SeriesPoint struct {
 
 // buildSeries は記録を 1 秒ごとに集計する。
 // 開始時刻の記録が無い（origin が zero）、または記録が空のときは nil を返す。
-func buildSeries(origin time.Time, reqs []Record, iters []IterationRecord) []SeriesPoint {
+func buildSeries(origin time.Time, reqs []record.Record, iters []record.IterationRecord) []SeriesPoint {
 	if origin.IsZero() {
 		return nil
 	}
@@ -67,16 +69,16 @@ func buildSeries(origin time.Time, reqs []Record, iters []IterationRecord) []Ser
 	for _, r := range reqs {
 		i := index(r.Start)
 		pts[i].Requests++
-		if r.Err != ErrNone {
+		if r.Err != record.ErrNone {
 			pts[i].Errors++
 		}
 		if r.Code >= 500 {
 			pts[i].HTTP5xx++
 		}
 		switch r.Conn {
-		case ConnNew:
+		case record.ConnNew:
 			pts[i].NewConns++
-		case ConnReused:
+		case record.ConnReused:
 			pts[i].ReusedConns++
 		}
 		lats[i] = append(lats[i], r.Latency)

@@ -1,4 +1,4 @@
-package jotaro
+package report
 
 import (
 	"fmt"
@@ -6,6 +6,8 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/RIRUa/jotaro/record"
 )
 
 // グラフは外部ライブラリも JavaScript も使わず、インライン SVG として出力する。
@@ -125,7 +127,7 @@ func connCharts(pts []SeriesPoint, build func(title string, names []string, vali
 }
 
 // healthCharts は負荷生成側のゴルーチン数と CPU のグラフ。記録が無ければ nil。
-func healthCharts(pts []HealthPoint) []htmlChart {
+func healthCharts(pts []record.HealthPoint) []htmlChart {
 	if len(pts) == 0 {
 		return nil
 	}

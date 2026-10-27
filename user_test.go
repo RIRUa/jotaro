@@ -8,9 +8,11 @@ import (
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	"github.com/RIRUa/jotaro/record"
 )
 
-func testUser(t *testing.T, baseURL string, id, iter int, col *Collector) *User {
+func testUser(t *testing.T, baseURL string, id, iter int, col *record.Collector) *User {
 	t.Helper()
 	jar, err := cookiejar.New(nil)
 	if err != nil {
@@ -33,7 +35,7 @@ func TestStepRecordsUnderStepName(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	col := NewCollector()
+	col := record.NewCollector()
 	u := testUser(t, srv.URL, 4, 2, col)
 	sc := NewScenario("checkout", func(ctx context.Context, u *User) error {
 		if err := u.Step("login", func(s *Step) error {
@@ -64,10 +66,10 @@ func TestStepRecordsUnderStepName(t *testing.T) {
 			t.Fatalf("tag = %+v", r)
 		}
 	}
-	if steps[0].Step != "login" || steps[1].Step != "list" || steps[0].Err != ErrNone {
+	if steps[0].Step != "login" || steps[1].Step != "list" || steps[0].Err != record.ErrNone {
 		t.Fatalf("steps = %+v", steps)
 	}
-	if iters[0].Err != ErrNone || iters[0].UserID != 4 {
+	if iters[0].Err != record.ErrNone || iters[0].UserID != 4 {
 		t.Fatalf("iter = %+v", iters[0])
 	}
 }
@@ -78,7 +80,7 @@ func TestStepErrorIsReturnedAndRecorded(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	col := NewCollector()
+	col := record.NewCollector()
 	u := testUser(t, srv.URL, 0, 0, col)
 	sc := NewScenario("checkout", func(ctx context.Context, u *User) error {
 		return u.Step("order", func(s *Step) error {
@@ -92,16 +94,16 @@ func TestStepErrorIsReturnedAndRecorded(t *testing.T) {
 	}
 
 	reqs, steps, iters := col.Snapshot()
-	if reqs[0].Code != 500 || reqs[0].Err != ErrNone {
+	if reqs[0].Code != 500 || reqs[0].Err != record.ErrNone {
 		t.Fatalf("request = %+v", reqs[0])
 	}
-	if steps[0].Err != ErrExpect || iters[0].Err != ErrExpect {
+	if steps[0].Err != record.ErrExpect || iters[0].Err != record.ErrExpect {
 		t.Fatalf("step=%q iter=%q", steps[0].Err, iters[0].Err)
 	}
 }
 
 func TestThinkExcludedFromActive(t *testing.T) {
-	col := NewCollector()
+	col := record.NewCollector()
 	u := testUser(t, "http://unused", 0, 0, col)
 	sc := NewScenario("s", func(ctx context.Context, u *User) error {
 		u.Think(80 * time.Millisecond)
@@ -121,7 +123,7 @@ func TestThinkExcludedFromActive(t *testing.T) {
 
 func TestThinkReturnsOnCancel(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
-	u := testUser(t, "http://unused", 0, 0, NewCollector())
+	u := testUser(t, "http://unused", 0, 0, record.NewCollector())
 	u.ctx = ctx
 	go func() {
 		time.Sleep(30 * time.Millisecond)
@@ -136,7 +138,7 @@ func TestThinkReturnsOnCancel(t *testing.T) {
 }
 
 func TestPanicBecomesIterationFailure(t *testing.T) {
-	col := NewCollector()
+	col := record.NewCollector()
 	u := testUser(t, "http://unused", 0, 0, col)
 	sc := NewScenario("s", func(ctx context.Context, u *User) error {
 		panic("boom")
@@ -145,7 +147,7 @@ func TestPanicBecomesIterationFailure(t *testing.T) {
 		t.Fatal("panic はエラーとして返るはず")
 	}
 	_, _, iters := col.Snapshot()
-	if len(iters) != 1 || iters[0].Err != ErrOther {
+	if len(iters) != 1 || iters[0].Err != record.ErrOther {
 		t.Fatalf("iters = %+v", iters)
 	}
 }
@@ -163,7 +165,7 @@ func TestCookiesAreKeptWithinUserOnly(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	col := NewCollector()
+	col := record.NewCollector()
 	u1 := testUser(t, srv.URL, 1, 0, col)
 	u2 := testUser(t, srv.URL, 2, 0, col)
 

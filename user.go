@@ -4,6 +4,8 @@ import (
 	"context"
 	"net/http"
 	"time"
+
+	"github.com/RIRUa/jotaro/record"
 )
 
 // User はシナリオ 1 回分を実行する仮想ユーザー。
@@ -17,7 +19,7 @@ type User struct {
 	ctx      context.Context
 	scenario string
 	baseURL  string
-	col      *Collector
+	col      *record.Collector
 
 	think time.Duration
 	// scheduled は予定到着時刻。最初のリクエストが使い切ると 0 に戻る。
@@ -33,7 +35,7 @@ func (u *User) Step(name string, fn func(s *Step) error) error {
 			ctx:     u.ctx,
 			client:  u.Client,
 			baseURL: u.baseURL,
-			tag: Record{
+			tag: record.Record{
 				Scenario:  u.scenario,
 				Step:      name,
 				UserID:    u.ID,
@@ -46,7 +48,7 @@ func (u *User) Step(name string, fn func(s *Step) error) error {
 
 	start := time.Now()
 	err := fn(s)
-	u.col.AddStep(StepRecord{
+	u.col.AddStep(record.StepRecord{
 		Scenario:  u.scenario,
 		Step:      name,
 		UserID:    u.ID,

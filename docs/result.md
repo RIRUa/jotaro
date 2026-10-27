@@ -7,16 +7,16 @@ jotaro の実行結果に関する仕様メモ。**実装済みの部分**と**�
 結果は **メモリ上の `Report` 構造体**で、コンソール表示・JSON・HTML に書き出せる（4 章）。生データは JSON Lines に書き出せる（下の「生データ」）。
 
 ```
-Run() ─▶ Collector ─▶ BuildReport() ─▶ *Report ─▶ report_print.go ─▶ コンソール
+Run() ─▶ Collector ─▶ report.BuildReport() ─▶ *report.Report ─▶ print.go ─▶ コンソール
         (生データ)      (集計)          (メモリ)
 ```
 
 | 層 | 型 | ファイル | 役割 |
 |---|---|---|---|
-| 生データ | `Record` / `StepRecord` / `IterationRecord` | `record.go` | リクエスト・ステップ・シナリオ1回ごとの記録 |
-| 収集 | `Collector` | `record.go` | 並行に記録を受け取る（`Snapshot()` でコピー取得） |
-| 集計 | `Report` | `report.go` | 3階層（リクエスト / ステップ / シナリオ）の集計結果 |
-| 出力 | — | `report_print.go` | コンソール表示 |
+| 生データ | `record.Record` / `StepRecord` / `IterationRecord` | `record/record.go` | リクエスト・ステップ・シナリオ1回ごとの記録 |
+| 収集 | `record.Collector` | `record/record.go` | 並行に記録を受け取る（`Snapshot()` でコピー取得） |
+| 集計 | `report.Report` | `report/report.go` | 3階層（リクエスト / ステップ / シナリオ）の集計結果 |
+| 出力 | — | `report/print.go` | コンソール表示 |
 
 ### `Report` の構造
 
@@ -75,7 +75,7 @@ HTTP 4xx/5xx は `ErrKind` ではなくステータス（`Status`）として記
 
 ### JSON 出力（実装済み）
 
-`Report.WriteJSON(w io.Writer) error` で、集計結果を JSON として書き出せる（`report_json.go`）。
+`Report.WriteJSON(w io.Writer) error` で、集計結果を JSON として書き出せる（`report/json.go`）。
 
 ```go
 f, _ := os.Create("result.json")
@@ -95,7 +95,7 @@ if err := rep.WriteJSON(f); err != nil {
 
 ### HTML レポート（実装済み）
 
-`Report.WriteHTML(w io.Writer) error` で、外部に依存しない 1 枚の HTML を書き出せる（`report_html.go` / `report.html.tmpl`）。
+`Report.WriteHTML(w io.Writer) error` で、外部に依存しない 1 枚の HTML を書き出せる（`report/html.go` / `report/report.html.tmpl`）。
 
 ```go
 f, _ := os.Create("report.html")
@@ -120,7 +120,7 @@ jotaro merge -o merged.json a.json b.json c.json
 jotaro merge -format html -o report.html a.json b.json
 ```
 
-ライブラリでは `jotaro.MergeReports(reps ...*Report) (*Report, error)`（`report_merge.go`）。`-format` の既定は `json`（結合結果を再び入力にできる）。
+ライブラリでは `report.MergeReports(reps ...*report.Report) (*report.Report, error)`（`report/merge.go`）。`-format` の既定は `json`（結合結果を再び入力にできる）。
 
 | 項目 | 結合の仕方 |
 |---|---|
@@ -145,7 +145,7 @@ jotaro merge -format html -o report.html a.json b.json
 
 ### 生データ（JSON Lines）（実装済み）
 
-集計前の記録を 1 行 1 レコードで書き出し、後から再集計したり、他のツールで可視化したりできる（`raw_json.go`）。集計結果（`Report`）は件数が増えても大きさが変わらないが、生データは件数に比例して大きくなる。
+集計前の記録を 1 行 1 レコードで書き出し、後から再集計したり、他のツールで可視化したりできる（`record/raw.go`）。集計結果（`Report`）は件数が増えても大きさが変わらないが、生データは件数に比例して大きくなる。
 
 ```go
 f, _ := os.Create("raw.jsonl")
@@ -160,7 +160,7 @@ jotaro report -raw -format json raw.jsonl | jotaro check -t 'p95<200ms' -   # �
 jotaro check -raw -t 'p95<200ms' raw.jsonl                    # 直接判定もできる
 ```
 
-ライブラリでは `WriteRaw(w, *Raw)` / `ReadRaw(r) (*Raw, error)` / `(*Raw).Report()`。`Run` の結果も `Raw.Report()` を通すので、書き出した生データから再集計した結果は `Run` が返した `Report` と一致する。`report` / `merge` / `check` の `-raw` で読める。
+ライブラリでは `record.WriteRaw(w, *record.Raw)` / `record.ReadRaw(r)` / `report.FromRaw(*record.Raw)`。`Run` の結果も `report.FromRaw` を通すので、書き出した生データから再集計した結果は `Run` が返した `Report` と一致する。`report` / `merge` / `check` の `-raw` で読める。
 
 - 先頭の行は実行全体の情報（`type` が `meta`）。`version`（`RawVersion`、現在 `1`）/ `open` / `dropped` / `started_at` / `elapsed_ns`。そのあとに `request` / `step` / `iteration` / `health` の行が続く。
 - 時間は集計の JSON と同じく**ナノ秒の整数**（`_ns`）。時刻は UTC の RFC 3339。0・空のフィールドは省く（`code`、`err`、`dns_ns`、`scheduled` など。読むときは 0・空に戻る）。
@@ -261,14 +261,14 @@ Run ─(任意)─▶ /metrics ─▶ Prometheus ─▶ Grafana
 
 ## 4. 出力 API（実装済み）
 
-`Report.Write(w io.Writer, f Format) error` が出力の入口（`report_write.go`）。出力先は `io.Writer` なので、ファイル、標準出力、`bytes.Buffer`、`http.ResponseWriter` のどれでもよい。
+`Report.Write(w io.Writer, f Format) error` が出力の入口（`report/write.go`）。出力先は `io.Writer` なので、ファイル、標準出力、`bytes.Buffer`、`http.ResponseWriter` のどれでもよい。
 
 ```
 *Report ─▶ Write(w, format) ─▶ Text / JSON / HTML ─▶ w
 ```
 
 ```go
-f, _ := jotaro.ParseFormat("json") // CLI のフラグ文字列から
+f, _ := report.ParseFormat("json") // CLI のフラグ文字列から
 if err := rep.Write(os.Stdout, f); err != nil {
     log.Fatal(err)
 }
@@ -290,7 +290,7 @@ if err := rep.Write(os.Stdout, f); err != nil {
 保存した JSON から、あとでレポートを作り直せる。
 
 ```go
-rep, err := jotaro.ReadJSON(f) // WriteJSON が書いた JSON を Report に戻す
+rep, err := report.ReadJSON(f) // WriteJSON が書いた JSON を Report に戻す
 ```
 
 - `version` が対応していないときは `error` を返す（`JSONVersion` と一致しないもの）。
@@ -323,14 +323,14 @@ type Writer interface {
 
 ### 注意点
 
-- 生データ（JSON Lines）は件数が多いので、`Report.Write` には含めず、別の API（`WriteRaw`、`Plan.Raw`）にした。
+- 生データ（JSON Lines）は件数が多いので、`Report.Write` には含めず、別の API（`record.WriteRaw`、`Plan.Raw`）にした。
 
 ## 5. しきい値判定（実装済み）
 
-結果が条件を満たすかを確かめ、CI で「遅くなったら失敗」にする（`threshold.go`）。k6 の `thresholds` に近い。実行後の `Report` に対して判定する（実行中に打ち切る `abortOnFail` 相当は無い）。
+結果が条件を満たすかを確かめ、CI で「遅くなったら失敗」にする（`report/threshold.go`）。k6 の `thresholds` に近い。実行後の `Report` に対して判定する（実行中に打ち切る `abortOnFail` 相当は無い）。
 
 ```go
-th, _ := jotaro.ParseThreshold("p95<200ms")
+th, _ := report.ParseThreshold("p95<200ms")
 checks := rep.Check(th)  // Checks
 checks.Print(os.Stdout)
 if !checks.Passed() { os.Exit(1) }
@@ -372,4 +372,4 @@ jotaro check -t 'p95<200ms' -t 'error_rate<1%' -t 'p99{step=login}<100ms' result
 ## 6. 関連
 
 - 設計の全体像: [`DESIGN.md`](../DESIGN.md)（計測は 5 章、未決は 8 章）
-- 実装: `record.go` / `report.go` / `report_print.go`
+- 実装: `record/record.go` / `report/report.go` / `report/print.go`

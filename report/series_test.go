@@ -1,4 +1,4 @@
-package jotaro
+package report
 
 import (
 	"bytes"
@@ -6,16 +6,18 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/RIRUa/jotaro/record"
 )
 
-func seriesRecords(t0 time.Time) ([]Record, []IterationRecord) {
+func seriesRecords(t0 time.Time) ([]record.Record, []record.IterationRecord) {
 	ms := time.Millisecond
-	reqs := []Record{
+	reqs := []record.Record{
 		{Start: t0, Latency: 10 * ms, Code: 200},
-		{Start: t0.Add(500 * ms), Latency: 30 * ms, Err: ErrTimeout},
+		{Start: t0.Add(500 * ms), Latency: 30 * ms, Err: record.ErrTimeout},
 		{Start: t0.Add(2100 * ms), Latency: 20 * ms, Code: 503}, // 1 秒目は空
 	}
-	iters := []IterationRecord{
+	iters := []record.IterationRecord{
 		{Start: t0, Duration: 1500 * ms},
 		{Start: t0.Add(200 * ms), Duration: 600 * ms},
 		{Start: t0.Add(1500 * ms), Duration: 700 * ms}, // 前のイテレーションの終了と同時
@@ -51,7 +53,7 @@ func TestBuildSeries(t *testing.T) {
 }
 
 func TestBuildSeriesNoStart(t *testing.T) {
-	rep := BuildReport([]Record{{Latency: time.Millisecond}}, nil, nil, time.Second)
+	rep := BuildReport([]record.Record{{Latency: time.Millisecond}}, nil, nil, time.Second)
 	if rep.Series != nil {
 		t.Errorf("Series = %+v, want nil", rep.Series)
 	}
@@ -102,12 +104,12 @@ func TestMergeSeriesOffset(t *testing.T) {
 func TestBuildSeriesConns(t *testing.T) {
 	t0 := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	ms := time.Millisecond
-	reqs := []Record{
-		{Start: t0, Latency: 10 * ms, Code: 200, Conn: ConnNew},
-		{Start: t0.Add(300 * ms), Latency: 10 * ms, Code: 200, Conn: ConnReused},
-		{Start: t0.Add(600 * ms), Latency: 10 * ms, Code: 200, Conn: ConnReused},
-		{Start: t0.Add(700 * ms), Latency: 10 * ms, Err: ErrDNS}, // 接続を得る前に失敗
-		{Start: t0.Add(1200 * ms), Latency: 10 * ms, Code: 200, Conn: ConnNew},
+	reqs := []record.Record{
+		{Start: t0, Latency: 10 * ms, Code: 200, Conn: record.ConnNew},
+		{Start: t0.Add(300 * ms), Latency: 10 * ms, Code: 200, Conn: record.ConnReused},
+		{Start: t0.Add(600 * ms), Latency: 10 * ms, Code: 200, Conn: record.ConnReused},
+		{Start: t0.Add(700 * ms), Latency: 10 * ms, Err: record.ErrDNS}, // 接続を得る前に失敗
+		{Start: t0.Add(1200 * ms), Latency: 10 * ms, Code: 200, Conn: record.ConnNew},
 	}
 	rep := BuildReport(reqs, nil, nil, 0)
 
@@ -142,11 +144,11 @@ func TestMergeSeriesConns(t *testing.T) {
 func TestBuildSeriesConnPhases(t *testing.T) {
 	t0 := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	ms := time.Millisecond
-	reqs := []Record{
-		{Start: t0, Latency: 50 * ms, Conn: ConnNew, DNS: 5 * ms, Connect: 10 * ms, TLS: 20 * ms},
-		{Start: t0.Add(100 * ms), Latency: 10 * ms, Conn: ConnReused},                              // 再利用は 0
-		{Start: t0.Add(200 * ms), Latency: 40 * ms, Conn: ConnNew, DNS: 15 * ms, Connect: 30 * ms}, // http は TLS なし
-		{Start: t0.Add(1100 * ms), Latency: 10 * ms, Conn: ConnReused},
+	reqs := []record.Record{
+		{Start: t0, Latency: 50 * ms, Conn: record.ConnNew, DNS: 5 * ms, Connect: 10 * ms, TLS: 20 * ms},
+		{Start: t0.Add(100 * ms), Latency: 10 * ms, Conn: record.ConnReused},                              // 再利用は 0
+		{Start: t0.Add(200 * ms), Latency: 40 * ms, Conn: record.ConnNew, DNS: 15 * ms, Connect: 30 * ms}, // http は TLS なし
+		{Start: t0.Add(1100 * ms), Latency: 10 * ms, Conn: record.ConnReused},
 	}
 	rep := BuildReport(reqs, nil, nil, 0)
 
@@ -187,10 +189,10 @@ func TestMergeSeriesConnPhases(t *testing.T) {
 func TestSeriesConnJSONRoundTrip(t *testing.T) {
 	t0 := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	ms := time.Millisecond
-	reqs := []Record{
-		{Start: t0, Latency: 50 * ms, Code: 200, Conn: ConnNew, DNS: 5 * ms, Connect: 10 * ms, TLS: 20 * ms},
-		{Start: t0.Add(100 * ms), Latency: 10 * ms, Code: 200, Conn: ConnReused},
-		{Start: t0.Add(1100 * ms), Latency: 12 * ms, Code: 200, Conn: ConnReused},
+	reqs := []record.Record{
+		{Start: t0, Latency: 50 * ms, Code: 200, Conn: record.ConnNew, DNS: 5 * ms, Connect: 10 * ms, TLS: 20 * ms},
+		{Start: t0.Add(100 * ms), Latency: 10 * ms, Code: 200, Conn: record.ConnReused},
+		{Start: t0.Add(1100 * ms), Latency: 12 * ms, Code: 200, Conn: record.ConnReused},
 	}
 	rep := BuildReport(reqs, nil, nil, 0)
 

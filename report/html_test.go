@@ -1,20 +1,22 @@
-package jotaro
+package report
 
 import (
 	"bytes"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/RIRUa/jotaro/record"
 )
 
 func sampleReport(open bool) *Report {
-	reqs := []Record{
+	reqs := []record.Record{
 		{Scenario: "s<b>", Step: "a", Code: 200, Latency: 10 * time.Millisecond, TTFB: 5 * time.Millisecond},
 		{Scenario: "s<b>", Step: "a", Code: 500, Latency: 40 * time.Millisecond, TTFB: 20 * time.Millisecond},
-		{Scenario: "s<b>", Step: "a", Err: ErrTimeout, Latency: 2 * time.Second},
+		{Scenario: "s<b>", Step: "a", Err: record.ErrTimeout, Latency: 2 * time.Second},
 	}
-	steps := []StepRecord{{Scenario: "s<b>", Step: "a", Duration: 50 * time.Millisecond, Err: ErrExpect}}
-	iters := []IterationRecord{{Scenario: "s<b>", Duration: 60 * time.Millisecond, Err: ErrExpect}}
+	steps := []record.StepRecord{{Scenario: "s<b>", Step: "a", Duration: 50 * time.Millisecond, Err: record.ErrExpect}}
+	iters := []record.IterationRecord{{Scenario: "s<b>", Duration: 60 * time.Millisecond, Err: record.ErrExpect}}
 	rep := BuildReport(reqs, steps, iters, 3*time.Second)
 	rep.Open = open
 	return rep
@@ -98,9 +100,9 @@ func TestWriteHTMLNoTimeline(t *testing.T) {
 }
 
 func TestWriteHTMLConnection(t *testing.T) {
-	reqs := []Record{
-		{Code: 200, Latency: 10 * time.Millisecond, Conn: ConnNew, DNS: time.Millisecond, Connect: 2 * time.Millisecond, TLS: 3 * time.Millisecond},
-		{Code: 200, Latency: 10 * time.Millisecond, Conn: ConnReused},
+	reqs := []record.Record{
+		{Code: 200, Latency: 10 * time.Millisecond, Conn: record.ConnNew, DNS: time.Millisecond, Connect: 2 * time.Millisecond, TLS: 3 * time.Millisecond},
+		{Code: 200, Latency: 10 * time.Millisecond, Conn: record.ConnReused},
 	}
 	rep := BuildReport(reqs, nil, nil, time.Second)
 	var buf bytes.Buffer
@@ -122,11 +124,11 @@ func TestWriteHTMLConnection(t *testing.T) {
 func TestWriteHTMLTimelineConnections(t *testing.T) {
 	t0 := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	ms := time.Millisecond
-	reqs := []Record{
-		{Start: t0, Latency: 50 * ms, Code: 200, Conn: ConnNew, DNS: 5 * ms, Connect: 10 * ms, TLS: 20 * ms},
-		{Start: t0.Add(100 * ms), Latency: 10 * ms, Code: 200, Conn: ConnReused},
-		{Start: t0.Add(1100 * ms), Latency: 10 * ms, Code: 200, Conn: ConnReused},
-		{Start: t0.Add(2100 * ms), Latency: 50 * ms, Code: 200, Conn: ConnNew, DNS: 6 * ms, Connect: 11 * ms, TLS: 21 * ms},
+	reqs := []record.Record{
+		{Start: t0, Latency: 50 * ms, Code: 200, Conn: record.ConnNew, DNS: 5 * ms, Connect: 10 * ms, TLS: 20 * ms},
+		{Start: t0.Add(100 * ms), Latency: 10 * ms, Code: 200, Conn: record.ConnReused},
+		{Start: t0.Add(1100 * ms), Latency: 10 * ms, Code: 200, Conn: record.ConnReused},
+		{Start: t0.Add(2100 * ms), Latency: 50 * ms, Code: 200, Conn: record.ConnNew, DNS: 6 * ms, Connect: 11 * ms, TLS: 21 * ms},
 	}
 	var buf bytes.Buffer
 	if err := BuildReport(reqs, nil, nil, 0).WriteHTML(&buf); err != nil {
@@ -148,7 +150,7 @@ func TestSeriesChartsConnPhasesOnlyWhatHappened(t *testing.T) {
 	t0 := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	ms := time.Millisecond
 	// IP 直指定の http: DNS も TLS も起きない。
-	reqs := []Record{{Start: t0, Latency: 10 * ms, Code: 200, Conn: ConnNew, Connect: 2 * ms}}
+	reqs := []record.Record{{Start: t0, Latency: 10 * ms, Code: 200, Conn: record.ConnNew, Connect: 2 * ms}}
 	charts := seriesCharts(BuildReport(reqs, nil, nil, 0).Series)
 
 	var setup *htmlChart

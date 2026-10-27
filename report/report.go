@@ -1,9 +1,16 @@
-package jotaro
+// Package report は、負荷試験の結果（Report）の集計と出力。
+//
+// 記録（record.Record など）から集計し（BuildReport / FromRaw）、テキスト・JSON・HTML に書き出し（Write）、
+// 複数の結果を結合し（MergeReports）、しきい値で判定する（Threshold / Report.Check）。
+package report
 
 import (
 	"fmt"
 	"slices"
 	"time"
+
+	"github.com/RIRUa/jotaro/internal/histogram"
+	"github.com/RIRUa/jotaro/record"
 )
 
 // Latency は時間の分布。
@@ -18,7 +25,7 @@ type Latency struct {
 	Max   time.Duration
 
 	// hist は分布のヒストグラム。MergeReports がパーセンタイルを求め直すために使う。
-	hist histogram
+	hist histogram.H
 }
 
 func newLatency(ds []time.Duration) Latency {
@@ -41,7 +48,7 @@ func newLatency(ds []time.Duration) Latency {
 		P95:   percentile(s, 95),
 		P99:   percentile(s, 99),
 		Max:   s[len(s)-1],
-		hist:  newHistogram(s),
+		hist:  histogram.New(s),
 	}
 }
 
@@ -68,8 +75,8 @@ type RequestStats struct {
 	// Users モデルでは Latency と同じ。
 	Corrected Latency
 
-	Status map[string]int  // "2xx" のようなステータスクラスごとの件数
-	Errors map[ErrKind]int // 通信エラーの内訳
+	Status map[string]int         // "2xx" のようなステータスクラスごとの件数
+	Errors map[record.ErrKind]int // 通信エラーの内訳
 
 	BytesIn  int64
 	BytesOut int64
@@ -89,7 +96,7 @@ type StepStats struct {
 	Count    int
 	Failed   int
 	Duration Latency
-	Errors   map[ErrKind]int // ステップの失敗の内訳
+	Errors   map[record.ErrKind]int // ステップの失敗の内訳
 	Requests RequestStats
 }
 
@@ -99,7 +106,7 @@ type IterationStats struct {
 	Failed int
 	Active Latency // Think を除いた時間
 	Total  Latency // Think を含む時間
-	Errors map[ErrKind]int
+	Errors map[record.ErrKind]int
 }
 
 // ScenarioReport はシナリオごとの集計。
@@ -124,7 +131,7 @@ type Report struct {
 	// Series は StartedAt から 1 秒ごとの集計。StartedAt が無いときは nil。
 	Series []SeriesPoint
 	// Health は StartedAt から 1 秒ごとの、負荷生成側の健全性。Run で実行したときだけ入る。
-	Health []HealthPoint
+	Health []record.HealthPoint
 }
 
 // RPS は 1 秒あたりのリクエスト数。
@@ -139,9 +146,21 @@ func perSecond(n int, elapsed time.Duration) float64 {
 	return float64(n) / elapsed.Seconds()
 }
 
+// FromRaw は生データを集計する。Run が返す Report と同じ集計になる。
+func FromRaw(raw *record.Raw) *Report {
+	rep := BuildReport(raw.Requests, raw.Steps, raw.Iterations, raw.Elapsed)
+	rep.Open = raw.Open
+	rep.Dropped = raw.Dropped
+	if !raw.StartedAt.IsZero() {
+		rep.StartedAt = wallUTC(raw.StartedAt)
+	}
+	rep.Health = raw.Health
+	return rep
+}
+
 // BuildReport は記録から集計する。
 // elapsed が 0 のときは、記録の最初の開始から最後の終了までを実行時間とする。
-func BuildReport(reqs []Record, steps []StepRecord, iters []IterationRecord, elapsed time.Duration) *Report {
+func BuildReport(reqs []record.Record, steps []record.StepRecord, iters []record.IterationRecord, elapsed time.Duration) *Report {
 	if elapsed == 0 {
 		elapsed = observedSpan(reqs, iters)
 	}
@@ -154,7 +173,7 @@ func BuildReport(reqs []Record, steps []StepRecord, iters []IterationRecord, ela
 		byName    = map[string]*ScenarioReport{}
 		stepDurs  = map[stepKey][]time.Duration{}
 		stepAt    = map[stepKey]int{} // sc.Steps 内の位置。append で動くのでポインタでは持たない
-		stepReqs  = map[stepKey][]Record{}
+		stepReqs  = map[stepKey][]record.Record{}
 	)
 	scenario := func(name string) *ScenarioReport {
 		sc, ok := byName[name]
@@ -173,9 +192,9 @@ func BuildReport(reqs []Record, steps []StepRecord, iters []IterationRecord, ela
 
 	// 開始時刻順に並べて、「最初に実行された順」を決める。
 	sortedIters := slices.Clone(iters)
-	slices.SortStableFunc(sortedIters, func(a, b IterationRecord) int { return a.Start.Compare(b.Start) })
+	slices.SortStableFunc(sortedIters, func(a, b record.IterationRecord) int { return a.Start.Compare(b.Start) })
 	sortedSteps := slices.Clone(steps)
-	slices.SortStableFunc(sortedSteps, func(a, b StepRecord) int { return a.Start.Compare(b.Start) })
+	slices.SortStableFunc(sortedSteps, func(a, b record.StepRecord) int { return a.Start.Compare(b.Start) })
 
 	var (
 		activeDurs = map[string][]time.Duration{}
@@ -184,7 +203,7 @@ func BuildReport(reqs []Record, steps []StepRecord, iters []IterationRecord, ela
 	for _, it := range sortedIters {
 		sc := scenario(it.Scenario)
 		sc.Iterations.Count++
-		if it.Err != ErrNone {
+		if it.Err != record.ErrNone {
 			sc.Iterations.Failed++
 			sc.Iterations.Errors = count(sc.Iterations.Errors, it.Err)
 		}
@@ -202,7 +221,7 @@ func BuildReport(reqs []Record, steps []StepRecord, iters []IterationRecord, ela
 		}
 		ss := &sc.Steps[i]
 		ss.Count++
-		if st.Err != ErrNone {
+		if st.Err != record.ErrNone {
 			ss.Failed++
 			ss.Errors = count(ss.Errors, st.Err)
 		}
@@ -227,7 +246,7 @@ func BuildReport(reqs []Record, steps []StepRecord, iters []IterationRecord, ela
 	return rep
 }
 
-func requestStats(reqs []Record) RequestStats {
+func requestStats(reqs []record.Record) RequestStats {
 	st := RequestStats{Count: len(reqs)}
 	var lat, ttfb, corrected, dns, connect, tlsd []time.Duration
 	for _, r := range reqs {
@@ -245,9 +264,9 @@ func requestStats(reqs []Record) RequestStats {
 			}
 		}
 		switch r.Conn {
-		case ConnNew:
+		case record.ConnNew:
 			st.NewConns++
-		case ConnReused:
+		case record.ConnReused:
 			st.ReusedConns++
 		}
 		if r.Code > 0 {
@@ -256,7 +275,7 @@ func requestStats(reqs []Record) RequestStats {
 			}
 			st.Status[fmt.Sprintf("%dxx", r.Code/100)]++
 		}
-		if r.Err != ErrNone {
+		if r.Err != record.ErrNone {
 			st.Errors = count(st.Errors, r.Err)
 		}
 		st.BytesIn += r.BytesIn
@@ -269,16 +288,16 @@ func requestStats(reqs []Record) RequestStats {
 	return st
 }
 
-func count(m map[ErrKind]int, k ErrKind) map[ErrKind]int {
+func count(m map[record.ErrKind]int, k record.ErrKind) map[record.ErrKind]int {
 	if m == nil {
-		m = map[ErrKind]int{}
+		m = map[record.ErrKind]int{}
 	}
 	m[k]++
 	return m
 }
 
 // observedSpan は記録から実行時間を推定する。
-func observedSpan(reqs []Record, iters []IterationRecord) time.Duration {
+func observedSpan(reqs []record.Record, iters []record.IterationRecord) time.Duration {
 	var first, last time.Time
 	extend := func(start time.Time, d time.Duration) {
 		if first.IsZero() || start.Before(first) {
@@ -301,7 +320,7 @@ func observedSpan(reqs []Record, iters []IterationRecord) time.Duration {
 }
 
 // observedStart は記録の中で一番早い開始時刻を返す。記録が無ければ zero。
-func observedStart(reqs []Record, steps []StepRecord, iters []IterationRecord) time.Time {
+func observedStart(reqs []record.Record, steps []record.StepRecord, iters []record.IterationRecord) time.Time {
 	var first time.Time
 	extend := func(t time.Time) {
 		if !t.IsZero() && (first.IsZero() || t.Before(first)) {
