@@ -27,12 +27,21 @@ type item struct {
 	Price int `json:"price"`
 }
 
+// accounts はユーザーごとに別のアカウントを配る。
+// CSV から読むなら jotaro.LoadCSV(f) の結果をそのまま渡せる。
+var accounts = jotaro.NewFeeder([]map[string]string{
+	{"user": "alice"}, {"user": "bob"}, {"user": "carol"},
+}, jotaro.Circular)
+
 var checkout = jotaro.NewScenario("checkout", func(ctx context.Context, u *jotaro.User) error {
 	var login struct {
 		Token string `json:"token"`
 	}
 	if err := u.Step("login", func(s *jotaro.Step) error {
-		creds := map[string]string{"user": fmt.Sprintf("user-%d", u.ID)}
+		creds, ok := accounts.Next()
+		if !ok {
+			return fmt.Errorf("アカウントが足りない")
+		}
 		if err := s.Post("/login").JSON(creds).Do().Decode(&login); err != nil {
 			return err
 		}

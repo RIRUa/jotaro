@@ -93,6 +93,26 @@ jotaro.Run(ctx, jotaro.Plan{
 - 親の `ctx` が終わったら、実行中のものも含めてすぐ止まる。
 - そのため `Report.Elapsed` は `Duration` より少し長くなり、RPS はわずかに低めに出る。
 
+### ユーザーごとのデータ（Feeder）
+
+`Feeder[T]` が、ユーザーごとに別のデータ（アカウント、入力値）を配る。全ユーザーから並行に呼べる。
+
+```go
+rows, _ := jotaro.LoadCSV(f) // 1 行目がヘッダー。列名をキーとする map の列
+accounts := jotaro.NewFeeder(rows, jotaro.Once)
+
+// シナリオの中で
+acc, ok := accounts.Next()
+```
+
+| モード | 動き | 向いているデータ |
+|---|---|---|
+| `Circular` | 順に配り、末尾で先頭へ戻る | 同じアカウントを繰り返し使ってよい |
+| `Random` | 毎回ランダム | 商品 ID など |
+| `Once` | 使い切ったら `false` | 1 アカウント 1 回きり（新規登録など） |
+
+Feeder はシナリオの外で作り、クロージャで共有する（`User` には持たせない。シナリオごとに必要なデータが違うため）。
+
 ## 5. 計測
 
 ### 構造
@@ -133,6 +153,7 @@ jotaro.Run(ctx, jotaro.Plan{
 | `report.go` `report_print.go` | 集計と出力 |
 | `run.go` | `Plan` / `Run`（`Users` / `Arrival` の両モデル） |
 | `arrival.go` | `Arrival` / `Rate` |
+| `feeder.go` | `Feeder` / `LoadCSV` |
 
 実装中に決めたこと:
 
