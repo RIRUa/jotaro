@@ -91,22 +91,24 @@ HTTP 4xx/5xx は `ErrKind` ではなくステータス（`Status`）として記
 
 | 論点 | 案 |
 |---|---|
-| `time.Duration` の表現 | ナノ秒の整数（Go 標準）か、ミリ秒の小数か |
+| `time.Duration` の表現 | **ナノ秒の整数で保存する（決定）**。フィールド名は `_ns` で終える。Go の標準と一致し、無損失。表示側（コンソール・HTML）でミリ秒などに変換する |
 | `map[ErrKind]int` | キーが文字列なのでそのまま JSON オブジェクトにできる |
 | 出力先 | CLI のフラグ（例: `-o result.json`）とライブラリの `Report.WriteJSON(w io.Writer)` |
 | スキーマの版 | `"version": 1` を持たせ、将来の変更に備える |
 
 ### 出力イメージ（案）
 
+時間はすべてナノ秒の整数（`_ns`）。フィールド名は仮。
+
 ```json
 {
   "version": 1,
   "open": false,
   "dropped": 0,
-  "elapsed_ms": 60123.4,
+  "elapsed_ns": 60123400000,
   "requests": {
     "count": 12000,
-    "latency": { "count": 12000, "min_ms": 3.1, "mean_ms": 18.2, "p50_ms": 15.0, "p90_ms": 30.2, "p95_ms": 41.7, "p99_ms": 88.0, "max_ms": 240.5 },
+    "latency": { "count": 12000, "min_ns": 3100000, "mean_ns": 18200000, "p50_ns": 15000000, "p90_ns": 30200000, "p95_ns": 41700000, "p99_ns": 88000000, "max_ns": 240500000 },
     "status": { "2xx": 11990, "5xx": 10 },
     "errors": { "timeout": 3 },
     "bytes_in": 1048576,
