@@ -3,6 +3,7 @@ package jotaro
 import (
 	"fmt"
 	"math"
+	"slices"
 	"strings"
 	"time"
 )
@@ -59,7 +60,7 @@ func seriesCharts(pts []SeriesPoint) []htmlChart {
 	hasReq := func(p SeriesPoint) bool { return p.Requests > 0 }
 	ms := func(d time.Duration) float64 { return float64(d) / float64(time.Millisecond) }
 
-	return []htmlChart{
+	charts := []htmlChart{
 		build("requests / s", []string{"requests", "errors", "5xx"}, always,
 			func(p SeriesPoint) []float64 {
 				return []float64{float64(p.Requests), float64(p.Errors), float64(p.HTTP5xx)}
@@ -71,9 +72,59 @@ func seriesCharts(pts []SeriesPoint) []htmlChart {
 		build("concurrency (active iterations, peak)", []string{"iterations"}, always,
 			func(p SeriesPoint) []float64 { return []float64{float64(p.Concurrency)} }),
 	}
+	return append(charts, connCharts(pts, build)...)
 }
 
-// seriesCol は 1 秒分の、系列ごとの値。
+// connPhase は接続を張るときの区間（DNS・TCP・TLS）のひとつ。
+type connPhase struct {
+	name string
+	get  func(SeriesPoint) Latency
+}
+
+// connCharts は接続のグラフ。接続の記録が無ければ（古い JSON など）何も返さない。
+func connCharts(pts []SeriesPoint, build func(title string, names []string, valid func(SeriesPoint) bool, val func(SeriesPoint) []float64) htmlChart) []htmlChart {
+	var charts []htmlChart
+	if slices.ContainsFunc(pts, func(p SeriesPoint) bool { return p.NewConns+p.ReusedConns > 0 }) {
+		charts = append(charts, build("connections / s (by request start)", []string{"new", "reused"},
+			func(p SeriesPoint) bool { return p.NewConns+p.ReusedConns > 0 },
+			func(p SeriesPoint) []float64 { return []float64{float64(p.NewConns), float64(p.ReusedConns)} }))
+	}
+
+	// 区間が一度でも起きた（DNS が無い IP 直指定、http の TLS など）ものだけ線にする。
+	phases := []connPhase{
+		{"dns", func(p SeriesPoint) Latency { return p.DNS }},
+		{"connect", func(p SeriesPoint) Latency { return p.Connect }},
+		{"tls", func(p SeriesPoint) Latency { return p.TLS }},
+	}
+	phases = slices.DeleteFunc(phases, func(ph connPhase) bool {
+		return !slices.ContainsFunc(pts, func(p SeriesPoint) bool { return ph.get(p).Count > 0 })
+	})
+	if len(phases) == 0 {
+		return charts
+	}
+	names := make([]string, len(phases))
+	for i, ph := range phases {
+		names[i] = ph.name
+	}
+	ms := func(d time.Duration) float64 { return float64(d) / float64(time.Millisecond) }
+	return append(charts, build("connection setup (ms, p95, new connections only)", names,
+		func(p SeriesPoint) bool {
+			return slices.ContainsFunc(phases, func(ph connPhase) bool { return ph.get(p).Count > 0 })
+		},
+		func(p SeriesPoint) []float64 {
+			vals := make([]float64, len(phases))
+			for i, ph := range phases {
+				if l := ph.get(p); l.Count > 0 {
+					vals[i] = ms(l.P95)
+				} else {
+					vals[i] = math.NaN() // その秒に起きなかった区間は線を切る
+				}
+			}
+			return vals
+		}))
+}
+
+// seriesCol は 1 秒分の、系列ごとの値。値が無い系列は NaN。
 type seriesCol struct {
 	sec  int
 	vals []float64
@@ -85,7 +136,9 @@ func lineChart(title string, names []string, n int, cols []seriesCol) htmlChart 
 	maxV := 0.0
 	for _, c := range cols {
 		for _, v := range c.vals {
-			maxV = math.Max(maxV, v)
+			if !math.IsNaN(v) {
+				maxV = math.Max(maxV, v)
+			}
 		}
 	}
 	step := niceStep(maxV)
@@ -133,6 +186,11 @@ func lineChart(title string, names []string, n int, cols []seriesCol) htmlChart 
 				flush()
 			}
 			prev = sec
+			if math.IsNaN(c.vals[i]) { // 値が無い秒。線を切る
+				flush()
+				prev = -2
+				continue
+			}
 			run = append(run, pos(x(sec))+","+pos(y(c.vals[i])))
 		}
 		flush()

@@ -118,3 +118,56 @@ func TestWriteHTMLConnection(t *testing.T) {
 		t.Errorf("text 出力: %s", text.String())
 	}
 }
+
+func TestWriteHTMLTimelineConnections(t *testing.T) {
+	t0 := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	ms := time.Millisecond
+	reqs := []Record{
+		{Start: t0, Latency: 50 * ms, Code: 200, Conn: ConnNew, DNS: 5 * ms, Connect: 10 * ms, TLS: 20 * ms},
+		{Start: t0.Add(100 * ms), Latency: 10 * ms, Code: 200, Conn: ConnReused},
+		{Start: t0.Add(1100 * ms), Latency: 10 * ms, Code: 200, Conn: ConnReused},
+		{Start: t0.Add(2100 * ms), Latency: 50 * ms, Code: 200, Conn: ConnNew, DNS: 6 * ms, Connect: 11 * ms, TLS: 21 * ms},
+	}
+	var buf bytes.Buffer
+	if err := BuildReport(reqs, nil, nil, 0).WriteHTML(&buf); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	for _, want := range []string{"connections / s", "connection setup (ms, p95", "new</span>", "reused</span>", "dns</span>", "connect</span>", "tls</span>"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("出力に %q が無い", want)
+		}
+	}
+	// 1 秒目は新規接続が無いので、接続時間の線は 0 秒目と 2 秒目で切れる（polyline が複数）。
+	if strings.Count(out, "<polyline") < 3+2+3*2 {
+		t.Errorf("polyline が少ない: %d", strings.Count(out, "<polyline"))
+	}
+}
+
+func TestSeriesChartsConnPhasesOnlyWhatHappened(t *testing.T) {
+	t0 := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	ms := time.Millisecond
+	// IP 直指定の http: DNS も TLS も起きない。
+	reqs := []Record{{Start: t0, Latency: 10 * ms, Code: 200, Conn: ConnNew, Connect: 2 * ms}}
+	charts := seriesCharts(BuildReport(reqs, nil, nil, 0).Series)
+
+	var setup *htmlChart
+	for i := range charts {
+		if strings.HasPrefix(charts[i].Title, "connection setup") {
+			setup = &charts[i]
+		}
+	}
+	if setup == nil || len(setup.Lines) != 1 || setup.Lines[0].Name != "connect" {
+		t.Fatalf("connect だけの線になるはず: %+v", setup)
+	}
+}
+
+func TestSeriesChartsWithoutConns(t *testing.T) {
+	t0 := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	reqs, iters := seriesRecords(t0) // Conn の記録が無い
+	for _, c := range seriesCharts(BuildReport(reqs, nil, iters, 0).Series) {
+		if strings.HasPrefix(c.Title, "connection") {
+			t.Errorf("接続の記録が無いのにグラフを出している: %s", c.Title)
+		}
+	}
+}
