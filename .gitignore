@@ -1,0 +1,16 @@
+# examples / CLI が書き出す結果
+result.html
+result.json
+raw.jsonl
+merged.json
+
+# Go
+*.test
+*.out
+coverage.*
+/dist/
+
+# エディタ・OS
+.DS_Store
+.idea/
+.vscode/
