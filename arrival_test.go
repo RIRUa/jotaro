@@ -179,7 +179,8 @@ func TestRunRamp(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if n := rep.Scenarios[0].Iterations.Count; n < 80 || n > 101 {
+	// タイマーの揺れ（Windows では特に大きい）を見込んで幅を持たせる。
+	if n := rep.Scenarios[0].Iterations.Count; n < 80 || n > 110 {
 		t.Fatalf("Iterations = %d, 約 100 のはず", n)
 	}
 }
