@@ -29,6 +29,8 @@ go run ./examples/checkout -raw raw.jsonl                     # 生データ（J
 go get github.com/RIRUa/jotaro
 ```
 
+Go 1.22 以上が必要です。
+
 ### 1. シナリオを書く
 
 ```go
