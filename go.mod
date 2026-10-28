@@ -1,3 +1,3 @@
 module github.com/RIRUa/jotaro
 
-go 1.27.3
+go 1.22
