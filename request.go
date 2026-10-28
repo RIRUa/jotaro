@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
+	"strings"
 )
 
 // RequestSpec はリクエストの記述。
@@ -11,6 +13,7 @@ import (
 type RequestSpec struct {
 	Method string
 	Path   string
+	Query  url.Values // Path のクエリに足される
 	Header http.Header
 	Body   []byte
 }
@@ -42,6 +45,41 @@ func (r *Request) JSON(v any) *Request {
 	return r
 }
 
+// Form はボディを application/x-www-form-urlencoded として設定する。
+func (r *Request) Form(v url.Values) *Request {
+	r.Spec.Body = []byte(v.Encode())
+	r.Spec.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	return r
+}
+
+// Query はクエリパラメーターを足す。同じキーを繰り返すと複数の値になる。
+// 値は Path に直書きするときと違い、エスケープされる。
+func (r *Request) Query(key, value string) *Request {
+	if r.Spec.Query == nil {
+		r.Spec.Query = url.Values{}
+	}
+	r.Spec.Query.Add(key, value)
+	return r
+}
+
+// Queries はクエリパラメーターをまとめて足す。
+func (r *Request) Queries(v url.Values) *Request {
+	for k, vs := range v {
+		for _, x := range vs {
+			r.Query(k, x)
+		}
+	}
+	return r
+}
+
+// Headers はヘッダーをまとめて設定する。同じキーは上書きする。
+func (r *Request) Headers(h map[string]string) *Request {
+	for k, v := range h {
+		r.Header(k, v)
+	}
+	return r
+}
+
 // Header はヘッダーを設定する。
 func (r *Request) Header(key, value string) *Request {
 	r.Spec.Header.Set(key, value)
@@ -57,4 +95,16 @@ func (r *Request) Bearer(token string) *Request {
 // 通信エラーはレスポンスに保持され、Decode や ExpectStatus が返す。
 func (r *Request) Do() *Response {
 	return r.exec.do(r)
+}
+
+// withQuery は rawURL に q を足した URL を返す。rawURL にクエリがあれば、その後ろに足す。
+func withQuery(rawURL string, q url.Values) string {
+	if len(q) == 0 {
+		return rawURL
+	}
+	sep := "?"
+	if strings.Contains(rawURL, "?") {
+		sep = "&"
+	}
+	return rawURL + sep + q.Encode()
 }

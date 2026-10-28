@@ -54,6 +54,10 @@ var checkout = jotaro.NewScenario("checkout", func(ctx context.Context, u *jotar
 
 - `Step` は計測の単位。結果はステップごとに集計される
 - `Get` / `Post` / `Put` / `Patch` / `Delete` でリクエストを組み立て、`Do()` で送る
+- リクエストには次を足せる（`Do()` の前につなげる）
+  - ヘッダー: `Header(k, v)` / `Headers(map)` / `Bearer(token)`
+  - クエリ: `Query(k, v)` / `Queries(url.Values)`（値はエスケープされる）
+  - ボディ: `JSON(v)` / `Form(url.Values)`
 - `Do()` のあとに `Decode(&v)`（JSON を読む）か `ExpectStatus(code)`（ステータスを検証する）をつなげる
 - `Think` は思考時間。シナリオ時間は、`Think` を除いたものと含めたものの両方が出る
 - ステップが失敗しても、シナリオの関数が `nil` を返せばそのイテレーションは成功として数える。ステップの失敗はステップ単位の集計で見る
