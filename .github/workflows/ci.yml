@@ -10,11 +10,12 @@ permissions:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        # go.mod の下限と、最新の安定版
+        # go.mod の下限と、最新の安定版。CPU 時間の取得などが OS で分かれるので 3 つの OS で動かす
+        os: [ubuntu-latest, macos-latest, windows-latest]
         go: ['1.22', 'stable']
     steps:
       - uses: actions/checkout@v7
