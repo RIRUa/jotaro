@@ -2,6 +2,10 @@
 
 [English](README.md) | [日本語](README_jp.md)
 
+[![CI](https://github.com/RIRUa/jotaro/actions/workflows/ci.yml/badge.svg)](https://github.com/RIRUa/jotaro/actions/workflows/ci.yml)
+[![Go Reference](https://pkg.go.dev/badge/github.com/RIRUa/jotaro.svg)](https://pkg.go.dev/github.com/RIRUa/jotaro)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
 A Go library for load-testing HTTP servers with scenarios (a flow such as login → list → order). Results can be written to the console, JSON or HTML, and the CLI can check them against thresholds.
 
 - Scenarios are plain Go code (`if` and variables just work)
@@ -12,6 +16,8 @@ A Go library for load-testing HTTP servers with scenarios (a flow such as login 
 - Also records a per-second time series and the health of the load generator itself (CPU, goroutine count)
 
 For the design rationale see [`DESIGN.md`](DESIGN.md); for the result format and the threshold spec see [`docs/result.md`](docs/result.md).
+
+> **Status: v0.x.** The API may still change between minor versions. Changes are listed in [`CHANGELOG.md`](CHANGELOG.md).
 
 ## Try it
 
@@ -123,6 +129,8 @@ A CLI for processing and judging saved results afterwards.
 ```sh
 go install github.com/RIRUa/jotaro/cmd/jotaro@latest
 ```
+
+Prebuilt binaries (Linux / macOS / Windows) are attached to each [GitHub Release](https://github.com/RIRUa/jotaro/releases).
 
 Put options **before** the file names.
 

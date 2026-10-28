@@ -2,6 +2,10 @@
 
 [English](README.md) | 日本語
 
+[![CI](https://github.com/RIRUa/jotaro/actions/workflows/ci.yml/badge.svg)](https://github.com/RIRUa/jotaro/actions/workflows/ci.yml)
+[![Go Reference](https://pkg.go.dev/badge/github.com/RIRUa/jotaro.svg)](https://pkg.go.dev/github.com/RIRUa/jotaro)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
 シナリオ（ログイン → 一覧 → 注文 のような一連の流れ）を Go で書いて、HTTP サーバーに負荷をかけるライブラリです。結果はコンソール・JSON・HTML で出せて、CLI でしきい値判定もできます。
 
 - シナリオは ふつうの Go のコードで書く（`if` や変数がそのまま使える）
@@ -12,6 +16,8 @@
 - 1 秒ごとの時系列と、負荷生成側の健全性（CPU・ゴルーチン数）も記録する
 
 設計の考え方は [`DESIGN_jp.md`](DESIGN_jp.md)、結果の形式としきい値の仕様は [`docs/result_jp.md`](docs/result_jp.md) にあります。
+
+> **状態: v0.x。** マイナーバージョンのあいだで API が変わることがあります。変更点は [`CHANGELOG.md`](CHANGELOG.md)（英語）にまとめます。
 
 ## 試してみる
 
@@ -123,6 +129,8 @@ if !checks.Passed() {
 ```sh
 go install github.com/RIRUa/jotaro/cmd/jotaro@latest
 ```
+
+ビルド済みのバイナリ（Linux / macOS / Windows）は、[GitHub Release](https://github.com/RIRUa/jotaro/releases) ごとに添付します。
 
 オプションは、ファイル名より**前**に書きます。
 
