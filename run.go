@@ -21,49 +21,49 @@ const (
 	defaultMaxUsers = 1000
 )
 
-// Plan は負荷のかけ方。
+// Plan describes how load is applied.
 //
-// Users（クローズド）か Arrival（オープン）のどちらか一方を指定する。
+// Specify exactly one of Users (closed model) and Arrival (open model).
 //
-//   - Users: 固定数のユーザーが Duration が過ぎるまでシナリオを繰り返す。
-//   - Arrival: シナリオの所要時間に関わらず、一定の割合でシナリオを開始する。
+//   - Users: a fixed number of users repeat the scenario until Duration has passed.
+//   - Arrival: scenarios start at a fixed rate, regardless of how long a scenario takes.
 type Plan struct {
 	Scenario *Scenario
 	BaseURL  string
 
-	// Users は同時に動かす仮想ユーザー数。
+	// Users is the number of virtual users running at the same time.
 	Users int
-	// Arrival は到着のしかた（例: Rate(10, time.Second)）。Users とは同時に指定できない。
+	// Arrival is how scenarios arrive (e.g. Rate(10, time.Second)). It cannot be set together with Users.
 	Arrival Arrival
-	// MaxUsers は Arrival のときの同時実行数の上限。0 なら 1000。
-	// 上限に達しているときに到着した分は、実行せずドロップとして数える。
+	// MaxUsers is the cap on concurrency with Arrival. 0 means 1000.
+	// Arrivals that come in while the cap is reached are not run and are counted as dropped.
 	MaxUsers int
-	// Duration を過ぎると、新しいイテレーションを始めなくなる。
+	// After Duration has passed, no new iterations are started.
 	Duration time.Duration
 
-	// Timeout は 1 リクエストあたりの上限。0 なら 30 秒。
+	// Timeout is the limit for a single request. 0 means 30 seconds.
 	Timeout time.Duration
-	// Grace は Duration 経過後、実行中のイテレーションの完了を待つ時間。
-	// 超えたものは中断して record.ErrCanceled として記録する。0 なら 30 秒。
+	// Grace is how long to wait for running iterations to finish after Duration.
+	// Those that exceed it are aborted and recorded as record.ErrCanceled. 0 means 30 seconds.
 	Grace time.Duration
 
-	// Raw が nil でなければ、Run が終わったときに生データを JSON Lines で書き出す（record.WriteRaw）。
-	// 書き出しに失敗しても、集計した Report は返す（error も同時に返す）。
+	// If Raw is not nil, the raw data is written as JSON Lines when Run finishes (record.WriteRaw).
+	// Even if writing fails, the aggregated Report is returned (together with an error).
 	Raw io.Writer
 }
 
 func (p Plan) validate() error {
 	switch {
 	case p.Scenario == nil || p.Scenario.Fn == nil:
-		return errors.New("jotaro: Plan.Scenario が未設定")
+		return errors.New("jotaro: Plan.Scenario is not set")
 	case p.Users > 0 && p.Arrival != nil:
-		return errors.New("jotaro: Plan.Users と Plan.Arrival は同時に指定できない")
+		return errors.New("jotaro: Plan.Users and Plan.Arrival cannot be set together")
 	case p.Users <= 0 && p.Arrival == nil:
-		return errors.New("jotaro: Plan.Users は 1 以上にする必要がある（または Plan.Arrival を指定する）")
+		return errors.New("jotaro: Plan.Users must be at least 1 (or set Plan.Arrival)")
 	case p.MaxUsers < 0:
-		return errors.New("jotaro: Plan.MaxUsers は 0 以上にする必要がある")
+		return errors.New("jotaro: Plan.MaxUsers must be at least 0")
 	case p.Duration <= 0:
-		return errors.New("jotaro: Plan.Duration は正の値にする必要がある")
+		return errors.New("jotaro: Plan.Duration must be positive")
 	}
 	if p.Arrival != nil {
 		return p.Arrival.validate()
@@ -82,10 +82,10 @@ func (p Plan) maxConcurrency() int {
 	return defaultMaxUsers
 }
 
-// Run は Plan に従って負荷をかけ、結果を集計して返す。
+// Run applies load according to the Plan, then aggregates and returns the result.
 //
-// ctx が終わると、実行中のイテレーションも含めてすぐに止まり、
-// そこまでの結果を返す。Report.Elapsed は、全ユーザーが止まるまでの実時間。
+// When ctx is done, everything stops at once, including running iterations,
+// and the results so far are returned. Report.Elapsed is the real time until all users have stopped.
 func Run(ctx context.Context, p Plan) (*report.Report, error) {
 	if err := p.validate(); err != nil {
 		return nil, err
@@ -133,7 +133,7 @@ func Run(ctx context.Context, p Plan) (*report.Report, error) {
 	rep := report.FromRaw(raw)
 	if p.Raw != nil {
 		if err := record.WriteRaw(p.Raw, raw); err != nil {
-			return rep, fmt.Errorf("jotaro: 生データの書き出しに失敗: %w", err)
+			return rep, fmt.Errorf("jotaro: failed to write raw data: %w", err)
 		}
 	}
 	return rep, nil

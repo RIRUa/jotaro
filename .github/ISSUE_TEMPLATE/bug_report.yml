@@ -1,0 +1,27 @@
+name: Bug report
+description: Something does not work as documented
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Minimal reproduction
+      description: A scenario / plan or CLI command that reproduces it.
+      render: go
+  - type: input
+    id: version
+    attributes:
+      label: jotaro version
+      placeholder: v0.1.0 or a commit hash
+  - type: input
+    id: env
+    attributes:
+      label: Go version and OS
+      placeholder: go1.22 / linux-amd64

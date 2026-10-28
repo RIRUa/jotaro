@@ -1,7 +1,7 @@
-// Package report は、負荷試験の結果（Report）の集計と出力。
+// Package report aggregates and outputs the results (Report) of a load test.
 //
-// 記録（record.Record など）から集計し（BuildReport / FromRaw）、テキスト・JSON・HTML に書き出し（Write）、
-// 複数の結果を結合し（MergeReports）、しきい値で判定する（Threshold / Report.Check）。
+// It aggregates records (record.Record and so on) (BuildReport / FromRaw), writes them as text, JSON or HTML (Write),
+// combines several results (MergeReports), and checks them against thresholds (Threshold / Report.Check).
 package report
 
 import (
@@ -13,7 +13,7 @@ import (
 	"github.com/RIRUa/jotaro/record"
 )
 
-// Latency は時間の分布。
+// Latency is a distribution of durations.
 type Latency struct {
 	Count int
 	Min   time.Duration
@@ -63,31 +63,31 @@ func percentile(s []time.Duration, p int) time.Duration {
 	return s[max(rank, 1)-1]
 }
 
-// RequestStats はリクエスト単位の集計。
+// RequestStats is the aggregate per request.
 type RequestStats struct {
 	Count   int
-	Latency Latency // 通信エラーのリクエストも含む
-	TTFB    Latency // 応答を受け取れたリクエストのみ
-	// DNS / Connect / TLS は、その区間が実際に起きたリクエストのみ
-	// （接続を再利用したリクエストや、http の TLS は含まれない）。
+	Latency Latency // includes requests that ended in a network error
+	TTFB    Latency // only requests that received a response
+	// DNS / Connect / TLS cover only requests in which that phase actually happened
+	// (requests that reused a connection, and TLS over plain http, are not included).
 	DNS     Latency
 	Connect Latency
 	TLS     Latency
-	// NewConns / ReusedConns は、接続を新しく張ったリクエストと再利用したリクエストの数。
+	// NewConns / ReusedConns are the number of requests that opened a new connection and that reused one.
 	NewConns    int
 	ReusedConns int
-	// Corrected は予定開始時刻からの時間（Coordinated Omission の補正後）。
-	// Users モデルでは Latency と同じ。
+	// Corrected is the time since the scheduled start (after Coordinated Omission correction).
+	// In the Users model it is the same as Latency.
 	Corrected Latency
 
-	Status map[string]int         // "2xx" のようなステータスクラスごとの件数
-	Errors map[record.ErrKind]int // 通信エラーの内訳
+	Status map[string]int         // count per status class such as "2xx"
+	Errors map[record.ErrKind]int // breakdown of network errors
 
 	BytesIn  int64
 	BytesOut int64
 }
 
-// ReuseRate は接続を再利用したリクエストの割合（0〜1）。接続の記録が無ければ 0。
+// ReuseRate is the share of requests that reused a connection (0 to 1). It is 0 when there is no connection record.
 func (q RequestStats) ReuseRate() float64 {
 	if n := q.NewConns + q.ReusedConns; n > 0 {
 		return float64(q.ReusedConns) / float64(n)
@@ -95,51 +95,51 @@ func (q RequestStats) ReuseRate() float64 {
 	return 0
 }
 
-// StepStats は u.Step 単位の集計。
+// StepStats is the aggregate per u.Step.
 type StepStats struct {
 	Name     string
 	Count    int
 	Failed   int
 	Duration Latency
-	Errors   map[record.ErrKind]int // ステップの失敗の内訳
+	Errors   map[record.ErrKind]int // breakdown of step failures
 	Requests RequestStats
 }
 
-// IterationStats はシナリオ 1 回分の集計。
+// IterationStats is the aggregate for one run of a scenario.
 type IterationStats struct {
 	Count  int
 	Failed int
-	Active Latency // Think を除いた時間
-	Total  Latency // Think を含む時間
+	Active Latency // time without Think
+	Total  Latency // time including Think
 	Errors map[record.ErrKind]int
 }
 
-// ScenarioReport はシナリオごとの集計。
+// ScenarioReport is the aggregate per scenario.
 type ScenarioReport struct {
 	Name       string
 	Iterations IterationStats
-	Steps      []StepStats // 最初に実行された順
+	Steps      []StepStats // in the order they first ran
 }
 
-// Report は実行全体の集計結果。
+// Report is the aggregated result of the whole run.
 type Report struct {
-	// Open は Arrival（オープンモデル）で実行したか。
+	// Open reports whether the run used Arrival (the open model).
 	Open bool
-	// Dropped は、同時実行数の上限のために実行しなかった到着の数。
+	// Dropped is the number of arrivals that were not run because of the concurrency cap.
 	Dropped int
 
-	// StartedAt は実行を始めた時刻 (UTC)。不明なら zero。
+	// StartedAt is when the run started (UTC). Zero if unknown.
 	StartedAt time.Time
 	Elapsed   time.Duration
 	Requests  RequestStats
-	Scenarios []ScenarioReport // 最初に実行された順
-	// Series は StartedAt から 1 秒ごとの集計。StartedAt が無いときは nil。
+	Scenarios []ScenarioReport // in the order they first ran
+	// Series is the per-second aggregate since StartedAt. nil when there is no StartedAt.
 	Series []SeriesPoint
-	// Health は StartedAt から 1 秒ごとの、負荷生成側の健全性。Run で実行したときだけ入る。
+	// Health is the per-second health of the load generator since StartedAt. Only set when the run was done with Run.
 	Health []record.HealthPoint
 }
 
-// RPS は 1 秒あたりのリクエスト数。
+// RPS is the number of requests per second.
 func (r *Report) RPS() float64 {
 	return perSecond(r.Requests.Count, r.Elapsed)
 }
@@ -151,7 +151,7 @@ func perSecond(n int, elapsed time.Duration) float64 {
 	return float64(n) / elapsed.Seconds()
 }
 
-// FromRaw は生データを集計する。Run が返す Report と同じ集計になる。
+// FromRaw aggregates raw data. The result is the same as the Report returned by Run.
 func FromRaw(raw *record.Raw) *Report {
 	rep := BuildReport(raw.Requests, raw.Steps, raw.Iterations, raw.Elapsed)
 	rep.Open = raw.Open
@@ -163,8 +163,8 @@ func FromRaw(raw *record.Raw) *Report {
 	return rep
 }
 
-// BuildReport は記録から集計する。
-// elapsed が 0 のときは、記録の最初の開始から最後の終了までを実行時間とする。
+// BuildReport aggregates from records.
+// When elapsed is 0, the run time is taken from the first start to the last end among the records.
 func BuildReport(reqs []record.Record, steps []record.StepRecord, iters []record.IterationRecord, elapsed time.Duration) *Report {
 	if elapsed == 0 {
 		elapsed = observedSpan(reqs, iters)

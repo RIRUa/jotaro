@@ -7,17 +7,17 @@ import (
 	"time"
 )
 
-// Arrival はオープンモデルの到着のしかた。
-// 到着の時刻はシナリオの所要時間と無関係に決まる。
+// Arrival is how scenarios arrive in the open model.
+// Arrival times are decided independently of how long a scenario takes.
 type Arrival interface {
-	// at は i 番目（0 始まり）の到着の、開始からの経過時間。
-	// i 番目以降に到着が無い（レートが 0 になった）ときは false。
+	// at is the time since the start of the i-th arrival (0-based).
+	// It is false when there is no arrival from the i-th on (the rate has dropped to 0).
 	at(i int) (time.Duration, bool)
 	validate() error
 }
 
-// Rate は per ごとに n 回の割合でシナリオを開始する。
-// 例えば Rate(10, time.Second) は毎秒 10 回。
+// Rate starts scenarios at a rate of n per per.
+// For example, Rate(10, time.Second) is 10 per second.
 func Rate(n int, per time.Duration) Arrival {
 	return rate{n: n, per: per}
 }
@@ -30,11 +30,11 @@ type rate struct {
 func (r rate) validate() error {
 	switch {
 	case r.n <= 0:
-		return errors.New("jotaro: Rate の回数は 1 以上にする必要がある")
+		return errors.New("jotaro: Rate count must be at least 1")
 	case r.per <= 0:
-		return errors.New("jotaro: Rate の期間は正の値にする必要がある")
+		return errors.New("jotaro: Rate period must be positive")
 	case r.per/time.Duration(r.n) <= 0:
-		return errors.New("jotaro: Rate が高すぎて間隔が 1ns 未満になる")
+		return errors.New("jotaro: Rate is so high that the interval is under 1ns")
 	}
 	return nil
 }
@@ -43,11 +43,11 @@ func (r rate) at(i int) (time.Duration, bool) {
 	return time.Duration(i) * (r.per / time.Duration(r.n)), true
 }
 
-// Ramp は到着のレートを from から to へ、over の間に直線的に変える。
-// レートは per ごとの回数で、over が過ぎたあとは to のまま続ける（to が 0 なら到着はそこで止まる）。
-// 例えば Ramp(0, 50, time.Second, 30*time.Second) は、毎秒 0 回から 50 回へ 30 秒かけて増やす。
+// Ramp changes the arrival rate linearly from from to to over over.
+// The rate is a count per per; after over has passed it stays at to (if to is 0, arrivals stop there).
+// For example, Ramp(0, 50, time.Second, 30*time.Second) raises the rate from 0 to 50 per second over 30 seconds.
 //
-// 実行全体の長さは Plan.Duration で決まる。over が Duration より長いと、to には届かない。
+// The length of the whole run is set by Plan.Duration. If over is longer than Duration, to is never reached.
 func Ramp(from, to int, per, over time.Duration) Arrival {
 	return ramp{from: from, to: to, per: per, over: over}
 }
@@ -60,15 +60,15 @@ type ramp struct {
 func (r ramp) validate() error {
 	switch {
 	case r.from < 0 || r.to < 0:
-		return errors.New("jotaro: Ramp の回数は 0 以上にする必要がある")
+		return errors.New("jotaro: Ramp counts must be at least 0")
 	case r.from == 0 && r.to == 0:
-		return errors.New("jotaro: Ramp の回数が両方 0 では到着しない")
+		return errors.New("jotaro: Ramp with both counts 0 never arrives")
 	case r.per <= 0:
-		return errors.New("jotaro: Ramp の期間は正の値にする必要がある")
+		return errors.New("jotaro: Ramp period must be positive")
 	case r.over <= 0:
-		return errors.New("jotaro: Ramp の傾斜の時間は正の値にする必要がある")
+		return errors.New("jotaro: Ramp slope duration must be positive")
 	case r.per/time.Duration(max(r.from, r.to)) <= 0:
-		return errors.New("jotaro: Ramp が高すぎて間隔が 1ns 未満になる")
+		return errors.New("jotaro: Ramp is so high that the interval is under 1ns")
 	}
 	return nil
 }
@@ -102,15 +102,15 @@ func (r ramp) at(i int) (time.Duration, bool) {
 	return time.Duration(t * float64(time.Second)), true
 }
 
-// Stage は Stages の 1 段階。Arrival を For の間だけ続ける。
+// Stage is one stage of Stages. It keeps Arrival going for For.
 type Stage struct {
 	Arrival Arrival
 	For     time.Duration
 }
 
-// Stages は複数の段階を順に実行する。
-// 各段階の Arrival は、その段階の開始を 0 として動く（Ramp の傾斜もそこから始まる）。
-// 例えば、30 秒かけて 50/s まで上げ、60 秒保ち、10 秒で 0 まで下げる:
+// Stages runs several stages in order.
+// The Arrival of each stage runs with the start of that stage as 0 (a Ramp's slope also starts there).
+// For example, ramp up to 50/s over 30 seconds, hold for 60 seconds, then ramp down to 0 over 10 seconds:
 //
 //	Stages(
 //		Stage{Ramp(0, 50, time.Second, 30*time.Second), 30 * time.Second},
@@ -118,8 +118,8 @@ type Stage struct {
 //		Stage{Ramp(50, 0, time.Second, 10*time.Second), 10 * time.Second},
 //	)
 //
-// 全段階が終わると到着は止まる。実行全体の長さは Plan.Duration で決まるので、
-// 各段階の For の合計に合わせる。
+// Arrivals stop when all stages are over. The length of the whole run is set by Plan.Duration,
+// so make it match the sum of the For of every stage.
 func Stages(stages ...Stage) Arrival {
 	s := stagedArrival{stages: stages}
 	var start time.Duration
@@ -168,14 +168,14 @@ func (st Stage) count() int {
 
 func (s stagedArrival) validate() error {
 	if len(s.stages) == 0 {
-		return errors.New("jotaro: Stages には 1 つ以上の段階が必要")
+		return errors.New("jotaro: Stages needs at least one stage")
 	}
 	for i, st := range s.stages {
 		switch {
 		case st.Arrival == nil:
-			return fmt.Errorf("jotaro: Stages の %d 番目の Arrival が未設定", i+1)
+			return fmt.Errorf("jotaro: Arrival of stage %d of Stages is not set", i+1)
 		case st.For <= 0:
-			return fmt.Errorf("jotaro: Stages の %d 番目の For は正の値にする必要がある", i+1)
+			return fmt.Errorf("jotaro: For of stage %d of Stages must be positive", i+1)
 		}
 		if err := st.Arrival.validate(); err != nil {
 			return fmt.Errorf("stages[%d]: %w", i+1, err)

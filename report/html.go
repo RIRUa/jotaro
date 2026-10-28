@@ -83,7 +83,7 @@ type htmlView struct {
 
 var latencyHeaders = []string{"min", "mean", "p50", "p90", "p95", "p99", "max"}
 
-// WriteHTML はレポートを、外部に依存しない 1 枚の HTML として w に書き出す。
+// WriteHTML writes the report to w as a single self-contained HTML file.
 func (r *Report) WriteHTML(w io.Writer) error {
 	return reportHTML.Execute(w, r.toHTMLView())
 }

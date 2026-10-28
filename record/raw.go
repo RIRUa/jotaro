@@ -8,28 +8,28 @@ import (
 	"time"
 )
 
-// RawVersion は WriteRaw が出力する生データの形式の版。互換を壊す変更のたびに上げる。
-// ReadRaw は 1 以降のすべての版を読める。
+// RawVersion is the version of the raw data format that WriteRaw emits. It is raised on every change that breaks compatibility.
+// ReadRaw can read every version from 1 on.
 const RawVersion = 1
 
-// Raw は実行の生データ。集計前のリクエスト・ステップ・イテレーションの記録を持つ。
+// Raw is the raw data of a run. It holds the records of requests, steps and iterations before aggregation.
 //
-// 集計結果（Report）は件数が増えても大きさが変わらないが、生データは件数に比例して大きくなる。
-// 後から別の切り口で再集計したり、他のツールで可視化したりするときに使う。
+// An aggregated Report keeps its size however many requests there are, while raw data grows in proportion to the count.
+// Use it to re-aggregate from another angle later, or to visualize with other tools.
 type Raw struct {
-	// Open は Arrival（オープンモデル）で実行したか。
+	// Open reports whether the run used Arrival (the open model).
 	Open bool
-	// Dropped は、同時実行数の上限のために実行しなかった到着の数。
+	// Dropped is the number of arrivals that were not run because of the concurrency cap.
 	Dropped int
-	// StartedAt は実行を始めた時刻。不明なら zero。
+	// StartedAt is when the run started. Zero if unknown.
 	StartedAt time.Time
-	// Elapsed は実行時間。0 なら記録から求める（BuildReport と同じ）。
+	// Elapsed is the run time. If 0, it is derived from the records (same as BuildReport).
 	Elapsed time.Duration
 
 	Requests   []Record
 	Steps      []StepRecord
 	Iterations []IterationRecord
-	// Health は負荷生成側の健全性。記録が無ければ nil。
+	// Health is the health of the load generator. nil if there are no records.
 	Health []HealthPoint
 }
 
@@ -123,10 +123,10 @@ func derefTime(t *time.Time) time.Time {
 // ns は d をナノ秒の整数にする。
 func ns(d time.Duration) int64 { return d.Nanoseconds() }
 
-// WriteRaw は生データを JSON Lines（1 行に 1 レコード）で w に書き出す。
+// WriteRaw writes the raw data to w as JSON Lines (one record per line).
 //
-// 先頭の行は実行全体の情報（type が "meta"）で、そのあとに request / step / iteration / health が続く。
-// 書き込みに失敗した場合は error を返す。途中まで書かれた内容は w に残る。
+// The first line holds information about the whole run (type "meta"), followed by request / step / iteration / health lines.
+// It returns an error if writing fails; what was written until then stays in w.
 func WriteRaw(w io.Writer, raw *Raw) error {
 	bw := bufio.NewWriter(w)
 	enc := json.NewEncoder(bw)
@@ -173,10 +173,10 @@ func WriteRaw(w io.Writer, raw *Raw) error {
 	return bw.Flush()
 }
 
-// ReadRaw は WriteRaw が書いた JSON Lines を読む。
+// ReadRaw reads JSON Lines written by WriteRaw.
 //
-// 知らない type の行は読み飛ばす（新しい版が足した行で、古い読み手が壊れないように）。
-// meta の行が無くても読める（その場合、実行時間は記録から求める）。
+// Lines of an unknown type are skipped (they are added by a newer version, and older readers must not break).
+// It can read data without a meta line (the run time is then derived from the records).
 func ReadRaw(r io.Reader) (*Raw, error) {
 	dec := json.NewDecoder(bufio.NewReader(r))
 	raw := &Raw{}

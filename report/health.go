@@ -29,7 +29,7 @@ func mergeHealth(a, b []record.HealthPoint, offset int) []record.HealthPoint {
 // healthCPUWarn は、これ以上の CPU 使用率を「詰まっている疑いがある」とみなす境目。
 const healthCPUWarn = 0.9
 
-// healthSummary は Health の要約。
+// healthSummary summarizes Health.
 type healthSummary struct {
 	HasCPU        bool    // CPU を取得できた点があるか
 	MaxCPU        float64 // 0〜1
@@ -37,7 +37,7 @@ type healthSummary struct {
 	MaxGoroutines int
 }
 
-// Hot は CPU が上限に近く、負荷生成側が詰まって測定値が悪く出ている疑いがあるか。
+// Hot reports whether the CPU is close to its limit, so the load generator may be saturated and the measurements worse than reality.
 func (h healthSummary) Hot() bool { return h.HasCPU && h.MaxCPU >= healthCPUWarn }
 
 // summarizeHealth は点を要約する。点が無ければ ok が false。

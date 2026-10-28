@@ -11,7 +11,7 @@ import (
 	"github.com/RIRUa/jotaro/record"
 )
 
-// Print はレポートを人が読める形で w に書き出す。
+// Print writes the report to w in a human-readable form.
 func (r *Report) Print(w io.Writer) {
 	fmt.Fprintln(w, "=== Summary ===")
 	fmt.Fprintf(w, "elapsed:    %s\n", fmtDur(r.Elapsed))

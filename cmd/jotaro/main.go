@@ -1,10 +1,10 @@
-// jotaro は結果ファイルを扱う CLI。
+// jotaro is a CLI that works with result files.
 //
-//	jotaro report [-raw] [-format html|text|json] [-o 出力先] <result.json | ->
-//	jotaro merge  [-raw] [-format html|text|json] [-o 出力先] <result.json>...
-//	jotaro check  [-raw] -t <しきい値> [-t <しきい値>]... <result.json | ->
+//	jotaro report [-raw] [-format html|text|json] [-o output] <result.json | ->
+//	jotaro merge  [-raw] [-format html|text|json] [-o output] <result.json>...
+//	jotaro check  [-raw] -t <threshold> [-t <threshold>]... <result.json | ->
 //
-// -raw を付けると、入力を JSON Lines の生データ（Plan.Raw の出力）として読み、集計し直す。
+// With -raw, the input is read as raw JSON Lines data (the output of Plan.Raw) and re-aggregated.
 package main
 
 import (
@@ -21,16 +21,16 @@ import (
 const usage = `usage: jotaro <command> [flags]
 
 commands:
-  report   保存した JSON の結果から、レポートを生成する
-  merge    複数の JSON の結果を 1 つにまとめる
-  check    結果がしきい値（例: p95<200ms）を満たすか確かめる。満たさなければ終了コード 1
+  report   build a report from a saved JSON result
+  merge    combine several JSON results into one
+  check    check whether a result meets the thresholds (e.g. p95<200ms); exit code 1 if not
 `
 
 func main() {
 	os.Exit(run(os.Args[1:], os.Stdin, os.Stdout, os.Stderr))
 }
 
-// run は終了コードを返す。入出力を引数で受け取るので、テストから呼べる。
+// run returns the exit code. It takes its input and output as arguments, so tests can call it.
 func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
 		fmt.Fprint(stderr, usage)
@@ -56,11 +56,11 @@ func runReport(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("report", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.Usage = func() {
-		fmt.Fprintln(stderr, "usage: jotaro report [-raw] [-format html|text|json] [-o 出力先] <result.json | ->")
+		fmt.Fprintln(stderr, "usage: jotaro report [-raw] [-format html|text|json] [-o output] <result.json | ->")
 		fs.PrintDefaults()
 	}
-	format := fs.String("format", "html", "出力の形式 (text, json, html)")
-	out := fs.String("o", "", "出力先のファイル。空なら標準出力")
+	format := fs.String("format", "html", "output format (text, json, html)")
+	out := fs.String("o", "", "output file; standard output if empty")
 	raw := fs.Bool("raw", false, rawUsage)
 	if err := fs.Parse(args); err != nil {
 		if err == flag.ErrHelp {
@@ -88,7 +88,7 @@ func runReport(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	return emit(rep, f, *out, stdout, stderr)
 }
 
-// emit はレポートを out（空なら stdout）に書き出し、終了コードを返す。
+// emit writes the report to out (stdout if empty) and returns the exit code.
 func emit(rep *report.Report, f report.Format, out string, stdout, stderr io.Writer) int {
 	if out == "" {
 		if err := rep.Write(stdout, f); err != nil {
@@ -108,11 +108,11 @@ func runMerge(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("merge", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.Usage = func() {
-		fmt.Fprintln(stderr, "usage: jotaro merge [-raw] [-format html|text|json] [-o 出力先] <result.json>...")
+		fmt.Fprintln(stderr, "usage: jotaro merge [-raw] [-format html|text|json] [-o output] <result.json>...")
 		fs.PrintDefaults()
 	}
-	format := fs.String("format", "json", "出力の形式 (text, json, html)")
-	out := fs.String("o", "", "出力先のファイル。空なら標準出力")
+	format := fs.String("format", "json", "output format (text, json, html)")
+	out := fs.String("o", "", "output file; standard output if empty")
 	raw := fs.Bool("raw", false, rawUsage)
 	if err := fs.Parse(args); err != nil {
 		if err == flag.ErrHelp {
@@ -148,7 +148,7 @@ func runMerge(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	return emit(merged, f, *out, stdout, stderr)
 }
 
-// thresholdFlags は -t を繰り返し指定できるようにする。
+// thresholdFlags lets -t be given repeatedly.
 type thresholdFlags []report.Threshold
 
 func (t *thresholdFlags) String() string { return "" }
@@ -166,12 +166,12 @@ func runCheck(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("check", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.Usage = func() {
-		fmt.Fprintln(stderr, "usage: jotaro check [-raw] -t <しきい値> [-t <しきい値>]... <result.json | ->")
-		fmt.Fprintln(stderr, "  例: jotaro check -t 'p95<200ms' -t 'error_rate<1%' -t 'p99{step=login}<100ms' result.json")
+		fmt.Fprintln(stderr, "usage: jotaro check [-raw] -t <threshold> [-t <threshold>]... <result.json | ->")
+		fmt.Fprintln(stderr, "  e.g. jotaro check -t 'p95<200ms' -t 'error_rate<1%' -t 'p99{step=login}<100ms' result.json")
 		fs.PrintDefaults()
 	}
 	var ts thresholdFlags
-	fs.Var(&ts, "t", "しきい値。繰り返し指定できる（例: p95<200ms）")
+	fs.Var(&ts, "t", "threshold; can be repeated (e.g. p95<200ms)")
 	raw := fs.Bool("raw", false, rawUsage)
 	if err := fs.Parse(args); err != nil {
 		if err == flag.ErrHelp {
@@ -198,14 +198,14 @@ func runCheck(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	return 0
 }
 
-// errMessage は、ライブラリのエラーが持つ "jotaro: " の接頭辞を外す。CLI が自分で付けるので二重にしない。
+// errMessage strips the "jotaro: " prefix of library errors. The CLI adds its own, so it must not be doubled.
 func errMessage(err error) string {
 	return strings.TrimPrefix(err.Error(), "jotaro: ")
 }
 
-const rawUsage = "入力を JSON Lines の生データとして読み、集計し直す"
+const rawUsage = "read the input as raw JSON Lines data and re-aggregate it"
 
-// readReport は path（"-" なら stdin）から結果を読む。raw なら生データを集計する。
+// readReport reads a result from path (stdin if "-"). With raw, it aggregates raw data.
 func readReport(path string, raw bool, stdin io.Reader) (*report.Report, error) {
 	in := stdin
 	if path != "-" {
@@ -226,7 +226,7 @@ func readReport(path string, raw bool, stdin io.Reader) (*report.Report, error) 
 	return report.ReadJSON(in)
 }
 
-// writeFile は書き込みに失敗したとき、途中まで書かれたファイルを消す。
+// writeFile removes the partly written file when writing fails.
 func writeFile(path string, rep *report.Report, f report.Format) error {
 	file, err := os.Create(path)
 	if err != nil {
@@ -234,7 +234,7 @@ func writeFile(path string, rep *report.Report, f report.Format) error {
 	}
 	if err := rep.Write(file, f); err != nil {
 		file.Close()
-		_ = os.Remove(path) // 書き込みのエラーを返すのが先。消せなくてもそれは伝えない
+		_ = os.Remove(path) // returning the write error comes first; failing to remove is not reported
 		return err
 	}
 	return file.Close()

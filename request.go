@@ -10,17 +10,17 @@ import (
 	"strings"
 )
 
-// RequestSpec はリクエストの記述。
-// 将来 YAML などから組み立てられるよう、実行とは切り離したデータとして持つ。
+// RequestSpec describes a request.
+// It is kept as data separate from execution so that it can later be built from YAML and the like.
 type RequestSpec struct {
 	Method string
 	Path   string
-	Query  url.Values // Path のクエリに足される
+	Query  url.Values // added to the query of Path
 	Header http.Header
 	Body   []byte
 }
 
-// Request はリクエストのビルダー。Do で実行する。
+// Request is a request builder. Send it with Do.
 type Request struct {
 	Spec RequestSpec
 
@@ -35,11 +35,11 @@ func newRequest(exec *executor, method, path string) *Request {
 	}
 }
 
-// JSON はボディを JSON として設定する。
+// JSON sets the body as JSON.
 func (r *Request) JSON(v any) *Request {
 	b, err := json.Marshal(v)
 	if err != nil {
-		r.err = fmt.Errorf("jotaro: JSON エンコードに失敗: %w", err)
+		r.err = fmt.Errorf("jotaro: failed to encode JSON: %w", err)
 		return r
 	}
 	r.Spec.Body = b
@@ -47,15 +47,15 @@ func (r *Request) JSON(v any) *Request {
 	return r
 }
 
-// Body はボディを型に応じて設定する。
+// Body sets the body according to its type.
 //
-//	[]byte / string  そのまま送る。Content-Type は設定しないので、必要なら Header で付ける
-//	io.Reader        最後まで読んで、そのまま送る。Content-Type は設定しない
-//	url.Values       Form と同じ
-//	それ以外         JSON と同じ（構造体、map、スライスなど）
+//	[]byte / string  sent as is. Content-Type is not set; add it with Header if you need it
+//	io.Reader        read to the end and sent as is. Content-Type is not set
+//	url.Values       same as Form
+//	anything else    same as JSON (structs, maps, slices, ...)
 //
-// nil は何も設定しない。JSON として送る意図をはっきりさせたいときは JSON を使う
-// （string を JSON 文字列として送りたいときも JSON）。
+// nil sets nothing. Use JSON when you want to make it explicit that the body is JSON
+// (also when you want to send a string as a JSON string).
 func (r *Request) Body(v any) *Request {
 	switch b := v.(type) {
 	case nil:
@@ -67,7 +67,7 @@ func (r *Request) Body(v any) *Request {
 	case io.Reader:
 		data, err := io.ReadAll(b)
 		if err != nil {
-			r.err = fmt.Errorf("jotaro: ボディの読み込みに失敗: %w", err)
+			r.err = fmt.Errorf("jotaro: failed to read body: %w", err)
 			return r
 		}
 		r.Spec.Body = data
@@ -79,15 +79,15 @@ func (r *Request) Body(v any) *Request {
 	return r
 }
 
-// Form はボディを application/x-www-form-urlencoded として設定する。
+// Form sets the body as application/x-www-form-urlencoded.
 func (r *Request) Form(v url.Values) *Request {
 	r.Spec.Body = []byte(v.Encode())
 	r.Spec.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	return r
 }
 
-// Query はクエリパラメーターを足す。同じキーを繰り返すと複数の値になる。
-// 値は Path に直書きするときと違い、エスケープされる。
+// Query adds a query parameter. Repeating a key gives multiple values.
+// Unlike writing it directly into Path, the value is escaped.
 func (r *Request) Query(key, value string) *Request {
 	if r.Spec.Query == nil {
 		r.Spec.Query = url.Values{}
@@ -96,7 +96,7 @@ func (r *Request) Query(key, value string) *Request {
 	return r
 }
 
-// Queries はクエリパラメーターをまとめて足す。
+// Queries adds several query parameters at once.
 func (r *Request) Queries(v url.Values) *Request {
 	for k, vs := range v {
 		for _, x := range vs {
@@ -106,7 +106,7 @@ func (r *Request) Queries(v url.Values) *Request {
 	return r
 }
 
-// Headers はヘッダーをまとめて設定する。同じキーは上書きする。
+// Headers sets several headers at once. An existing key is overwritten.
 func (r *Request) Headers(h map[string]string) *Request {
 	for k, v := range h {
 		r.Header(k, v)
@@ -114,24 +114,24 @@ func (r *Request) Headers(h map[string]string) *Request {
 	return r
 }
 
-// Header はヘッダーを設定する。
+// Header sets a header.
 func (r *Request) Header(key, value string) *Request {
 	r.Spec.Header.Set(key, value)
 	return r
 }
 
-// Bearer は Authorization ヘッダーに Bearer トークンを設定する。
+// Bearer sets a Bearer token in the Authorization header.
 func (r *Request) Bearer(token string) *Request {
 	return r.Header("Authorization", "Bearer "+token)
 }
 
-// Basic は Authorization ヘッダーに Basic 認証を設定する。
+// Basic sets Basic authentication in the Authorization header.
 func (r *Request) Basic(user, pass string) *Request {
 	return r.Header("Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte(user+":"+pass)))
 }
 
-// Do はリクエストを実行する。
-// 通信エラーはレスポンスに保持され、Decode や ExpectStatus が返す。
+// Do sends the request.
+// A network error is kept in the response and returned by Decode or ExpectStatus.
 func (r *Request) Do() *Response {
 	return r.exec.do(r)
 }
