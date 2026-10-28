@@ -47,7 +47,7 @@ func (e *executor) do(r *Request) *Response {
 		return &Response{err: r.err}
 	}
 
-	url := e.resolve(r.Spec.Path)
+	url := withQuery(e.resolve(r.Spec.Path), r.Spec.Query)
 	rec := e.tag
 	rec.Method = r.Spec.Method
 	rec.URL = url

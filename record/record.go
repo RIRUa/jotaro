@@ -154,6 +154,16 @@ func (c *Collector) Snapshot() (requests []Record, steps []StepRecord, iteration
 	return requests, steps, iterations
 }
 
+// Take は記録を渡して Collector を空にする。Snapshot と違い、コピーしない。
+// 全部の記録を持つので、実行が終わって誰も Add しなくなってから呼ぶ。
+func (c *Collector) Take() (requests []Record, steps []StepRecord, iterations []IterationRecord) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	requests, steps, iterations = c.requests, c.steps, c.iterations
+	c.requests, c.steps, c.iterations = nil, nil, nil
+	return requests, steps, iterations
+}
+
 // HealthPoint は負荷生成側（jotaro を動かしているプロセス）の、1 秒ごとの健全性。
 // CPU が上限に近いときは、生成側が詰まって測定値が実際より悪く出ている疑いがある。
 type HealthPoint struct {
