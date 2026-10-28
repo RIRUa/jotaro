@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"runtime"
 	"sync"
 	"testing"
 	"time"
@@ -221,7 +222,11 @@ func TestConnReuse(t *testing.T) {
 	if len(got) != 2 {
 		t.Fatalf("records = %d", len(got))
 	}
-	if got[0].Conn != record.ConnNew || got[0].Connect <= 0 || got[0].TLS <= 0 {
+	if got[0].Conn != record.ConnNew {
+		t.Errorf("1 回目は新規接続のはず: %+v", got[0])
+	}
+	// Windows は時計が粗く、ループバックの接続が 0 と測られることがある。
+	if runtime.GOOS != "windows" && (got[0].Connect <= 0 || got[0].TLS <= 0) {
 		t.Errorf("1 回目は新規接続で Connect/TLS を持つはず: %+v", got[0])
 	}
 	if got[1].Conn != record.ConnReused || got[1].Connect != 0 || got[1].TLS != 0 || got[1].DNS != 0 {
