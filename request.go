@@ -1,8 +1,10 @@
 package jotaro
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -42,6 +44,38 @@ func (r *Request) JSON(v any) *Request {
 	}
 	r.Spec.Body = b
 	r.Spec.Header.Set("Content-Type", "application/json")
+	return r
+}
+
+// Body はボディを型に応じて設定する。
+//
+//	[]byte / string  そのまま送る。Content-Type は設定しないので、必要なら Header で付ける
+//	io.Reader        最後まで読んで、そのまま送る。Content-Type は設定しない
+//	url.Values       Form と同じ
+//	それ以外         JSON と同じ（構造体、map、スライスなど）
+//
+// nil は何も設定しない。JSON として送る意図をはっきりさせたいときは JSON を使う
+// （string を JSON 文字列として送りたいときも JSON）。
+func (r *Request) Body(v any) *Request {
+	switch b := v.(type) {
+	case nil:
+		return r
+	case []byte:
+		r.Spec.Body = b
+	case string:
+		r.Spec.Body = []byte(b)
+	case io.Reader:
+		data, err := io.ReadAll(b)
+		if err != nil {
+			r.err = fmt.Errorf("jotaro: ボディの読み込みに失敗: %w", err)
+			return r
+		}
+		r.Spec.Body = data
+	case url.Values:
+		return r.Form(b)
+	default:
+		return r.JSON(v)
+	}
 	return r
 }
 
@@ -89,6 +123,11 @@ func (r *Request) Header(key, value string) *Request {
 // Bearer は Authorization ヘッダーに Bearer トークンを設定する。
 func (r *Request) Bearer(token string) *Request {
 	return r.Header("Authorization", "Bearer "+token)
+}
+
+// Basic は Authorization ヘッダーに Basic 認証を設定する。
+func (r *Request) Basic(user, pass string) *Request {
+	return r.Header("Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte(user+":"+pass)))
 }
 
 // Do はリクエストを実行する。
