@@ -1,37 +1,39 @@
 # jotaro
 
-シナリオ（ログイン → 一覧 → 注文 のような一連の流れ）を Go で書いて、HTTP サーバーに負荷をかけるライブラリです。結果はコンソール・JSON・HTML で出せて、CLI でしきい値判定もできます。
+[English](README.md) | [日本語](README_jp.md)
 
-- シナリオは ふつうの Go のコードで書く（`if` や変数がそのまま使える）
-- 負荷のかけ方は 2 通り
-  - **クローズド**: 固定数のユーザーがシナリオを繰り返す（`Users`）
-  - **オープン**: 一定の割合でシナリオを開始する（`Rate` / `Ramp` / `Stages`）。サーバーが遅くなっても到着のペースを落とさず、遅延は予定開始時刻から測る（Coordinated Omission の補正）
-- ステップ単位のレイテンシ（p50 / p90 / p95 / p99 / max）、エラーの内訳、スループット、TTFB、DNS / TCP / TLS 時間、接続の再利用率を計測する
-- 1 秒ごとの時系列と、負荷生成側の健全性（CPU・ゴルーチン数）も記録する
+A Go library for load-testing HTTP servers with scenarios (a flow such as login → list → order). Results can be written to the console, JSON or HTML, and the CLI can check them against thresholds.
 
-設計の考え方は [`DESIGN.md`](DESIGN.md)、結果の形式としきい値の仕様は [`docs/result.md`](docs/result.md) にあります。
+- Scenarios are plain Go code (`if` and variables just work)
+- Two ways to apply load
+  - **Closed**: a fixed number of users repeat the scenario (`Users`)
+  - **Open**: scenarios start at a fixed rate (`Rate` / `Ramp` / `Stages`). Arrivals keep their pace even when the server slows down, and latency is measured from the scheduled start time (Coordinated Omission correction)
+- Measures per-step latency (p50 / p90 / p95 / p99 / max), error breakdown, throughput, TTFB, DNS / TCP / TLS time, and connection reuse rate
+- Also records a per-second time series and the health of the load generator itself (CPU, goroutine count)
 
-## 試してみる
+For the design rationale see [`DESIGN.md`](DESIGN.md); for the result format and the threshold spec see [`docs/result.md`](docs/result.md).
 
-自前のモックサーバーを立てるサンプルが付いています。
+## Try it
+
+A sample that starts its own mock server is included.
 
 ```sh
-go run ./examples/checkout                                    # 20 ユーザー固定
-go run ./examples/checkout -rate 50                           # 毎秒 50 シナリオ
-go run ./examples/checkout -rate 100 -duration 12s -stages    # 上げる → 保つ → 下げる
-go run ./examples/checkout -format html -o result.html        # HTML レポート
-go run ./examples/checkout -raw raw.jsonl                     # 生データ（JSON Lines）も書き出す
+go run ./examples/checkout                                    # 20 fixed users
+go run ./examples/checkout -rate 50                           # 50 scenarios per second
+go run ./examples/checkout -rate 100 -duration 12s -stages    # ramp up → hold → ramp down
+go run ./examples/checkout -format html -o result.html        # HTML report
+go run ./examples/checkout -raw raw.jsonl                     # also write raw data (JSON Lines)
 ```
 
-## ライブラリとして使う
+## Use as a library
 
 ```sh
 go get github.com/RIRUa/jotaro
 ```
 
-Go 1.22 以上が必要です。
+Requires Go 1.22 or later.
 
-### 1. シナリオを書く
+### 1. Write a scenario
 
 ```go
 var checkout = jotaro.NewScenario("checkout", func(ctx context.Context, u *jotaro.User) error {
@@ -41,10 +43,10 @@ var checkout = jotaro.NewScenario("checkout", func(ctx context.Context, u *jotar
 	if err := u.Step("login", func(s *jotaro.Step) error {
 		return s.Post("/login").JSON(creds).Do().Decode(&login)
 	}); err != nil {
-		return err // 止めるなら return err。続けるなら無視する
+		return err // return err to stop; ignore it to continue
 	}
 
-	u.Think(50 * time.Millisecond) // 待ち時間。レイテンシには含めない
+	u.Think(50 * time.Millisecond) // waiting time; not counted in latency
 
 	return u.Step("order", func(s *jotaro.Step) error {
 		return s.Post("/orders").Bearer(login.Token).
@@ -54,18 +56,18 @@ var checkout = jotaro.NewScenario("checkout", func(ctx context.Context, u *jotar
 })
 ```
 
-- `Step` は計測の単位。結果はステップごとに集計される
-- `Get` / `Post` / `Put` / `Patch` / `Delete` でリクエストを組み立て、`Do()` で送る
-- リクエストには次を足せる（`Do()` の前につなげる）
-  - ヘッダー: `Header(k, v)` / `Headers(map)` / `Bearer(token)` / `Basic(user, pass)`
-  - クエリ: `Query(k, v)` / `Queries(url.Values)`（値はエスケープされる）
-  - ボディ: `JSON(v)` / `Form(url.Values)` / `Body(v)`（`[]byte` / `string` / `io.Reader` はそのまま、`url.Values` はフォーム、それ以外は JSON。`Content-Type` が要るときは `Header` で付ける）
-- `Do()` のあとに `Decode(&v)`（JSON を読む）か `ExpectStatus(code)`（ステータスを検証する）をつなげる
-- `Think` は思考時間。シナリオ時間は、`Think` を除いたものと含めたものの両方が出る
-- ステップが失敗しても、シナリオの関数が `nil` を返せばそのイテレーションは成功として数える。ステップの失敗はステップ単位の集計で見る
-- Cookie はイテレーションごとに新しくなる。接続プールは全ユーザーで共有する
+- `Step` is the unit of measurement. Results are aggregated per step
+- Build a request with `Get` / `Post` / `Put` / `Patch` / `Delete` and send it with `Do()`
+- The following can be chained onto a request before `Do()`
+  - Headers: `Header(k, v)` / `Headers(map)` / `Bearer(token)` / `Basic(user, pass)`
+  - Query: `Query(k, v)` / `Queries(url.Values)` (values are escaped)
+  - Body: `JSON(v)` / `Form(url.Values)` / `Body(v)` (`[]byte` / `string` / `io.Reader` are sent as is, `url.Values` as a form, anything else as JSON. Set `Content-Type` with `Header` when you need it)
+- After `Do()`, chain `Decode(&v)` (read JSON) or `ExpectStatus(code)` (verify the status)
+- `Think` is think time. Scenario time is reported both without and with `Think`
+- Even if a step fails, the iteration counts as successful as long as the scenario function returns `nil`. Step failures show up in the per-step stats
+- Cookies are fresh for each iteration. The connection pool is shared by all users
 
-ユーザーごとに別のデータ（アカウントなど）を配るには `Feeder` を使う。CSV からは `LoadCSV` で読める。
+Use a `Feeder` to hand out different data (accounts, etc.) to each user. `LoadCSV` reads one from a CSV.
 
 ```go
 var accounts = jotaro.NewFeeder([]map[string]string{
@@ -75,35 +77,35 @@ var accounts = jotaro.NewFeeder([]map[string]string{
 creds, ok := accounts.Next()
 ```
 
-### 2. 負荷のかけ方を決めて実行する
+### 2. Choose the load and run
 
 ```go
 rep, err := jotaro.Run(ctx, jotaro.Plan{
 	Scenario: checkout,
 	BaseURL:  "http://localhost:8080",
 	Duration: time.Minute,
-	Users:    20, // クローズド。オープンにするなら Users の代わりに Arrival
+	Users:    20, // closed model. For the open model, use Arrival instead of Users
 })
 ```
 
-`Users` と `Arrival` はどちらか一方だけを指定します。
+Specify exactly one of `Users` and `Arrival`.
 
-| 指定 | 内容 |
+| Setting | Meaning |
 |---|---|
-| `Users: 20` | 20 ユーザーが `Duration` の間シナリオを繰り返す |
-| `Arrival: jotaro.Rate(50, time.Second)` | 毎秒 50 回シナリオを開始する |
-| `Arrival: jotaro.Ramp(0, 100, time.Second, 10*time.Second)` | 10 秒かけて毎秒 0 回から 100 回へ増やす |
-| `Arrival: jotaro.Stages(...)` | 段階ごとに `Arrival` を切り替える（上げる → 保つ → 下げる、など） |
+| `Users: 20` | 20 users repeat the scenario for `Duration` |
+| `Arrival: jotaro.Rate(50, time.Second)` | Start 50 scenarios per second |
+| `Arrival: jotaro.Ramp(0, 100, time.Second, 10*time.Second)` | Increase from 0 to 100 per second over 10 seconds |
+| `Arrival: jotaro.Stages(...)` | Switch `Arrival` stage by stage (ramp up → hold → ramp down, etc.) |
 
-そのほか、`MaxUsers`（オープンのときの同時実行数の上限。超えた分はドロップとして数える）、`Timeout`（1 リクエストの上限）、`Grace`（`Duration` 後に実行中のイテレーションを待つ時間）、`Raw`（生データの書き出し先）を指定できます。
+You can also set `MaxUsers` (the cap on concurrency in the open model; arrivals beyond it are counted as dropped), `Timeout` (the limit for a single request), `Grace` (how long to wait for running iterations after `Duration`), and `Raw` (where to write raw data).
 
-### 3. 結果を出す
+### 3. Output the results
 
 ```go
 rep.Write(os.Stdout, report.FormatText) // FormatText / FormatJSON / FormatHTML
 ```
 
-しきい値で判定することもできます。
+You can also judge the results against thresholds.
 
 ```go
 th, _ := report.ParseThreshold("p95<200ms")
@@ -116,59 +118,59 @@ if !checks.Passed() {
 
 ## CLI
 
-保存した結果を、あとから加工・判定するための CLI です。
+A CLI for processing and judging saved results afterwards.
 
 ```sh
 go install github.com/RIRUa/jotaro/cmd/jotaro@latest
 ```
 
-オプションは、ファイル名より**前**に書きます。
+Put options **before** the file names.
 
 ```sh
-# JSON の結果から HTML レポートを作る（既定は html）
+# Build an HTML report from a JSON result (default format is html)
 jotaro report -o result.html result.json
 
-# 複数の結果（別マシンで走らせた分など）を 1 つにまとめる（既定は json）
+# Merge several results (e.g. from different machines) into one (default format is json)
 jotaro merge -o merged.json a.json b.json
 
-# しきい値を満たすか確かめる。満たさないものが 1 つでもあれば終了コード 1
+# Check the thresholds. Exit code 1 if any of them is not met
 jotaro check -t 'p95<200ms' -t 'error_rate<1%' -t 'p99{step=login}<100ms' result.json
 ```
 
-- 入力に `-` を渡すと標準入力から読む（`report` / `check`）
-- `-raw` を付けると、入力を JSON Lines の生データ（`Plan.Raw` の出力）として読み、集計し直す
-- `-format text|json|html` で出力の形式を選ぶ
+- Pass `-` as the input to read from standard input (`report` / `check`)
+- With `-raw`, the input is read as raw JSON Lines data (the output of `Plan.Raw`) and re-aggregated
+- Choose the output format with `-format text|json|html`
 
-### しきい値の書き方
+### Threshold syntax
 
-`指標[{scenario=名前,step=名前}] 演算子 値`。演算子は `<` `<=` `>` `>=`。
+`metric[{scenario=name,step=name}] operator value`. Operators are `<` `<=` `>` `>=`.
 
-| 指標 | 意味 |
+| Metric | Meaning |
 |---|---|
-| `min` `mean` `p50` `p90` `p95` `p99` `max` | リクエストのレイテンシ（`200ms`、`1.5s`） |
-| 上の頭に `corrected_` `ttfb_` `dns_` `connect_` `tls_` | CO 補正後 / TTFB / DNS / TCP / TLS の時間 |
-| `error_rate` | 通信エラーと `ExpectStatus` 不一致の割合（`1%` または `0.01`） |
-| `http_4xx_rate` `http_5xx_rate` | HTTP 4xx / 5xx の割合 |
-| `iteration_fail_rate` | 失敗したイテレーションの割合 |
-| `requests` `rps` `dropped` | リクエスト数 / 毎秒のリクエスト数 / ドロップされた到着の数 |
+| `min` `mean` `p50` `p90` `p95` `p99` `max` | Request latency (`200ms`, `1.5s`) |
+| The above prefixed with `corrected_` `ttfb_` `dns_` `connect_` `tls_` | After CO correction / TTFB / DNS / TCP / TLS time |
+| `error_rate` | Share of network errors and `ExpectStatus` mismatches (`1%` or `0.01`) |
+| `http_4xx_rate` `http_5xx_rate` | Share of HTTP 4xx / 5xx |
+| `iteration_fail_rate` | Share of failed iterations |
+| `requests` `rps` `dropped` | Number of requests / requests per second / number of dropped arrivals |
 
-対象が無い、またはデータが無いときは「満たさなかった」扱いになります。ステップ名の打ち間違いで通ってしまわないようにするためです。詳しくは [`docs/result.md`](docs/result.md) の 5 章を見てください。
+When the target or the data is missing, the threshold counts as not met, so that a mistyped step name cannot pass silently. See chapter 5 of [`docs/result.md`](docs/result.md) for details.
 
-## パッケージ
+## Packages
 
-| パッケージ | 内容 |
+| Package | Contents |
 |---|---|
-| `jotaro` | シナリオ（`Scenario` / `User` / `Step`）と負荷のかけ方（`Plan` / `Run` / `Rate` / `Ramp` / `Stages`）。使う人の入口 |
-| `report` | 結果（`Report`）の集計・出力（text / JSON / HTML）・結合・しきい値判定 |
-| `record` | リクエスト単位の記録と、生データ（JSON Lines）の読み書き |
-| `cmd/jotaro` | CLI（`report` / `merge` / `check`） |
+| `jotaro` | Scenarios (`Scenario` / `User` / `Step`) and load models (`Plan` / `Run` / `Rate` / `Ramp` / `Stages`). The entry point for users |
+| `report` | Aggregation of results (`Report`), output (text / JSON / HTML), merging, and threshold checks |
+| `record` | Per-request records and reading/writing raw data (JSON Lines) |
+| `cmd/jotaro` | CLI (`report` / `merge` / `check`) |
 
-## 注意
+## Caveats
 
-- 計測できるのは HTTP のみです
-- 結果の p50 などは、現状は全記録をソートして求めています。長時間・高負荷ではメモリを使います
-- 統計的な比較（2 つの結果に有意差があるか）をする機能はありません。`check` は基準を決めて合否を見る方式です
+- Only HTTP can be measured
+- Percentiles such as p50 are currently computed by sorting all records, which uses memory on long, high-load runs
+- There is no statistical comparison (whether two results differ significantly). `check` works by setting criteria and judging pass or fail
 
-## ライセンス
+## License
 
 [MIT](LICENSE)

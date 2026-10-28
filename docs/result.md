@@ -1,81 +1,83 @@
-# 結果（リザルト）の仕様
+# Result specification
 
-jotaro の実行結果に関する仕様メモ。**実装済みの部分**と**未実装（提案）の部分**を分けて書く。
+[English](result.md) | [日本語](result_jp.md)
 
-## 1. 現状（実装済み）
+Spec notes on jotaro's run results. The **implemented** parts and the **unimplemented (proposed)** parts are written separately.
 
-結果は **メモリ上の `Report` 構造体**で、コンソール表示・JSON・HTML に書き出せる（4 章）。生データは JSON Lines に書き出せる（下の「生データ」）。
+## 1. Current state (implemented)
+
+A result is an **in-memory `Report` struct**, which can be written to the console, JSON or HTML (chapter 4). Raw data can be written as JSON Lines (see "Raw data" below).
 
 ```
-Run() ─▶ Collector ─▶ report.BuildReport() ─▶ *report.Report ─▶ print.go ─▶ コンソール
-        (生データ)      (集計)          (メモリ)
+Run() ─▶ Collector ─▶ report.BuildReport() ─▶ *report.Report ─▶ print.go ─▶ console
+        (raw data)      (aggregation)          (in memory)
 ```
 
-| 層 | 型 | ファイル | 役割 |
+| Layer | Type | File | Role |
 |---|---|---|---|
-| 生データ | `record.Record` / `StepRecord` / `IterationRecord` | `record/record.go` | リクエスト・ステップ・シナリオ1回ごとの記録 |
-| 収集 | `record.Collector` | `record/record.go` | 並行に記録を受け取る（`Snapshot()` でコピー取得） |
-| 集計 | `report.Report` | `report/report.go` | 3階層（リクエスト / ステップ / シナリオ）の集計結果 |
-| 出力 | — | `report/print.go` | コンソール表示 |
+| Raw data | `record.Record` / `StepRecord` / `IterationRecord` | `record/record.go` | Records per request, step and scenario run |
+| Collection | `record.Collector` | `record/record.go` | Receives records concurrently (`Snapshot()` returns a copy) |
+| Aggregation | `report.Report` | `report/report.go` | Aggregated results at three levels (request / step / scenario) |
+| Output | — | `report/print.go` | Console output |
 
-### `Report` の構造
+### Structure of `Report`
 
 ```
 Report
-├─ Open        オープンモデル（Rate）で実行したか
-├─ Dropped     MaxUsers 超過で実行しなかった到着の数
-├─ Elapsed     実行時間（Duration より少し長くなる）
-├─ Requests    RequestStats（全リクエスト合計）
+├─ Open        whether the run used the open model (Rate)
+├─ Dropped     number of arrivals not run because MaxUsers was exceeded
+├─ Elapsed     run time (slightly longer than Duration)
+├─ Requests    RequestStats (all requests combined)
 └─ Scenarios[] ScenarioReport
    ├─ Name
-   ├─ Iterations  IterationStats（Active = Think 除く / Total = Think 含む）
-   └─ Steps[]     StepStats（最初に実行された順）
+   ├─ Iterations  IterationStats (Active = excluding Think / Total = including Think)
+   └─ Steps[]     StepStats (in order of first execution)
       └─ Requests RequestStats
 ```
 
-### `Latency`（時間の分布）
+### `Latency` (distribution of durations)
 
-| フィールド | 内容 |
+| Field | Meaning |
 |---|---|
-| `Count` | 件数 |
-| `Min` / `Mean` / `Max` | 最小 / 平均 / 最大 |
-| `P50` `P90` `P95` `P99` | パーセンタイル（nearest-rank 法） |
+| `Count` | Number of samples |
+| `Min` / `Mean` / `Max` | Minimum / mean / maximum |
+| `P50` `P90` `P95` `P99` | Percentiles (nearest-rank method) |
 
 ### `RequestStats`
 
-| フィールド | 内容 |
+| Field | Meaning |
 |---|---|
-| `Count` | リクエスト数 |
-| `Latency` | レイテンシ。通信エラーのものも含む |
-| `TTFB` | 応答を受け取れたものだけ |
-| `Corrected` | 予定開始時刻からの時間（Coordinated Omission 補正後）。`Users` モデルでは `Latency` と同じ |
-| `Status` | `"2xx"` などステータスクラスごとの件数 |
-| `Errors` | 通信エラーの内訳（`ErrKind` ごと） |
-| `BytesIn` / `BytesOut` | ボディのバイト数（ヘッダーは含まない） |
+| `Count` | Number of requests |
+| `Latency` | Latency, including requests that ended in a network error |
+| `TTFB` | Only requests that received a response |
+| `Corrected` | Time from the scheduled start (after Coordinated Omission correction). Same as `Latency` in the `Users` model |
+| `Status` | Counts per status class such as `"2xx"` |
+| `Errors` | Breakdown of network errors (per `ErrKind`) |
+| `BytesIn` / `BytesOut` | Body bytes (headers are not included) |
 
-### `ErrKind`（失敗の種類）
+### `ErrKind` (kinds of failure)
 
-| 値 | 意味 |
+| Value | Meaning |
 |---|---|
-| `""`（`ErrNone`） | 成功 |
-| `timeout` | リクエストのタイムアウト |
-| `connection_refused` | 接続拒否 |
-| `dns` | 名前解決の失敗 |
-| `tls` | TLS の失敗 |
-| `canceled` | `Grace` 超過などによる中断 |
-| `expect_mismatch` | `ExpectStatus` などの期待値の不一致 |
-| `other` | 上記以外 |
+| `""` (`ErrNone`) | Success |
+| `timeout` | Request timeout |
+| `connection_refused` | Connection refused |
+| `dns` | Name resolution failure |
+| `tls` | TLS failure |
+| `canceled` | Aborted, e.g. because `Grace` was exceeded |
+| `expect_mismatch` | An expectation such as `ExpectStatus` did not match |
+| `other` | Anything else |
 
-HTTP 4xx/5xx は `ErrKind` ではなくステータス（`Status`）として記録される。
+HTTP 4xx/5xx are recorded as a status (`Status`), not as an `ErrKind`.
 
-### 補足
+### Notes
 
-- `RPS()` は `Requests.Count / Elapsed`。
-- 集計は全記録をソートして求める。長時間・高負荷でメモリが問題になったら、ヒストグラムに置き換える予定。
+- `RPS()` is `Requests.Count / Elapsed`.
+- Aggregation sorts all records. If memory becomes a problem on long, high-load runs, this is planned to be replaced with a histogram.
 
-### JSON 出力（実装済み）
+### JSON output (implemented)
 
-`Report.WriteJSON(w io.Writer) error` で、集計結果を JSON として書き出せる（`report/json.go`）。
+`Report.WriteJSON(w io.Writer) error` writes the aggregated result as JSON (`report/json.go`).
 
 ```go
 f, _ := os.Create("result.json")
@@ -85,17 +87,17 @@ if err := rep.WriteJSON(f); err != nil {
 }
 ```
 
-- 時間はすべて**ナノ秒の整数**（フィールド名は `_ns` で終わる）。
-- トップレベルに `version`（現在 `3`、定数 `JSONVersion`）を持つ。互換を壊す変更のたびに上げる。`ReadJSON` は 1 以降を読める。
-  - `2`: `started_at`（実行の開始時刻、RFC 3339）と、各 `latency` の `buckets`（ヒストグラム）を追加
-  - `1`: 初版
-- 内部の `Report` とは別の出力用の型を持つので、`Report` を変えても JSON の形は変わらない。
-- 空の集合は `null` ではなく `[]` / `{}` で出す（読む側が分岐しなくて済む）。
-- 追加で `rps` を出す（`Requests.Count / Elapsed`）。リクエストの集計は `latency` / `ttfb` / `corrected` の 3 つを持つ。
+- All durations are **integer nanoseconds** (field names end in `_ns`).
+- The top level has `version` (currently `3`, the constant `JSONVersion`). It is raised whenever a compatibility-breaking change is made. `ReadJSON` can read version 1 and later.
+  - `2`: added `started_at` (start time of the run, RFC 3339) and a `buckets` histogram to each `latency`
+  - `1`: first version
+- There is an output type separate from the internal `Report`, so changing `Report` does not change the JSON shape.
+- Empty collections are written as `[]` / `{}` rather than `null` (so readers need no branching).
+- `rps` is additionally written (`Requests.Count / Elapsed`). Request aggregation has three entries: `latency` / `ttfb` / `corrected`.
 
-### HTML レポート（実装済み）
+### HTML report (implemented)
 
-`Report.WriteHTML(w io.Writer) error` で、外部に依存しない 1 枚の HTML を書き出せる（`report/html.go` / `report/report.html.tmpl`）。
+`Report.WriteHTML(w io.Writer) error` writes a single self-contained HTML file (`report/html.go` / `report/report.html.tmpl`).
 
 ```go
 f, _ := os.Create("report.html")
@@ -105,97 +107,97 @@ if err := rep.WriteHTML(f); err != nil {
 }
 ```
 
-- `html/template` で生成するので、シナリオ名やステップ名は自動でエスケープされる。
-- CSS は埋め込み、JS と外部リソースは使わない。ライト／ダークは OS の設定に従う。
-- 内容: サマリー、ステータス・エラーの内訳、レイテンシ（p50〜max の棒）、`corrected`（`Rate` のときのみ）、TTFB、シナリオ別のイテレーション時間とステップ別の表。
-- 表示用の値は `Print` と同じ書式（`fmtDur`）。ナノ秒の無損失な値は JSON を使う。
-- サンプル: `go run ./examples/checkout -format html -o report.html`（`-rate 30` で `Rate` モデル）。
+- It is generated with `html/template`, so scenario and step names are escaped automatically.
+- CSS is embedded; no JS or external resources are used. Light/dark follows the OS setting.
+- Contents: summary, breakdown of statuses and errors, latency (p50 to max bars), `corrected` (only for `Rate`), TTFB, per-scenario iteration time and per-step tables.
+- Displayed values use the same format as `Print` (`fmtDur`). Use JSON for lossless nanosecond values.
+- Sample: `go run ./examples/checkout -format html -o report.html` (`-rate 30` for the `Rate` model).
 
-### レポートの結合（実装済み）
+### Merging reports (implemented)
 
-負荷生成機を分けて同時に実行した結果などを、1 つにまとめる。
+Combine results into one, e.g. from runs on separate load generators executed at the same time.
 
 ```
 jotaro merge -o merged.json a.json b.json c.json
 jotaro merge -format html -o report.html a.json b.json
 ```
 
-ライブラリでは `report.MergeReports(reps ...*report.Report) (*report.Report, error)`（`report/merge.go`）。`-format` の既定は `json`（結合結果を再び入力にできる）。
+In the library: `report.MergeReports(reps ...*report.Report) (*report.Report, error)` (`report/merge.go`). The default `-format` is `json` (so the merged result can be used as input again).
 
-| 項目 | 結合の仕方 |
+| Item | How it is merged |
 |---|---|
-| 件数・バイト数・`Dropped`・ステータス・エラー | 合計 |
-| `StartedAt` / `Elapsed` | 最初の開始〜最後の終了（`StartedAt + Elapsed` の最大）。同時でも順次でも RPS が正しくなる |
-| `Min` / `Max` / `Mean` | 正確 |
-| `P50`〜`P99` | ヒストグラムを足して求め直す（**相対誤差 1% 以内**） |
-| シナリオ・ステップ | 名前で突き合わせ。並びは最初に現れた順 |
-| `Open` が揃っていない | エラー（モデルが違う結果は混ぜられない） |
+| Counts, bytes, `Dropped`, statuses, errors | Summed |
+| `StartedAt` / `Elapsed` | From the first start to the last end (the maximum of `StartedAt + Elapsed`). RPS is correct whether the runs were simultaneous or sequential |
+| `Min` / `Max` / `Mean` | Exact |
+| `P50`–`P99` | Recomputed by adding the histograms (**within 1% relative error**) |
+| Scenarios and steps | Matched by name. Order is that of first appearance |
+| `Open` differs | Error (results from different models cannot be mixed) |
 
-- **ヒストグラム**: 各 `latency` に対数バケット（DDSketch 方式、相対誤差 1%）を持たせた（JSON の `buckets`: バケット番号 → 件数）。バケットは足し算で結合できるので、何台分でも順序に関係なく同じ結果になる。1 つのレポートの `P50`〜`P99` は従来どおり nearest-rank の正確な値で、結合したときだけ近似になる。
-- **サイズ**: バケットの数は分布の広がりで決まる（件数には比例しない）。10 万件・裾の重い分布で 1 つの `latency` あたり数百バケット。
-- **接続の内訳 (`requests` と各ステップの `requests`、version 3)**: `dns` / `connect`（TCP）/ `tls` は、その区間が実際に起きたリクエストだけのレイテンシ分布（`buckets` つき）。接続を再利用したリクエストや、http の TLS は含まない。`conn_new` / `conn_reused` は接続を新しく張った / 再利用したリクエストの数で、再利用率は `conn_reused / (conn_new + conn_reused)`。接続を得る前に失敗したリクエストはどちらにも数えない。version 1・2 の JSON には無い（0・空として読める）。
-- **時系列 (`series`、version 3)**: `started_at` からの 1 秒ごとの配列。要素は `second` / `requests` / `errors`（通信エラー。HTTP 4xx/5xx は含まない）/ `http_5xx`（HTTP 5xx の数。`errors` とは重ならない。無ければ 0）/ `latency`（`buckets` つき）/ `conn_new` / `conn_reused`（その秒に開始したリクエストのうち、接続を新しく張った / 再利用した数）/ `dns` / `connect` / `tls`（その区間が起きたリクエストだけの分布。`buckets` つき。`requests` の同名のフィールドと同じ範囲）/ `concurrency`（その秒の実行中イテレーション数の最大）。`started_at` が無いと空。結合では `started_at` の差だけ秒をずらして足し、`concurrency` は合計（上限の見積り）。version 1・2 の JSON には無い。`conn_new` 以降は version 3 に後から足した項目で、無い JSON は 0・空として読む（互換を壊さないので版は上げていない）。
-- **負荷生成側の健全性 (`health`、version 3)**: `jotaro.Run` を動かしているプロセスの、`started_at` からの 1 秒ごとの配列。要素は `second` / `goroutines`（その秒の終わりのゴルーチン数）/ `cpu`（その秒に使った CPU 時間の割合。GOMAXPROCS 個の CPU 全体に対して 0〜1。取得できない環境では -1）。`BuildReport` だけで作った結果や、古い JSON には無い（空）。結合では秒をずらして重ね、`goroutines` は合計、`cpu` は最大（負荷生成側が複数あるときは、一番詰まっているものを見る）。
-  - CPU は `getrusage`（Unix 系）の CPU 時間から求める。Windows など取得できない環境では -1 で、グラフや平均には含めない。`runtime/metrics` の `/cpu/classes/*` は GC のたびにしか更新されないため使っていない。
-  - 負荷をかける対象を同じプロセスで動かしている（`examples/checkout` など）と、その分も含む。
-  - CPU の最大が 90% 以上のとき、テキストと HTML のサマリーに「負荷生成側が詰まって測定値が悪く出ている疑い」の警告を出す。
-- **version 1 の JSON との互換**: 読める。`buckets` と `started_at` が無いので、それが混じる結合では次のフォールバックになる。
-  - `P50`〜`P99` は件数で重み付けした平均（誤差が大きい）。
-  - `Elapsed` は最大値（同時に実行した前提）。
+- **Histogram**: each `latency` carries logarithmic buckets (DDSketch style, 1% relative error) (`buckets` in the JSON: bucket number → count). Buckets can be merged by addition, so the result is the same for any number of machines in any order. For a single report, `P50`–`P99` remain exact nearest-rank values as before; they become approximate only after merging.
+- **Size**: the number of buckets depends on the spread of the distribution (not proportional to the count). For 100,000 samples of a heavy-tailed distribution, several hundred buckets per `latency`.
+- **Connection breakdown (`requests` and each step's `requests`, version 3)**: `dns` / `connect` (TCP) / `tls` are latency distributions (with `buckets`) over only the requests in which that phase actually occurred. Requests that reused a connection, and TLS for http, are not included. `conn_new` / `conn_reused` are the numbers of requests that opened a new connection / reused one; the reuse rate is `conn_reused / (conn_new + conn_reused)`. Requests that failed before obtaining a connection are counted in neither. These are absent from version 1 and 2 JSON (read as 0 / empty).
+- **Time series (`series`, version 3)**: an array per second since `started_at`. Elements are `second` / `requests` / `errors` (network errors; HTTP 4xx/5xx not included) / `http_5xx` (number of HTTP 5xx; does not overlap with `errors`; 0 if absent) / `latency` (with `buckets`) / `conn_new` / `conn_reused` (among requests started in that second, those that opened a new connection / reused one) / `dns` / `connect` / `tls` (distributions over only the requests in which that phase occurred; with `buckets`; the same scope as the same-named fields of `requests`) / `concurrency` (the maximum number of running iterations in that second). Empty without `started_at`. When merging, seconds are shifted by the difference in `started_at` and added, and `concurrency` is summed (an upper estimate). Absent from version 1 and 2 JSON. Items from `conn_new` onward were added to version 3 later; JSON without them is read as 0 / empty (compatibility is not broken, so the version was not raised).
+- **Load-generator health (`health`, version 3)**: an array per second since `started_at`, for the process running `jotaro.Run`. Elements are `second` / `goroutines` (goroutine count at the end of that second) / `cpu` (the fraction of CPU time used in that second, 0 to 1 relative to all GOMAXPROCS CPUs; -1 on environments where it cannot be obtained). Absent (empty) in results built only with `BuildReport` and in old JSON. When merging, seconds are shifted and overlaid; `goroutines` is summed and `cpu` takes the maximum (with several load generators, look at the most saturated one).
+  - CPU is derived from `getrusage` (Unix-like) CPU time. On environments where it cannot be obtained, such as Windows, it is -1 and is excluded from charts and averages. `runtime/metrics` `/cpu/classes/*` is not used because it is updated only at each GC.
+  - If the system under test runs in the same process (as in `examples/checkout`), its share is included.
+  - When the maximum CPU is 90% or more, the text and HTML summaries show a warning that "the load generator may be saturated and the measurements may look worse than they are".
+- **Compatibility with version 1 JSON**: It can be read. Since `buckets` and `started_at` are absent, merges that include it fall back as follows.
+  - `P50`–`P99` become a count-weighted average (large error).
+  - `Elapsed` becomes the maximum (assuming the runs were simultaneous).
 
-### 生データ（JSON Lines）（実装済み）
+### Raw data (JSON Lines) (implemented)
 
-集計前の記録を 1 行 1 レコードで書き出し、後から再集計したり、他のツールで可視化したりできる（`record/raw.go`）。集計結果（`Report`）は件数が増えても大きさが変わらないが、生データは件数に比例して大きくなる。
+Pre-aggregation records are written one record per line, so they can be re-aggregated later or visualized with other tools (`record/raw.go`). The aggregated result (`Report`) stays the same size as the count grows, but raw data grows in proportion to the count.
 
 ```go
 f, _ := os.Create("raw.jsonl")
 defer f.Close()
-rep, err := jotaro.Run(ctx, jotaro.Plan{ /* ... */ Raw: f }) // 終了時に書き出す
+rep, err := jotaro.Run(ctx, jotaro.Plan{ /* ... */ Raw: f }) // written at the end
 ```
 
 ```
 go run ./examples/checkout -raw raw.jsonl
-jotaro report -raw -format html -o report.html raw.jsonl     # 生データから再集計
-jotaro report -raw -format json raw.jsonl | jotaro check -t 'p95<200ms' -   # 集計済み JSON を経由して判定
-jotaro check -raw -t 'p95<200ms' raw.jsonl                    # 直接判定もできる
+jotaro report -raw -format html -o report.html raw.jsonl     # re-aggregate from raw data
+jotaro report -raw -format json raw.jsonl | jotaro check -t 'p95<200ms' -   # check via aggregated JSON
+jotaro check -raw -t 'p95<200ms' raw.jsonl                    # direct checks also work
 ```
 
-ライブラリでは `record.WriteRaw(w, *record.Raw)` / `record.ReadRaw(r)` / `report.FromRaw(*record.Raw)`。`Run` の結果も `report.FromRaw` を通すので、書き出した生データから再集計した結果は `Run` が返した `Report` と一致する。`report` / `merge` / `check` の `-raw` で読める。
+In the library: `record.WriteRaw(w, *record.Raw)` / `record.ReadRaw(r)` / `report.FromRaw(*record.Raw)`. The result of `Run` also goes through `report.FromRaw`, so a result re-aggregated from the written raw data matches the `Report` returned by `Run`. `report` / `merge` / `check` can read it with `-raw`.
 
-- 先頭の行は実行全体の情報（`type` が `meta`）。`version`（`RawVersion`、現在 `1`）/ `open` / `dropped` / `started_at` / `elapsed_ns`。そのあとに `request` / `step` / `iteration` / `health` の行が続く。
-- 時間は集計の JSON と同じく**ナノ秒の整数**（`_ns`）。時刻は UTC の RFC 3339。0・空のフィールドは省く（`code`、`err`、`dns_ns`、`scheduled` など。読むときは 0・空に戻る）。
-- `request` は `Record` と同じ内容: `scenario` / `step` / `user_id` / `iteration` / `method` / `url` / `code` / `err` / `scheduled` / `start` / `latency_ns` / `conn` / `dns_ns` / `connect_ns` / `tls_ns` / `ttfb_ns` / `bytes_out` / `bytes_in`。`step` は `StepRecord`、`iteration` は `IterationRecord`、`health` は `HealthPoint` と同じ。
-- `ReadRaw` は知らない `type` の行を読み飛ばす（新しい版が行を足しても、古い読み手が壊れない）。`meta` が無くても読める（実行時間は記録から求める）。
-- 集計済みの JSON（`ReadJSON`）に生データを渡すと、先頭の `meta` 行が `version: 1` の JSON として読めてしまう。`ReadJSON` は JSON の後ろに別のデータが続くとエラーにするので、`-raw` の付け忘れは「生データなら `-raw` を使う」というエラーになる。
-- 生データは `Run` が終わってからまとめて書く（記録はもともとメモリに溜めているため）。実行中に少しずつ書く（メモリを使わない）形にはなっていない。
-- 書き出しに失敗しても、`Run` は集計した `Report` を返す（`error` も同時に返す）。
+- The first line holds information about the whole run (`type` is `meta`): `version` (`RawVersion`, currently `1`) / `open` / `dropped` / `started_at` / `elapsed_ns`. It is followed by `request` / `step` / `iteration` / `health` lines.
+- Durations are **integer nanoseconds** (`_ns`), as in the aggregated JSON. Times are RFC 3339 in UTC. Zero / empty fields are omitted (`code`, `err`, `dns_ns`, `scheduled`, etc.; they return to 0 / empty when read).
+- `request` has the same content as `Record`: `scenario` / `step` / `user_id` / `iteration` / `method` / `url` / `code` / `err` / `scheduled` / `start` / `latency_ns` / `conn` / `dns_ns` / `connect_ns` / `tls_ns` / `ttfb_ns` / `bytes_out` / `bytes_in`. `step` is the same as `StepRecord`, `iteration` as `IterationRecord`, and `health` as `HealthPoint`.
+- `ReadRaw` skips lines with an unknown `type` (so old readers do not break if a newer version adds lines). It can read without a `meta` line (the run time is derived from the records).
+- If raw data is passed to the aggregated-JSON reader (`ReadJSON`), the leading `meta` line can be read as `version: 1` JSON. `ReadJSON` returns an error if other data follows the JSON, so forgetting `-raw` produces the error "use `-raw` for raw data".
+- Raw data is written all at once after `Run` finishes (records are kept in memory anyway). It is not written incrementally during the run (which would use no memory).
+- Even if writing fails, `Run` returns the aggregated `Report` (together with an `error`).
 
-## 2. 未実装（提案）
+## 2. Unimplemented (proposals)
 
-> 以下は提案であり、**まだ決まっていない**。JSON 出力の項目は 1 章の実装を正とする。`DESIGN.md` の「未決」にある vegeta 互換の程度の判断が前提になる。
+> The following are proposals and **not yet decided**. For JSON output items, the implementation in chapter 1 is authoritative. The judgment on the extent of vegeta compatibility under "Open" in `DESIGN.md` is a prerequisite.
 
-### 出力形式の候補
+### Candidate output formats
 
-| 形式 | 内容 | メリット | デメリット |
+| Format | Contents | Pros | Cons |
 |---|---|---|---|
-| JSON（集計） | `Report` をそのまま出力 | 実装が小さい。CI で閾値判定しやすい | 生データは残らない |
-| JSON Lines（生データ。**実装済み**） | `Record` などを1行ずつ出力 | 後から再集計・可視化できる | ファイルが大きくなる |
-| vegeta 互換 | vegeta の `Result` 形式 | 既存の `vegeta report` / `plot` が使える | シナリオ・ステップの情報が落ちる |
+| JSON (aggregated) | Output `Report` as is | Small to implement. Easy to check thresholds in CI | Raw data is not kept |
+| JSON Lines (raw data; **implemented**) | Output `Record` etc. one per line | Can be re-aggregated and visualized later | Files get large |
+| vegeta-compatible | vegeta's `Result` format | Existing `vegeta report` / `plot` can be used | Scenario and step information is lost |
 
-**推奨**: まず JSON（集計）。次に生データ（JSON Lines）を追加する（どちらも実装済み）。vegeta 互換は需要が出てから。
+**Recommendation**: JSON (aggregated) first, then raw data (JSON Lines) (both implemented). vegeta compatibility once demand appears.
 
-### JSON 化の際に決めること
+### What to decide when making JSON
 
-| 論点 | 案 |
+| Issue | Proposal |
 |---|---|
-| `time.Duration` の表現 | **ナノ秒の整数で保存する（決定）**。フィールド名は `_ns` で終える。Go の標準と一致し、無損失。表示側（コンソール・HTML）でミリ秒などに変換する |
-| `map[ErrKind]int` | キーが文字列なのでそのまま JSON オブジェクトにできる |
-| 出力先 | CLI のフラグ（例: `-o result.json`）とライブラリの `Report.WriteJSON(w io.Writer)` |
-| スキーマの版 | `"version": 1` を持たせ、将来の変更に備える |
+| Representation of `time.Duration` | **Store as integer nanoseconds (decided)**. Field names end in `_ns`. Matches Go's standard and is lossless. The display side (console, HTML) converts to milliseconds etc. |
+| `map[ErrKind]int` | Keys are strings, so it can be a JSON object as is |
+| Output destination | A CLI flag (e.g. `-o result.json`) and the library's `Report.WriteJSON(w io.Writer)` |
+| Schema version | Include `"version": 1` to prepare for future changes |
 
-### 出力イメージ（案）
+### Output sketch (proposal)
 
-時間はすべてナノ秒の整数（`_ns`）。フィールド名は仮。
+All durations are integer nanoseconds (`_ns`). Field names are tentative.
 
 ```json
 {
@@ -221,99 +223,99 @@ jotaro check -raw -t 'p95<200ms' raw.jsonl                    # 直接判定も�
 }
 ```
 
-## 3. 結果の閲覧手段（提案）
+## 3. Ways to view results (proposal)
 
-> 提案であり、**まだ決まっていない**。方針は「機械可読な結果ファイルを土台にして、見る手段を後から足す」。
+> A proposal, **not yet decided**. The policy is: use machine-readable result files as the foundation and add ways to view them later.
 
 ```
-Run ─▶ 結果ファイル（JSON / JSON Lines）─▶ 静的 HTML レポート
-                                        ├▶ jq / スクリプト / CI
-                                        └▶ Grafana 等
-Run ─(任意)─▶ /metrics ─▶ Prometheus ─▶ Grafana
+Run ─▶ result file (JSON / JSON Lines) ─▶ static HTML report
+                                        ├▶ jq / scripts / CI
+                                        └▶ Grafana etc.
+Run ─(optional)─▶ /metrics ─▶ Prometheus ─▶ Grafana
 ```
 
-| 手段 | 手間 | 見られるもの | 依存 |
+| Method | Effort | What you can see | Dependencies |
 |---|---|---|---|
-| JSON + `jq` / CI | 最小 | 最終値、閾値判定 | なし |
-| 静的 HTML レポート | 小 | 分布、ステップ別、エラー内訳 | なし（1ファイルで完結） |
-| JSON Lines + 外部ツール | 小 | 生データの再集計、時系列 | 外部ツール |
-| Prometheus + Grafana | 中 | 実行中の推移 | 基盤が必要 |
-| 専用 Web UI（サーバー） | 大 | 複数回の比較、履歴 | 重い |
+| JSON + `jq` / CI | Minimal | Final values, threshold checks | None |
+| Static HTML report | Small | Distributions, per-step, error breakdown | None (a single file) |
+| JSON Lines + external tools | Small | Re-aggregation of raw data, time series | External tools |
+| Prometheus + Grafana | Medium | Trends during a run | Infrastructure required |
+| Dedicated web UI (server) | Large | Comparing multiple runs, history | Heavy |
 
-### 実装の順序
+### Order of implementation
 
-1. **JSON 出力**（集計結果）: すべての土台。`version` を持たせ、他ツールが形式の変更で壊れないようにする。
-2. **JSON Lines 出力**（生データ。実装済み）: 他ツールでの再集計・可視化用。
-3. **静的 HTML レポート**: `jotaro report result.json -o report.html` のように JSON から1ファイルを生成する。サーバー不要で、CI の成果物にも添付できる。
-4. **`/metrics`**（Prometheus）: 実行中の推移を見たくなったら追加する。
+1. **JSON output** (aggregated results): the foundation of everything. It carries a `version` so other tools do not break when the format changes.
+2. **JSON Lines output** (raw data; implemented): for re-aggregation and visualization in other tools.
+3. **Static HTML report**: generate a single file from JSON, as in `jotaro report result.json -o report.html`. No server needed, and it can be attached as a CI artifact.
+4. **`/metrics`** (Prometheus): add it when you want to see trends during a run.
 
-### Prometheus 連携の注意点
+### Notes on Prometheus integration
 
-- `scenario` / `step` はラベルにしてよいが、`user_id` や URL は系列数が爆発するのでラベルにしない。
-- ヒストグラムは固定バケットなので、nearest-rank のパーセンタイルとは値がずれる。バケット境界を決める必要がある。
-- `client_golang` を使うか、テキスト形式を自前で書くか（依存を増やさない方針との兼ね合い）は未決。
-- 記録の受け口を `Sink` のようなインターフェースにすると、`Run` を変えずに出力先を足せる。
+- `scenario` / `step` may be labels, but `user_id` and URLs must not be, as the number of series would explode.
+- Histograms use fixed buckets, so values drift from nearest-rank percentiles. Bucket boundaries need to be decided.
+- Whether to use `client_golang` or write the text format by hand (versus the policy of not adding dependencies) is undecided.
+- If the sink for records is made an interface such as `Sink`, output destinations can be added without changing `Run`.
 
-### 注意点
+### Caveats
 
-- 静的 HTML のグラフは、JS ライブラリを埋め込むと容量が増える。最初は表と簡単な SVG の棒グラフで足りるかもしれない。
-- 時系列を見るには、`DESIGN.md` のフェーズ3（1秒ごとの集計）が先に必要。それまでは最終値の可視化が中心になる。
+- Embedding a JS library in a static HTML report increases its size. Tables and simple SVG bar charts may be enough at first.
+- To see a time series, phase 3 of `DESIGN.md` (per-second aggregation) is needed first. Until then, visualizing final values is the main thing.
 
-## 4. 出力 API（実装済み）
+## 4. Output API (implemented)
 
-`Report.Write(w io.Writer, f Format) error` が出力の入口（`report/write.go`）。出力先は `io.Writer` なので、ファイル、標準出力、`bytes.Buffer`、`http.ResponseWriter` のどれでもよい。
+`Report.Write(w io.Writer, f Format) error` is the entry point for output (`report/write.go`). The destination is an `io.Writer`, so a file, standard output, a `bytes.Buffer` or an `http.ResponseWriter` all work.
 
 ```
 *Report ─▶ Write(w, format) ─▶ Text / JSON / HTML ─▶ w
 ```
 
 ```go
-f, _ := report.ParseFormat("json") // CLI のフラグ文字列から
+f, _ := report.ParseFormat("json") // from a CLI flag string
 if err := rep.Write(os.Stdout, f); err != nil {
     log.Fatal(err)
 }
 ```
 
-| `Format` | 内容 | 実体 |
+| `Format` | Contents | Implementation |
 |---|---|---|
-| `FormatText` | 人が読める表 | `Print`（書き込みの失敗は `Write` が `error` で返す） |
-| `FormatJSON` | 時間はナノ秒の整数 | `WriteJSON` |
-| `FormatHTML` | 外部に依存しない 1 枚の HTML | `WriteHTML` |
+| `FormatText` | A human-readable table | `Print` (write failures are returned by `Write` as an `error`) |
+| `FormatJSON` | Durations in integer nanoseconds | `WriteJSON` |
+| `FormatHTML` | A single self-contained HTML file | `WriteHTML` |
 
-- 未知の形式は、何も書かずに `error` を返す。`ParseFormat` は文字列から `Format` を作り、未知なら `error` を返す。
-- 書き込みの途中で失敗した場合は `error` を返す。途中まで書かれた内容は `w` に残るので、ファイルに書くときは呼び出し側が扱う。
-- `Print` / `WriteJSON` / `WriteHTML` も公開したまま残す。形式が決まっているなら直接呼べる。
-- サンプル: `go run ./examples/checkout -format json -o result.json`（`-o` を省くと標準出力）。
+- An unknown format writes nothing and returns an `error`. `ParseFormat` builds a `Format` from a string and returns an `error` if it is unknown.
+- If writing fails midway, an `error` is returned. What was already written remains in `w`, so the caller handles that when writing to a file.
+- `Print` / `WriteJSON` / `WriteHTML` also stay public. They can be called directly when the format is fixed.
+- Sample: `go run ./examples/checkout -format json -o result.json` (omit `-o` for standard output).
 
-### `ReadJSON` と `report` サブコマンド（実装済み）
+### `ReadJSON` and the `report` subcommand (implemented)
 
-保存した JSON から、あとでレポートを作り直せる。
+A report can be rebuilt later from saved JSON.
 
 ```go
-rep, err := report.ReadJSON(f) // WriteJSON が書いた JSON を Report に戻す
+rep, err := report.ReadJSON(f) // turn the JSON written by WriteJSON back into a Report
 ```
 
-- `version` が対応していないときは `error` を返す（`JSONVersion` と一致しないもの）。
-- 往復しても `Report` は同じになる（空の map / スライスは `nil` に戻す。テストで `reflect.DeepEqual` を確認）。
-- 時間はナノ秒の整数なので、読み戻しで丸めは起きない。
+- An unsupported `version` (anything not matching `JSONVersion`) returns an `error`.
+- A `Report` is unchanged by a round trip (empty maps / slices return to `nil`; confirmed with `reflect.DeepEqual` in tests).
+- Durations are integer nanoseconds, so no rounding happens when reading back.
 
 ```bash
-go run ./examples/checkout -format json -o result.json   # 実行して JSON を保存
-go run ./cmd/jotaro report -o report.html result.json    # JSON から HTML を生成
-go run ./cmd/jotaro report -format text result.json      # テキストで見る
-cat result.json | go run ./cmd/jotaro report -           # 標準入力から読む
+go run ./examples/checkout -format json -o result.json   # run and save JSON
+go run ./cmd/jotaro report -o report.html result.json    # generate HTML from JSON
+go run ./cmd/jotaro report -format text result.json      # view as text
+cat result.json | go run ./cmd/jotaro report -           # read from standard input
 ```
 
-| フラグ | 既定 | 内容 |
+| Flag | Default | Meaning |
 |---|---|---|
 | `-format` | `html` | `text` / `json` / `html` |
-| `-o` | 標準出力 | 出力先のファイル。書き込みに失敗したら、途中のファイルを消す |
+| `-o` | standard output | Output file. If writing fails, the partial file is removed |
 
-終了コードは、成功 `0`、使い方の誤り（引数なし・未知の形式など）`2`、読み書きの失敗・未対応の `version` が `1`。実装は `cmd/jotaro/main.go`。
+Exit codes: success `0`, usage error (no arguments, unknown format, etc.) `2`, and read/write failure or an unsupported `version` `1`. Implemented in `cmd/jotaro/main.go`.
 
-### 形式が増える場合（将来）
+### When formats increase (future)
 
-利用者が独自の形式を足したくなったら、`Format` の `switch` の代わりにインターフェースへ移る。需要が出るまでは今の形のままにする。
+If users want to add their own formats, we will move to an interface instead of a `switch` on `Format`. Until demand appears, we keep the current form.
 
 ```go
 type Writer interface {
@@ -321,13 +323,13 @@ type Writer interface {
 }
 ```
 
-### 注意点
+### Caveats
 
-- 生データ（JSON Lines）は件数が多いので、`Report.Write` には含めず、別の API（`record.WriteRaw`、`Plan.Raw`）にした。
+- Raw data (JSON Lines) is large, so it is not included in `Report.Write` and has separate APIs (`record.WriteRaw`, `Plan.Raw`).
 
-## 5. しきい値判定（実装済み）
+## 5. Threshold checks (implemented)
 
-結果が条件を満たすかを確かめ、CI で「遅くなったら失敗」にする（`report/threshold.go`）。k6 の `thresholds` に近い。実行後の `Report` に対して判定する（実行中に打ち切る `abortOnFail` 相当は無い）。
+Check whether a result meets conditions, so that CI can fail when things get slower (`report/threshold.go`). Close to k6's `thresholds`. Checks are made against the `Report` after the run (there is no equivalent of `abortOnFail`, which aborts during a run).
 
 ```go
 th, _ := report.ParseThreshold("p95<200ms")
@@ -340,36 +342,36 @@ if !checks.Passed() { os.Exit(1) }
 jotaro check -t 'p95<200ms' -t 'error_rate<1%' -t 'p99{step=login}<100ms' result.json
 ```
 
-満たさないものが 1 つでもあれば終了コード 1。しきい値の書き方が誤り、またはファイルが読めないときは 2 / 1。
+Exit code 1 if any threshold is not met. If a threshold is malformed or the file cannot be read, 2 / 1 respectively.
 
-### 書き方
+### Syntax
 
-`指標[{scenario=名前,step=名前}] 演算子 値`。演算子は `<` `<=` `>` `>=`。
+`metric[{scenario=name,step=name}] operator value`. Operators are `<` `<=` `>` `>=`.
 
-| 指標 | 意味 | 値 | 絞り込み |
+| Metric | Meaning | Value | Filter |
 |---|---|---|---|
-| `min` `mean` `p50` `p90` `p95` `p99` `max` | リクエストのレイテンシ | 時間（`200ms`、`1.5s`） | `{step=...}` |
-| 上の頭に `corrected_` `ttfb_` `dns_` `connect_` `tls_` | CO 補正後 / TTFB / DNS / TCP / TLS（例: `corrected_p99`） | 時間 | `{step=...}` |
-| `error_rate` | 通信エラーと Expect 不一致の割合（リクエスト数に対して） | `1%` または `0.01` | `{step=...}` |
-| `http_4xx_rate` `http_5xx_rate` | HTTP 4xx / 5xx の割合 | 割合 | `{step=...}` |
-| `iteration_fail_rate` | 失敗したイテレーションの割合 | 割合 | `{scenario=...}` |
-| `requests` | リクエスト数 | 数 | `{step=...}` |
-| `rps` `dropped` | 1 秒あたりのリクエスト数 / ドロップされた到着の数 | 数 | 全体のみ |
+| `min` `mean` `p50` `p90` `p95` `p99` `max` | Request latency | Duration (`200ms`, `1.5s`) | `{step=...}` |
+| The above prefixed with `corrected_` `ttfb_` `dns_` `connect_` `tls_` | After CO correction / TTFB / DNS / TCP / TLS (e.g. `corrected_p99`) | Duration | `{step=...}` |
+| `error_rate` | Share of network errors and Expect mismatches (of the number of requests) | `1%` or `0.01` | `{step=...}` |
+| `http_4xx_rate` `http_5xx_rate` | Share of HTTP 4xx / 5xx | Ratio | `{step=...}` |
+| `iteration_fail_rate` | Share of failed iterations | Ratio | `{scenario=...}` |
+| `requests` | Number of requests | Number | `{step=...}` |
+| `rps` `dropped` | Requests per second / number of dropped arrivals | Number | Overall only |
 
-### 決めたこと
+### Decisions
 
-- `{step=...}` が複数のシナリオにある同名のステップに当たるときは、それぞれを別の結果として確かめる（`scenario=` を足せば 1 つに絞れる）。
-- **対象が無い・データが無いときは満たさなかった扱い**にする（ステップ名のタイポ、リクエストが 0 件、`ttfb_` の記録が無い、など）。設定の間違いや、動かなかった試験を成功にしないため。
-- `error_rate` は HTTP 4xx/5xx を含まない（`ExpectStatus` を付けたステップの不一致は `ErrExpect` として含まれる）。4xx/5xx は `http_4xx_rate` / `http_5xx_rate` で別に見る。
-- シナリオ単位のレイテンシは無い（シナリオ全体のリクエスト分布は持っていないため）。ステップ単位か全体で見る。
+- When `{step=...}` matches same-named steps in several scenarios, each is checked as a separate result (add `scenario=` to narrow it to one).
+- **When the target or data is missing, the threshold counts as not met** (a typo in a step name, zero requests, no `ttfb_` records, etc.), so that a misconfiguration or a test that did not run is not treated as a success.
+- `error_rate` does not include HTTP 4xx/5xx (a mismatch in a step with `ExpectStatus` is included as `ErrExpect`). 4xx/5xx are viewed separately with `http_4xx_rate` / `http_5xx_rate`.
+- There is no scenario-level latency (the request distribution for a whole scenario is not kept). Look at it per step or overall.
 
-### 未対応
+### Not supported
 
-- 実行中に判定して早く止める（`abortOnFail`）。
-- 結果ファイルへの判定結果の書き込み。`report` / `merge` の `-t`。
-- 時系列（1 秒ごと）に対する条件。
+- Judging during a run to stop early (`abortOnFail`).
+- Writing check results into the result file; `-t` for `report` / `merge`.
+- Conditions on the time series (per second).
 
-## 6. 関連
+## 6. Related
 
-- 設計の全体像: [`DESIGN.md`](../DESIGN.md)（計測は 5 章、未決は 8 章）
-- 実装: `record/record.go` / `report/report.go` / `report/print.go`
+- Overall design: [`DESIGN.md`](../DESIGN.md) (measurement in chapter 5, open questions in chapter 8)
+- Implementation: `record/record.go` / `report/report.go` / `report/print.go`
