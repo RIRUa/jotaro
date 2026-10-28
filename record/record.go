@@ -1,4 +1,4 @@
-// Package record は、負荷試験の生データ（リクエスト・ステップ・イテレーションの記録）と、その入出力。
+// Package record holds the raw data of a load test (records of requests, steps and iterations), and its input and output.
 package record
 
 import (
@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-// ErrKind は失敗の種類。空文字は成功を表す。
+// ErrKind is the kind of a failure. The empty string means success.
 type ErrKind string
 
 const (
@@ -20,15 +20,15 @@ const (
 	ErrOther       ErrKind = "other"
 )
 
-// ConnKind はリクエストが使った接続の由来。空は接続を得る前に失敗したもの。
+// ConnKind is where the connection used by a request came from. Empty means it failed before getting a connection.
 type ConnKind string
 
 const (
-	ConnNew    ConnKind = "new"    // 新しく張った接続
-	ConnReused ConnKind = "reused" // 接続プールの再利用
+	ConnNew    ConnKind = "new"    // a newly opened connection
+	ConnReused ConnKind = "reused" // reused from the connection pool
 )
 
-// Record は 1 回の HTTP リクエストの生データ。集計はすべてここから行う。
+// Record is the raw data of one HTTP request. All aggregation is done from it.
 type Record struct {
 	Scenario  string
 	Step      string
@@ -37,21 +37,21 @@ type Record struct {
 
 	Method string
 	URL    string
-	Code   int     // 0 は応答なし（通信エラー）
-	Err    ErrKind // 通信エラーの種類。HTTP 4xx/5xx は Code で表す
+	Code   int     // 0 means no response (network error)
+	Err    ErrKind // kind of network error. HTTP 4xx/5xx are expressed by Code
 
-	// Scheduled は予定開始時刻。Users モデルでは Start と同じ値になる。
-	// Arrival モデルでは、イテレーションの最初のリクエストだけ予定到着時刻になる。
-	// Coordinated Omission の補正に使う。
+	// Scheduled is the scheduled start time. In the Users model it equals Start.
+	// In the Arrival model, only the first request of an iteration gets the scheduled arrival time.
+	// It is used for Coordinated Omission correction.
 	Scheduled time.Time
 	Start     time.Time
 	Latency   time.Duration
 
-	// Conn は使った接続が新規か再利用か。
+	// Conn is whether the connection used was new or reused.
 	Conn ConnKind
 
-	// httptrace で取れる各区間。取れなかった区間は 0。
-	// 再利用した接続では DNS / Connect / TLS はどれも 0 になる。
+	// Phases obtainable with httptrace. A phase that could not be obtained is 0.
+	// With a reused connection, DNS / Connect / TLS are all 0.
 	DNS     time.Duration
 	Connect time.Duration
 	TLS     time.Duration
@@ -61,8 +61,8 @@ type Record struct {
 	BytesIn  int64
 }
 
-// Corrected は予定開始時刻から応答を受け取り終えるまでの時間。
-// 予定より遅れて始まった分も含むので、Coordinated Omission の補正になる。
+// Corrected is the time from the scheduled start until the response has been fully received.
+// It includes the delay of a late start, which is what corrects for Coordinated Omission.
 func (r Record) Corrected() time.Duration {
 	if r.Scheduled.IsZero() {
 		return r.Latency
@@ -70,7 +70,7 @@ func (r Record) Corrected() time.Duration {
 	return r.Start.Add(r.Latency).Sub(r.Scheduled)
 }
 
-// StepRecord は u.Step 1 回分の記録。
+// StepRecord is the record of one u.Step.
 type StepRecord struct {
 	Scenario  string
 	Step      string
@@ -82,24 +82,24 @@ type StepRecord struct {
 	Err      ErrKind
 }
 
-// IterationRecord はシナリオ 1 回分の記録。
+// IterationRecord is the record of one run of a scenario.
 type IterationRecord struct {
 	Scenario  string
 	UserID    int
 	Iteration int
 
 	Start    time.Time
-	Duration time.Duration // Think を含む
+	Duration time.Duration // includes Think
 	Think    time.Duration
 	Err      ErrKind
 }
 
-// Active は Think を除いたシナリオ時間を返す。
+// Active returns the scenario time without Think.
 func (r IterationRecord) Active() time.Duration {
 	return r.Duration - r.Think
 }
 
-// Collector は並行に記録を受け取る。
+// Collector receives records concurrently.
 type Collector struct {
 	mu         sync.Mutex
 	requests   []Record
@@ -130,21 +130,21 @@ func (c *Collector) AddIteration(r IterationRecord) {
 	c.mu.Unlock()
 }
 
-// AddDropped は、同時実行数の上限のために実行しなかった到着を 1 回数える。
+// AddDropped counts one arrival that was not run because of the concurrency cap.
 func (c *Collector) AddDropped() {
 	c.mu.Lock()
 	c.dropped++
 	c.mu.Unlock()
 }
 
-// Dropped はドロップした到着の数。
+// Dropped is the number of dropped arrivals.
 func (c *Collector) Dropped() int {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.dropped
 }
 
-// Snapshot はその時点の記録のコピーを返す。
+// Snapshot returns a copy of the records at that moment.
 func (c *Collector) Snapshot() (requests []Record, steps []StepRecord, iterations []IterationRecord) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -154,8 +154,8 @@ func (c *Collector) Snapshot() (requests []Record, steps []StepRecord, iteration
 	return requests, steps, iterations
 }
 
-// Take は記録を渡して Collector を空にする。Snapshot と違い、コピーしない。
-// 全部の記録を持つので、実行が終わって誰も Add しなくなってから呼ぶ。
+// Take hands over the records and empties the Collector. Unlike Snapshot, it does not copy.
+// Since it holds all the records, call it after the run is over and nobody calls Add any more.
 func (c *Collector) Take() (requests []Record, steps []StepRecord, iterations []IterationRecord) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -164,15 +164,15 @@ func (c *Collector) Take() (requests []Record, steps []StepRecord, iterations []
 	return requests, steps, iterations
 }
 
-// HealthPoint は負荷生成側（jotaro を動かしているプロセス）の、1 秒ごとの健全性。
-// CPU が上限に近いときは、生成側が詰まって測定値が実際より悪く出ている疑いがある。
+// HealthPoint is the per-second health of the load generator (the process running jotaro).
+// When the CPU is close to its limit, the generator may be saturated and the measurements worse than reality.
 type HealthPoint struct {
-	// Second は実行の開始からの経過秒（0 始まり）。区間は [Second, Second+1) 秒。
+	// Second is the seconds elapsed since the start of the run (0-based). The interval is [Second, Second+1) seconds.
 	Second int
-	// Goroutines は区間の終わりの時点のゴルーチン数。
+	// Goroutines is the number of goroutines at the end of the interval.
 	Goroutines int
-	// CPU は区間の間にプロセスが使った CPU 時間の割合（0〜1）。GOMAXPROCS 個の CPU 全体に対する割合。
-	// 負荷をかける対象を同じプロセスで動かしているときは、その分も含む。
-	// CPU 時間を取得できない環境（Unix 以外）では -1。
+	// CPU is the share of CPU time used by the process during the interval (0 to 1), relative to all GOMAXPROCS CPUs.
+	// If the target under load runs in the same process, its share is included.
+	// It is -1 on platforms where CPU time cannot be obtained (non-Unix).
 	CPU float64
 }

@@ -8,33 +8,33 @@ import (
 	"sync/atomic"
 )
 
-// FeedMode は Feeder が行を取り出す順序。
+// FeedMode is the order in which a Feeder hands out rows.
 type FeedMode int
 
 const (
-	// Circular は先頭から順に配り、末尾まで来たら先頭に戻る。
+	// Circular hands out rows from the first one and wraps around after the last.
 	Circular FeedMode = iota
-	// Random は毎回ランダムに選ぶ。同じ行が続けて選ばれることもある。
+	// Random picks a row at random each time. The same row can be picked twice in a row.
 	Random
-	// Once は先頭から順に配り、使い切ったら以降は false を返す。
-	// 1 アカウントを 1 回しか使えない、といったデータ向け。
+	// Once hands out rows from the first one and returns false once they are used up.
+	// It is meant for data such as accounts that can be used only once.
 	Once
 )
 
-// Feeder はユーザーごとに別のデータ（アカウント、入力値など）を配る。
-// 全ユーザーから同時に Next を呼んでよい。
+// Feeder hands out different data (accounts, input values, ...) to each user.
+// Next may be called from all users at the same time.
 type Feeder[T any] struct {
 	rows []T
 	mode FeedMode
 	next atomic.Uint64
 }
 
-// NewFeeder は rows を mode の順で配る Feeder を作る。
+// NewFeeder creates a Feeder that hands out rows in the order given by mode.
 func NewFeeder[T any](rows []T, mode FeedMode) *Feeder[T] {
 	return &Feeder[T]{rows: rows, mode: mode}
 }
 
-// Next は次の行を返す。行が無い、または Once で使い切ったときは false。
+// Next returns the next row. It returns false when there are no rows or when Once has run out.
 func (f *Feeder[T]) Next() (T, bool) {
 	var zero T
 	n := uint64(len(f.rows))
@@ -55,10 +55,10 @@ func (f *Feeder[T]) Next() (T, bool) {
 	}
 }
 
-// Len は行数。
+// Len returns the number of rows.
 func (f *Feeder[T]) Len() int { return len(f.rows) }
 
-// LoadCSV は、1 行目をヘッダーとする CSV を、列名をキーとする行に読み込む。
+// LoadCSV reads a CSV whose first line is the header into rows keyed by column name.
 func LoadCSV(r io.Reader) ([]map[string]string, error) {
 	cr := csv.NewReader(r)
 	header, err := cr.Read()

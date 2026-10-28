@@ -1,8 +1,11 @@
-// Package jotaro は、シナリオ（ログイン → 一覧 → 注文 のような一連の流れ）を書いて HTTP サーバーに負荷をかけるライブラリ。
+// Package jotaro is a library for load-testing HTTP servers with scenarios:
+// a flow such as login → list → order, written as plain Go code.
 //
-// 使う人の入口はこのパッケージで、シナリオ（Scenario / User / Step）と負荷のかけ方（Plan / Run / Rate / Ramp / Stages）を扱う。
-// 結果は [report.Report] で返る。コンソール・JSON・HTML に書き出したり、しきい値で判定したりするのは
-// report パッケージ、生データ（リクエスト単位の記録）は record パッケージが扱う。
+// This package is the entry point. It handles scenarios (Scenario / User / Step)
+// and how load is applied (Plan / Run / Rate / Ramp / Stages).
+// The result is returned as a [report.Report]. Writing it to the console, JSON or HTML,
+// and checking it against thresholds, is done by the report package;
+// raw per-request records are handled by the record package.
 //
 //	sc := jotaro.NewScenario("checkout", func(ctx context.Context, u *jotaro.User) error {
 //		return u.Step("login", func(s *jotaro.Step) error {

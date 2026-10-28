@@ -9,32 +9,32 @@ import (
 	"time"
 )
 
-// Threshold は結果が満たすべき条件。CI で「遅くなったら失敗させる」ために使う。
+// Threshold is a condition that the result must meet. It is used in CI to fail the build when things get slower.
 //
-// 文字列では次の形で書く（ParseThreshold）。
+// In a string it is written in the following form (ParseThreshold).
 //
 //	p95<200ms
 //	error_rate<1%
 //	p99{step=login}<100ms
 //	iteration_fail_rate{scenario=checkout}<=5%
 //
-// 使える指標は次のとおり。
+// The available metrics are:
 //
-//   - レイテンシ: [区間_]統計。統計は min / mean / p50 / p90 / p95 / p99 / max。
-//     区間は無し（リクエスト全体）/ corrected_（Coordinated Omission 補正後）/
-//     ttfb_ / dns_ / connect_ / tls_。例: p95、corrected_p99、ttfb_p50
-//   - 割合: error_rate（通信エラーと Expect 不一致）/ http_4xx_rate / http_5xx_rate
-//     （いずれもリクエスト数に対する割合）、iteration_fail_rate（イテレーション数に対する割合）
-//   - 数: requests / rps / dropped
+//   - Latency: [phase_]statistic. The statistic is one of min / mean / p50 / p90 / p95 / p99 / max.
+//     The phase is none (the whole request) / corrected_ (after Coordinated Omission correction) /
+//     ttfb_ / dns_ / connect_ / tls_. Examples: p95, corrected_p99, ttfb_p50
+//   - Ratio: error_rate (network errors and Expect mismatches) / http_4xx_rate / http_5xx_rate
+//     (all relative to the number of requests), iteration_fail_rate (relative to the number of iterations)
+//   - Count: requests / rps / dropped
 //
-// {step=...}（任意で scenario=... も）は、レイテンシ・割合・requests をステップ単位で見る。
-// iteration_fail_rate は {scenario=...} でシナリオ単位で見る。rps と dropped は全体のみ。
+// {step=...} (optionally together with scenario=...) looks at latency, ratios and requests per step.
+// iteration_fail_rate is looked at per scenario with {scenario=...}. rps and dropped are overall only.
 type Threshold struct {
 	Metric   string
 	Scenario string
 	Step     string
 	Op       string // "<" / "<=" / ">" / ">="
-	// Value は Metric の単位で持つ。時間はナノ秒、割合は 0〜1。
+	// Value is held in the unit of Metric: nanoseconds for durations, 0 to 1 for ratios.
 	Value float64
 }
 
@@ -145,7 +145,7 @@ func requestRatio(n func(q RequestStats) int) metric {
 
 var thresholdOps = []string{"<=", ">=", "<", ">"}
 
-// ParseThreshold は "p95<200ms" のような文字列を Threshold にする。
+// ParseThreshold turns a string such as "p95<200ms" into a Threshold.
 func ParseThreshold(s string) (Threshold, error) {
 	fail := func(format string, a ...any) (Threshold, error) {
 		return Threshold{}, fmt.Errorf("jotaro: しきい値 %q: %s", s, fmt.Sprintf(format, a...))
@@ -265,7 +265,7 @@ func parseThresholdValue(kind metricKind, s string) (float64, error) {
 	return v, nil
 }
 
-// String は ParseThreshold で読める形で返す。
+// String returns the threshold in a form that ParseThreshold can read.
 func (t Threshold) String() string {
 	return t.label() + t.Op + t.formatValue(t.Value)
 }
@@ -313,30 +313,30 @@ func (t Threshold) holds(actual float64) bool {
 	return false
 }
 
-// CheckResult は 1 つのしきい値を 1 つの対象について確かめた結果。
+// CheckResult is the result of checking one threshold against one target.
 type CheckResult struct {
 	Threshold Threshold
-	// Target は実際に見た対象。"checkout/login" のように、絞り込みに合ったシナリオとステップ。全体なら空。
+	// Target is what was actually looked at: the scenario and step that matched the filter, such as "checkout/login". Empty for the whole run.
 	Target string
 	Actual float64
 	Pass   bool
-	// Note は Pass が false の理由が値の比較ではないときの説明（データが無い、対象が無い）。
+	// Note explains why Pass is false when the reason is not a comparison of values (no data, no target).
 	Note string
 }
 
-// Checks は Check の結果。
+// Checks is the result of Check.
 type Checks []CheckResult
 
-// Passed はすべてのしきい値を満たしたか。
+// Passed reports whether every threshold was met.
 func (c Checks) Passed() bool {
 	return !slices.ContainsFunc(c, func(r CheckResult) bool { return !r.Pass })
 }
 
-// Check は r が ts をすべて満たすかを確かめる。
+// Check checks whether r meets all of ts.
 //
-// {step=...} が複数のシナリオにある同名のステップに当たるときは、それぞれを別々に確かめる。
-// 絞り込みに合う対象が無い、または集計の元になるデータが無い（リクエストが 0 件など）ときは、
-// 満たさなかったものとする。設定の間違いや、動かなかった負荷試験を成功にしないため。
+// When {step=...} matches steps of the same name in several scenarios, each is checked separately.
+// When nothing matches the filter, or there is no data to aggregate (such as zero requests),
+// the threshold counts as not met, so that a configuration mistake or a load test that never ran cannot pass.
 func (r *Report) Check(ts ...Threshold) Checks {
 	var out Checks
 	for _, t := range ts {
@@ -402,7 +402,7 @@ func (r *Report) check(t Threshold) []CheckResult {
 	return out
 }
 
-// Print は結果を 1 行ずつ書き出す。最後に全体の成否を書く。
+// Print writes the results one per line, and the overall outcome at the end.
 func (c Checks) Print(w io.Writer) {
 	for _, r := range c {
 		mark := "PASS"

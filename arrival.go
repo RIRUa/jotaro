@@ -7,17 +7,17 @@ import (
 	"time"
 )
 
-// Arrival はオープンモデルの到着のしかた。
-// 到着の時刻はシナリオの所要時間と無関係に決まる。
+// Arrival is how scenarios arrive in the open model.
+// Arrival times are decided independently of how long a scenario takes.
 type Arrival interface {
-	// at は i 番目（0 始まり）の到着の、開始からの経過時間。
-	// i 番目以降に到着が無い（レートが 0 になった）ときは false。
+	// at is the time since the start of the i-th arrival (0-based).
+	// It is false when there is no arrival from the i-th on (the rate has dropped to 0).
 	at(i int) (time.Duration, bool)
 	validate() error
 }
 
-// Rate は per ごとに n 回の割合でシナリオを開始する。
-// 例えば Rate(10, time.Second) は毎秒 10 回。
+// Rate starts scenarios at a rate of n per per.
+// For example, Rate(10, time.Second) is 10 per second.
 func Rate(n int, per time.Duration) Arrival {
 	return rate{n: n, per: per}
 }
@@ -43,11 +43,11 @@ func (r rate) at(i int) (time.Duration, bool) {
 	return time.Duration(i) * (r.per / time.Duration(r.n)), true
 }
 
-// Ramp は到着のレートを from から to へ、over の間に直線的に変える。
-// レートは per ごとの回数で、over が過ぎたあとは to のまま続ける（to が 0 なら到着はそこで止まる）。
-// 例えば Ramp(0, 50, time.Second, 30*time.Second) は、毎秒 0 回から 50 回へ 30 秒かけて増やす。
+// Ramp changes the arrival rate linearly from from to to over over.
+// The rate is a count per per; after over has passed it stays at to (if to is 0, arrivals stop there).
+// For example, Ramp(0, 50, time.Second, 30*time.Second) raises the rate from 0 to 50 per second over 30 seconds.
 //
-// 実行全体の長さは Plan.Duration で決まる。over が Duration より長いと、to には届かない。
+// The length of the whole run is set by Plan.Duration. If over is longer than Duration, to is never reached.
 func Ramp(from, to int, per, over time.Duration) Arrival {
 	return ramp{from: from, to: to, per: per, over: over}
 }
@@ -102,15 +102,15 @@ func (r ramp) at(i int) (time.Duration, bool) {
 	return time.Duration(t * float64(time.Second)), true
 }
 
-// Stage は Stages の 1 段階。Arrival を For の間だけ続ける。
+// Stage is one stage of Stages. It keeps Arrival going for For.
 type Stage struct {
 	Arrival Arrival
 	For     time.Duration
 }
 
-// Stages は複数の段階を順に実行する。
-// 各段階の Arrival は、その段階の開始を 0 として動く（Ramp の傾斜もそこから始まる）。
-// 例えば、30 秒かけて 50/s まで上げ、60 秒保ち、10 秒で 0 まで下げる:
+// Stages runs several stages in order.
+// The Arrival of each stage runs with the start of that stage as 0 (a Ramp's slope also starts there).
+// For example, ramp up to 50/s over 30 seconds, hold for 60 seconds, then ramp down to 0 over 10 seconds:
 //
 //	Stages(
 //		Stage{Ramp(0, 50, time.Second, 30*time.Second), 30 * time.Second},
@@ -118,8 +118,8 @@ type Stage struct {
 //		Stage{Ramp(50, 0, time.Second, 10*time.Second), 10 * time.Second},
 //	)
 //
-// 全段階が終わると到着は止まる。実行全体の長さは Plan.Duration で決まるので、
-// 各段階の For の合計に合わせる。
+// Arrivals stop when all stages are over. The length of the whole run is set by Plan.Duration,
+// so make it match the sum of the For of every stage.
 func Stages(stages ...Stage) Arrival {
 	s := stagedArrival{stages: stages}
 	var start time.Duration

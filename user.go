@@ -8,9 +8,9 @@ import (
 	"github.com/RIRUa/jotaro/record"
 )
 
-// User はシナリオ 1 回分を実行する仮想ユーザー。
-// ID は仮想ユーザーの番号で、イテレーションをまたいで変わらない。
-// Client は Cookie jar をイテレーションごとに持つので、毎回新しいセッションになる。
+// User is a virtual user that runs the scenario once.
+// ID is the number of the virtual user and does not change across iterations.
+// Client has its own cookie jar per iteration, so every iteration starts a fresh session.
 type User struct {
 	ID        int
 	Iteration int
@@ -26,8 +26,8 @@ type User struct {
 	scheduled time.Time
 }
 
-// Step はシナリオの 1 区間を実行し、その所要時間と成否を記録する。
-// fn が返したエラーはそのまま返すので、続けるか止めるかは呼び出し側が決める。
+// Step runs one section of the scenario and records its duration and outcome.
+// The error returned by fn is returned as is, so the caller decides whether to continue or stop.
 func (u *User) Step(name string, fn func(s *Step) error) error {
 	s := &Step{
 		name: name,
@@ -60,8 +60,8 @@ func (u *User) Step(name string, fn func(s *Step) error) error {
 	return err
 }
 
-// Think は d だけ待つ。待った時間はステップにも Active にも含まれない。
-// ctx が終わったら途中で戻る。
+// Think waits for d. The time waited is counted in neither the step nor Active.
+// It returns early when ctx is done.
 func (u *User) Think(d time.Duration) {
 	if d <= 0 {
 		return

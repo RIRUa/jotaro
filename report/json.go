@@ -10,14 +10,14 @@ import (
 	"time"
 )
 
-// JSONVersion は WriteJSON が出力するスキーマの版。互換を壊す変更のたびに上げる。
-// ReadJSON は 1 以降のすべての版を読める。
+// JSONVersion is the version of the schema that WriteJSON emits. It is raised on every change that breaks compatibility.
+// ReadJSON can read every version from 1 on.
 //
-//	3: series（1 秒ごとの時系列）と、requests の dns / connect / tls / conn_new / conn_reused を追加。
-//	   series の conn_new / conn_reused / dns / connect / tls と、health（負荷生成側の健全性）は後から足した
-//	   （無い JSON は 0・空として読む）
-//	2: started_at と、latency の buckets (ヒストグラム) を追加
-//	1: 初版
+//	3: added series (per-second time series) and, in requests, dns / connect / tls / conn_new / conn_reused.
+//	   conn_new / conn_reused / dns / connect / tls in series, and health (health of the load generator), were added later
+//	   (JSON without them is read as 0 / empty)
+//	2: added started_at and the buckets (histogram) of latency
+//	1: first version
 const JSONVersion = 3
 
 // 出力用の型。Report の内部表現を変えても JSON の形が変わらないよう、別に持つ。
@@ -109,7 +109,7 @@ type jsonReport struct {
 	Health    []jsonHealthPoint `json:"health"`
 }
 
-// WriteJSON はレポートを JSON として w に書き出す。時間はナノ秒の整数。
+// WriteJSON writes the report to w as JSON. Durations are integer nanoseconds.
 func (r *Report) WriteJSON(w io.Writer) error {
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
@@ -222,9 +222,9 @@ func errCounts(m map[record.ErrKind]int) map[string]int {
 
 func ns(d time.Duration) int64 { return d.Nanoseconds() }
 
-// ReadJSON は WriteJSON が書いた JSON を Report に戻す。
-// version が対応していないとき、または JSON の後ろに別のデータが続くときは error を返す。
-// 後者は、生データ（JSON Lines。record.WriteRaw の出力）を渡してしまった場合に当たる。
+// ReadJSON turns JSON written by WriteJSON back into a Report.
+// It returns an error when the version is not supported, or when other data follows the JSON.
+// The latter is the case when raw data (JSON Lines, the output of record.WriteRaw) is passed by mistake.
 func ReadJSON(r io.Reader) (*Report, error) {
 	var in jsonReport
 	dec := json.NewDecoder(r)

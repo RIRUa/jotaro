@@ -5,16 +5,16 @@ import (
 	"io"
 )
 
-// Format はレポートの出力形式。
+// Format is the output format of a report.
 type Format string
 
 const (
-	FormatText Format = "text" // 人が読める表（Print と同じ）
-	FormatJSON Format = "json" // 時間はナノ秒の整数
-	FormatHTML Format = "html" // 外部に依存しない 1 枚の HTML
+	FormatText Format = "text" // a human-readable table (same as Print)
+	FormatJSON Format = "json" // durations are integer nanoseconds
+	FormatHTML Format = "html" // a single self-contained HTML file
 )
 
-// ParseFormat は CLI のフラグなどの文字列を Format にする。
+// ParseFormat turns a string, such as a CLI flag, into a Format.
 func ParseFormat(s string) (Format, error) {
 	switch f := Format(s); f {
 	case FormatText, FormatJSON, FormatHTML:
@@ -23,8 +23,8 @@ func ParseFormat(s string) (Format, error) {
 	return "", fmt.Errorf("jotaro: unknown format %q (text, json, html)", s)
 }
 
-// Write はレポートを f の形式で w に書き出す。
-// 書き込みに失敗した場合は error を返す。途中まで書かれた内容は w に残る。
+// Write writes the report to w in format f.
+// It returns an error if writing fails; what was written until then stays in w.
 func (r *Report) Write(w io.Writer, f Format) error {
 	switch f {
 	case FormatText:

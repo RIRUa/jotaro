@@ -9,21 +9,21 @@ import (
 	"time"
 )
 
-// MergeReports は複数のレポートを 1 つにまとめる。
-// 負荷生成機を分けて同時に実行した結果を、1 回の実行として見たいときに使う。
+// MergeReports combines several reports into one.
+// Use it to see the results of a run split across several load generators as a single run.
 //
-//   - 件数・バイト数・ステータス・エラーは合計する。
-//   - 実行時間は、最初の StartedAt から最後の終了 (StartedAt + Elapsed) まで。
-//     StartedAt が無いレポート (version 1 の JSON など) が混じるときは、
-//     Elapsed の最大値（同時に実行した前提）にする。RPS は合計件数 / Elapsed になる。
-//   - 時系列 (Series) は、StartedAt の差だけ秒をずらして重ね、区間ごとに足す。
-//     同時実行数は同時に動いていた前提の合計（上限の見積り）。
-//   - シナリオとステップは名前で突き合わせ、並びは最初に現れた順。
-//   - Min / Max / Mean は正確。P50〜P99 はヒストグラムを足して求め直すので、
-//     相対誤差 1% 以内の近似になる。ヒストグラムが無い (version 1 の JSON など)
-//     ものが混じるときは、件数で重み付けした平均（誤差は大きい）。
+//   - Counts, bytes, statuses and errors are summed.
+//   - The run time goes from the first StartedAt to the last end (StartedAt + Elapsed).
+//     If a report without StartedAt (such as version 1 JSON) is mixed in,
+//     the maximum Elapsed is used (assuming they ran at the same time). RPS is total count / Elapsed.
+//   - Series are shifted by the difference of StartedAt, overlaid, and added per interval.
+//     Concurrency is summed assuming everything ran at the same time (an upper-bound estimate).
+//   - Scenarios and steps are matched by name, in the order they first appear.
+//   - Min / Max / Mean are exact. P50 to P99 are recomputed by adding the histograms,
+//     so they are approximations within 1% relative error. If reports without a histogram
+//     (such as version 1 JSON) are mixed in, a count-weighted average is used (with a larger error).
 //
-// Open が揃っていないレポートは混ぜられないので error を返す。
+// Reports whose Open differs cannot be mixed, so an error is returned.
 func MergeReports(reps ...*Report) (*Report, error) {
 	if len(reps) == 0 {
 		return nil, errors.New("jotaro: merge: no reports")

@@ -7,31 +7,31 @@ import (
 	"github.com/RIRUa/jotaro/record"
 )
 
-// SeriesInterval は時系列の 1 区間の長さ。
+// SeriesInterval is the length of one interval of the time series.
 const SeriesInterval = time.Second
 
-// SeriesPoint は実行開始から 1 秒ごとの集計。
+// SeriesPoint is the aggregate for one second since the start of the run.
 type SeriesPoint struct {
-	// Second は StartedAt からの経過秒（0 始まり）。区間は [Second, Second+1) 秒。
+	// Second is the seconds elapsed since StartedAt (0-based). The interval is [Second, Second+1) seconds.
 	Second int
-	// Requests はこの区間に開始したリクエスト数。
+	// Requests is the number of requests started in this interval.
 	Requests int
-	// Errors はそのうち通信エラー（Err が空でない）になった数。HTTP 4xx/5xx は含まない。
+	// Errors is how many of them ended in a network error (Err is not empty). HTTP 4xx/5xx are not included.
 	Errors int
-	// HTTP5xx はそのうち HTTP 5xx を返した数（Errors とは重ならない）。
+	// HTTP5xx is how many of them returned HTTP 5xx (it does not overlap with Errors).
 	HTTP5xx int
-	// NewConns / ReusedConns は、この区間に開始したリクエストのうち、
-	// 接続を新しく張ったものと再利用したものの数。接続を得る前に失敗したものはどちらにも数えない。
+	// NewConns / ReusedConns are, among the requests started in this interval,
+	// the number that opened a new connection and the number that reused one. Those that failed before getting a connection are counted in neither.
 	NewConns    int
 	ReusedConns int
-	// Latency はこの区間に開始したリクエストのレイテンシ分布。
+	// Latency is the latency distribution of the requests started in this interval.
 	Latency Latency
-	// DNS / Connect / TLS は、この区間に開始したリクエストのうち、その区間が実際に起きたものの分布
-	// （RequestStats の同名のフィールドと同じ範囲）。
+	// DNS / Connect / TLS are the distributions over the requests started in this interval in which that phase actually happened
+	// (the same scope as the fields of the same name in RequestStats).
 	DNS     Latency
 	Connect Latency
 	TLS     Latency
-	// Concurrency はこの区間に実行中だったイテレーション数の最大値。
+	// Concurrency is the maximum number of iterations running during this interval.
 	Concurrency int
 }
 

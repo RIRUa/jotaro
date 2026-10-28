@@ -6,8 +6,8 @@ import (
 	"net/http"
 )
 
-// Response は 1 回のリクエストの結果。
-// HTTP 4xx/5xx は通信エラーではないので Err は nil のまま、Code に入る。
+// Response is the result of a single request.
+// HTTP 4xx/5xx are not network errors, so Err stays nil and the status goes into Code.
 type Response struct {
 	Code   int
 	Header http.Header
@@ -16,22 +16,23 @@ type Response struct {
 	err error
 }
 
-// ExpectError は ExpectStatus の期待値が外れたことを表す。
+// ExpectError reports that the status code did not match what ExpectStatus expected.
 type ExpectError struct {
 	Want int
 	Got  int
 }
 
+// Error implements the error interface.
 func (e *ExpectError) Error() string {
 	return fmt.Sprintf("jotaro: ステータスコードが期待と違う (want %d, got %d)", e.Want, e.Got)
 }
 
-// Err は通信エラーを返す。HTTP のステータスコードは見ない。
+// Err returns the network error, if any. It does not look at the HTTP status code.
 func (r *Response) Err() error {
 	return r.err
 }
 
-// Decode はボディを JSON として v に読み込む。
+// Decode reads the body into v as JSON.
 func (r *Response) Decode(v any) error {
 	if r.err != nil {
 		return r.err
@@ -42,7 +43,7 @@ func (r *Response) Decode(v any) error {
 	return nil
 }
 
-// ExpectStatus はステータスコードが code と一致することを確認する。
+// ExpectStatus checks that the status code equals code.
 func (r *Response) ExpectStatus(code int) error {
 	if r.err != nil {
 		return r.err
