@@ -227,7 +227,7 @@ func TestChecksPrint(t *testing.T) {
 	var buf bytes.Buffer
 	cs.Print(&buf)
 	out := buf.String()
-	for _, want := range []string{"PASS  max<=200ms", "FAIL  p50<10ms", "対象のステップがない", "NG: 3 件中 2 件"} {
+	for _, want := range []string{"PASS  max<=200ms", "FAIL  p50<10ms", "no matching step", "NG: 2 of 3 not met"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("出力に %q が無い:\n%s", want, out)
 		}

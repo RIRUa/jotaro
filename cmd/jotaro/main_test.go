@@ -144,10 +144,10 @@ func TestCheck(t *testing.T) {
 		code int
 		want string
 	}{
-		{"満たす", []string{"-t", "p95<100ms", "-t", "error_rate<1%", in}, 0, "OK: 2 件すべて満たした"},
+		{"満たす", []string{"-t", "p95<100ms", "-t", "error_rate<1%", in}, 0, "OK: all 2 met"},
 		{"満たさない", []string{"-t", "p95<1ms", "-t", "error_rate<1%", in}, 1, "FAIL  p95<1ms"},
 		{"ステップを絞る", []string{"-t", "p95{step=login}<100ms", in}, 0, "[checkout/login]"},
-		{"ステップがない", []string{"-t", "p95{step=nothing}<100ms", in}, 1, "対象のステップがない"},
+		{"ステップがない", []string{"-t", "p95{step=nothing}<100ms", in}, 1, "no matching step"},
 	}
 	for _, tt := range tests {
 		var stdout, stderr bytes.Buffer

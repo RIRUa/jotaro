@@ -232,7 +232,7 @@ func ReadJSON(r io.Reader) (*Report, error) {
 		return nil, fmt.Errorf("jotaro: read report: %w", err)
 	}
 	if _, err := dec.Token(); err != io.EOF {
-		return nil, fmt.Errorf("jotaro: read report: JSON の後ろに別のデータが続いている（生データなら record.ReadRaw / -raw を使う）")
+		return nil, fmt.Errorf("jotaro: read report: other data follows the JSON (for raw data, use record.ReadRaw / -raw)")
 	}
 	if in.Version < 1 || in.Version > JSONVersion {
 		return nil, fmt.Errorf("jotaro: unsupported report version %d (want 1..%d)", in.Version, JSONVersion)

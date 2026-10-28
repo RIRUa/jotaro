@@ -25,7 +25,7 @@ func (sc *Scenario) run(u *User) (err error) {
 	start := time.Now()
 	defer func() {
 		if p := recover(); p != nil {
-			err = fmt.Errorf("jotaro: シナリオが panic した: %v", p)
+			err = fmt.Errorf("jotaro: scenario panicked: %v", p)
 		}
 		u.col.AddIteration(record.IterationRecord{
 			Scenario:  sc.Name,

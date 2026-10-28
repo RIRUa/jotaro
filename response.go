@@ -24,7 +24,7 @@ type ExpectError struct {
 
 // Error implements the error interface.
 func (e *ExpectError) Error() string {
-	return fmt.Sprintf("jotaro: ステータスコードが期待と違う (want %d, got %d)", e.Want, e.Got)
+	return fmt.Sprintf("jotaro: unexpected status code (want %d, got %d)", e.Want, e.Got)
 }
 
 // Err returns the network error, if any. It does not look at the HTTP status code.
@@ -38,7 +38,7 @@ func (r *Response) Decode(v any) error {
 		return r.err
 	}
 	if err := json.Unmarshal(r.Body, v); err != nil {
-		return fmt.Errorf("jotaro: レスポンスのデコードに失敗 (status %d): %w", r.Code, err)
+		return fmt.Errorf("jotaro: failed to decode response (status %d): %w", r.Code, err)
 	}
 	return nil
 }

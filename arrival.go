@@ -30,11 +30,11 @@ type rate struct {
 func (r rate) validate() error {
 	switch {
 	case r.n <= 0:
-		return errors.New("jotaro: Rate の回数は 1 以上にする必要がある")
+		return errors.New("jotaro: Rate count must be at least 1")
 	case r.per <= 0:
-		return errors.New("jotaro: Rate の期間は正の値にする必要がある")
+		return errors.New("jotaro: Rate period must be positive")
 	case r.per/time.Duration(r.n) <= 0:
-		return errors.New("jotaro: Rate が高すぎて間隔が 1ns 未満になる")
+		return errors.New("jotaro: Rate is so high that the interval is under 1ns")
 	}
 	return nil
 }
@@ -60,15 +60,15 @@ type ramp struct {
 func (r ramp) validate() error {
 	switch {
 	case r.from < 0 || r.to < 0:
-		return errors.New("jotaro: Ramp の回数は 0 以上にする必要がある")
+		return errors.New("jotaro: Ramp counts must be at least 0")
 	case r.from == 0 && r.to == 0:
-		return errors.New("jotaro: Ramp の回数が両方 0 では到着しない")
+		return errors.New("jotaro: Ramp with both counts 0 never arrives")
 	case r.per <= 0:
-		return errors.New("jotaro: Ramp の期間は正の値にする必要がある")
+		return errors.New("jotaro: Ramp period must be positive")
 	case r.over <= 0:
-		return errors.New("jotaro: Ramp の傾斜の時間は正の値にする必要がある")
+		return errors.New("jotaro: Ramp slope duration must be positive")
 	case r.per/time.Duration(max(r.from, r.to)) <= 0:
-		return errors.New("jotaro: Ramp が高すぎて間隔が 1ns 未満になる")
+		return errors.New("jotaro: Ramp is so high that the interval is under 1ns")
 	}
 	return nil
 }
@@ -168,14 +168,14 @@ func (st Stage) count() int {
 
 func (s stagedArrival) validate() error {
 	if len(s.stages) == 0 {
-		return errors.New("jotaro: Stages には 1 つ以上の段階が必要")
+		return errors.New("jotaro: Stages needs at least one stage")
 	}
 	for i, st := range s.stages {
 		switch {
 		case st.Arrival == nil:
-			return fmt.Errorf("jotaro: Stages の %d 番目の Arrival が未設定", i+1)
+			return fmt.Errorf("jotaro: Arrival of stage %d of Stages is not set", i+1)
 		case st.For <= 0:
-			return fmt.Errorf("jotaro: Stages の %d 番目の For は正の値にする必要がある", i+1)
+			return fmt.Errorf("jotaro: For of stage %d of Stages must be positive", i+1)
 		}
 		if err := st.Arrival.validate(); err != nil {
 			return fmt.Errorf("stages[%d]: %w", i+1, err)

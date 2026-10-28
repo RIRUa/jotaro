@@ -148,7 +148,7 @@ var thresholdOps = []string{"<=", ">=", "<", ">"}
 // ParseThreshold turns a string such as "p95<200ms" into a Threshold.
 func ParseThreshold(s string) (Threshold, error) {
 	fail := func(format string, a ...any) (Threshold, error) {
-		return Threshold{}, fmt.Errorf("jotaro: しきい値 %q: %s", s, fmt.Sprintf(format, a...))
+		return Threshold{}, fmt.Errorf("jotaro: threshold %q: %s", s, fmt.Sprintf(format, a...))
 	}
 
 	// 演算子は {...} の外にある最初の < か >。
@@ -168,7 +168,7 @@ scan:
 		}
 	}
 	if at < 0 {
-		return fail("演算子（<, <=, >, >=）がない")
+		return fail("no operator (<, <=, >, >=)")
 	}
 	left := strings.TrimSpace(s[:at])
 	right := s[at:]
@@ -187,13 +187,13 @@ scan:
 	if hasSel {
 		sel, ok := strings.CutSuffix(sel, "}")
 		if !ok {
-			return fail("} で閉じていない")
+			return fail("not closed with }")
 		}
 		for _, kv := range strings.Split(sel, ",") {
 			k, v, ok := strings.Cut(kv, "=")
 			k, v = strings.TrimSpace(k), strings.TrimSpace(v)
 			if !ok || v == "" {
-				return fail("絞り込みは key=value の形で書く: %q", kv)
+				return fail("a filter must be written as key=value: %q", kv)
 			}
 			switch k {
 			case "scenario":
@@ -201,27 +201,27 @@ scan:
 			case "step":
 				t.Step = v
 			default:
-				return fail("絞り込みのキー %q は使えない（scenario, step）", k)
+				return fail("filter key %q is not allowed (scenario, step)", k)
 			}
 		}
 	}
 
 	m, ok := lookupMetric(t.Metric)
 	if !ok {
-		return fail("指標 %q を知らない", t.Metric)
+		return fail("unknown metric %q", t.Metric)
 	}
 	switch m.scope {
 	case scopeGlobal:
 		if t.Scenario != "" || t.Step != "" {
-			return fail("%s は全体でしか見られない", t.Metric)
+			return fail("%s can only be looked at for the whole run", t.Metric)
 		}
 	case scopeIteration:
 		if t.Step != "" {
-			return fail("%s は {scenario=...} で絞り込む（step は使えない）", t.Metric)
+			return fail("%s is filtered with {scenario=...} (step cannot be used)", t.Metric)
 		}
 	case scopeRequests:
 		if t.Step == "" && t.Scenario != "" {
-			return fail("%s を絞り込むには {step=...} が要る（scenario だけでは絞り込めない）", t.Metric)
+			return fail("filtering %s needs {step=...} (scenario alone is not enough)", t.Metric)
 		}
 	}
 
@@ -235,32 +235,32 @@ scan:
 
 func parseThresholdValue(kind metricKind, s string) (float64, error) {
 	if s == "" {
-		return 0, fmt.Errorf("値がない")
+		return 0, fmt.Errorf("no value")
 	}
 	switch kind {
 	case kindDuration:
 		d, err := time.ParseDuration(s)
 		if err != nil {
-			return 0, fmt.Errorf("時間として読めない（例: 200ms, 1.5s）")
+			return 0, fmt.Errorf("cannot be read as a duration (e.g. 200ms, 1.5s)")
 		}
 		return float64(d), nil
 	case kindRatio:
 		if p, ok := strings.CutSuffix(s, "%"); ok {
 			v, err := strconv.ParseFloat(strings.TrimSpace(p), 64)
 			if err != nil {
-				return 0, fmt.Errorf("割合として読めない（例: 1%%, 0.01）")
+				return 0, fmt.Errorf("cannot be read as a ratio (e.g. 1%%, 0.01)")
 			}
 			return v / 100, nil
 		}
 		v, err := strconv.ParseFloat(s, 64)
 		if err != nil {
-			return 0, fmt.Errorf("割合として読めない（例: 1%%, 0.01）")
+			return 0, fmt.Errorf("cannot be read as a ratio (e.g. 1%%, 0.01)")
 		}
 		return v, nil
 	}
 	v, err := strconv.ParseFloat(s, 64)
 	if err != nil {
-		return 0, fmt.Errorf("数として読めない")
+		return 0, fmt.Errorf("cannot be read as a number")
 	}
 	return v, nil
 }
@@ -348,11 +348,11 @@ func (r *Report) Check(ts ...Threshold) Checks {
 func (r *Report) check(t Threshold) []CheckResult {
 	m, ok := lookupMetric(t.Metric)
 	if !ok {
-		return []CheckResult{{Threshold: t, Note: fmt.Sprintf("指標 %q を知らない", t.Metric)}}
+		return []CheckResult{{Threshold: t, Note: fmt.Sprintf("unknown metric %q", t.Metric)}}
 	}
 	judge := func(target string, v float64, ok bool) CheckResult {
 		if !ok {
-			return CheckResult{Threshold: t, Target: target, Note: "データがない"}
+			return CheckResult{Threshold: t, Target: target, Note: "no data"}
 		}
 		return CheckResult{Threshold: t, Target: target, Actual: v, Pass: t.holds(v)}
 	}
@@ -373,7 +373,7 @@ func (r *Report) check(t Threshold) []CheckResult {
 			failed += sc.Iterations.Failed
 		}
 		if !matched {
-			return []CheckResult{{Threshold: t, Note: "対象のシナリオがない"}}
+			return []CheckResult{{Threshold: t, Note: "no matching scenario"}}
 		}
 		v, ok := m.iter(count, failed)
 		return []CheckResult{judge(t.Scenario, v, ok)}
@@ -397,7 +397,7 @@ func (r *Report) check(t Threshold) []CheckResult {
 		}
 	}
 	if len(out) == 0 {
-		return []CheckResult{{Threshold: t, Note: "対象のステップがない"}}
+		return []CheckResult{{Threshold: t, Note: "no matching step"}}
 	}
 	return out
 }
@@ -425,10 +425,10 @@ func (c Checks) Print(w io.Writer) {
 		}
 	}
 	if failed == 0 {
-		fmt.Fprintf(w, "OK: %d 件すべて満たした\n", len(c))
+		fmt.Fprintf(w, "OK: all %d met\n", len(c))
 		return
 	}
-	fmt.Fprintf(w, "NG: %d 件中 %d 件が満たさなかった\n", len(c), failed)
+	fmt.Fprintf(w, "NG: %d of %d not met\n", failed, len(c))
 }
 
 func actualText(r CheckResult) string {

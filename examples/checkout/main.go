@@ -1,11 +1,11 @@
-// checkout は jotaro の使い方を示すサンプル。
-// 自前のモックサーバーを立てて、ログイン → 商品一覧 → 注文 の流れに負荷をかける。
+// checkout is a sample that shows how to use jotaro.
+// It starts its own mock server and applies load to the flow login → product list → order.
 //
-//	go run ./examples/checkout            # 20 ユーザー固定（クローズド）
-//	go run ./examples/checkout -rate 50   # 毎秒 50 シナリオ（オープン）
-//	go run ./examples/checkout -rate 100 -ramp 8s -duration 12s  # 0 から 100 へ 8 秒かけて増やす
-//	go run ./examples/checkout -rate 100 -duration 12s -stages    # 上げる → 保つ → 下げる
-//	go run ./examples/checkout -raw raw.jsonl                      # 生データ（JSON Lines）も書き出す
+//	go run ./examples/checkout            # 20 fixed users (closed)
+//	go run ./examples/checkout -rate 50   # 50 scenarios per second (open)
+//	go run ./examples/checkout -rate 100 -ramp 8s -duration 12s  # ramp from 0 to 100 over 8 seconds
+//	go run ./examples/checkout -rate 100 -duration 12s -stages    # ramp up → hold → ramp down
+//	go run ./examples/checkout -raw raw.jsonl                      # also write raw data (JSON Lines)
 package main
 
 import (
@@ -32,8 +32,8 @@ type item struct {
 	Price int `json:"price"`
 }
 
-// accounts はユーザーごとに別のアカウントを配る。
-// CSV から読むなら jotaro.LoadCSV(f) の結果をそのまま渡せる。
+// accounts hands out a different account to each user.
+// To read from a CSV, pass the result of jotaro.LoadCSV(f) as is.
 var accounts = jotaro.NewFeeder([]map[string]string{
 	{"user": "alice"}, {"user": "bob"}, {"user": "carol"},
 }, jotaro.Circular)
@@ -45,7 +45,7 @@ var checkout = jotaro.NewScenario("checkout", func(ctx context.Context, u *jotar
 	if err := u.Step("login", func(s *jotaro.Step) error {
 		creds, ok := accounts.Next()
 		if !ok {
-			return fmt.Errorf("アカウントが足りない")
+			return fmt.Errorf("not enough accounts")
 		}
 		if err := s.Post("/login").JSON(creds).Do().Decode(&login); err != nil {
 			return err
@@ -73,13 +73,13 @@ var checkout = jotaro.NewScenario("checkout", func(ctx context.Context, u *jotar
 })
 
 func main() {
-	rate := flag.Int("rate", 0, "毎秒のシナリオ開始数。0 なら Users モデル")
-	ramp := flag.Duration("ramp", 0, "-rate に達するまでの時間。0 なら最初から一定")
-	stages := flag.Bool("stages", false, "-rate・-ramp・-duration を使い、上げる → 保つ → 下げるの 3 段階にする")
-	duration := flag.Duration("duration", 3*time.Second, "実行時間")
-	format := flag.String("format", "text", "結果の形式 (text, json, html)")
-	out := flag.String("o", "", "結果の書き出し先。空なら標準出力")
-	rawOut := flag.String("raw", "", "生データ（JSON Lines）の書き出し先。空なら出さない")
+	rate := flag.Int("rate", 0, "scenarios started per second; 0 means the Users model")
+	ramp := flag.Duration("ramp", 0, "time to reach -rate; 0 means constant from the start")
+	stages := flag.Bool("stages", false, "use -rate, -ramp and -duration to make three stages: ramp up → hold → ramp down")
+	duration := flag.Duration("duration", 3*time.Second, "run time")
+	format := flag.String("format", "text", "result format (text, json, html)")
+	out := flag.String("o", "", "where to write the result; standard output if empty")
+	rawOut := flag.String("raw", "", "where to write raw data (JSON Lines); not written if empty")
 	flag.Parse()
 
 	f, err := report.ParseFormat(*format)
@@ -107,7 +107,7 @@ func main() {
 		plan.Users = 20
 	}
 	if *rate > 0 && *stages {
-		// 前後の 1/4 ずつで上げ下げし、中間の 1/2 は一定にする。
+		// ramp up and down in the first and last quarter, and hold steady in the middle half.
 		q := *duration / 4
 		plan.Arrival = jotaro.Stages(
 			jotaro.Stage{Arrival: jotaro.Ramp(0, *rate, time.Second, q), For: q},
@@ -142,7 +142,7 @@ func main() {
 	}
 }
 
-// mockShop は少し遅くて、ときどき注文に失敗する API。
+// mockShop is an API that is a bit slow and sometimes fails an order.
 func mockShop() http.Handler {
 	delay := func(min, max time.Duration) {
 		time.Sleep(min + rand.N(max-min))

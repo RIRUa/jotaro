@@ -39,7 +39,7 @@ func newRequest(exec *executor, method, path string) *Request {
 func (r *Request) JSON(v any) *Request {
 	b, err := json.Marshal(v)
 	if err != nil {
-		r.err = fmt.Errorf("jotaro: JSON エンコードに失敗: %w", err)
+		r.err = fmt.Errorf("jotaro: failed to encode JSON: %w", err)
 		return r
 	}
 	r.Spec.Body = b
@@ -67,7 +67,7 @@ func (r *Request) Body(v any) *Request {
 	case io.Reader:
 		data, err := io.ReadAll(b)
 		if err != nil {
-			r.err = fmt.Errorf("jotaro: ボディの読み込みに失敗: %w", err)
+			r.err = fmt.Errorf("jotaro: failed to read body: %w", err)
 			return r
 		}
 		r.Spec.Body = data

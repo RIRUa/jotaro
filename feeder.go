@@ -63,7 +63,7 @@ func LoadCSV(r io.Reader) ([]map[string]string, error) {
 	cr := csv.NewReader(r)
 	header, err := cr.Read()
 	if errors.Is(err, io.EOF) {
-		return nil, errors.New("jotaro: CSV が空（ヘッダー行が必要）")
+		return nil, errors.New("jotaro: CSV is empty (a header line is required)")
 	}
 	if err != nil {
 		return nil, err

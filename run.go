@@ -55,15 +55,15 @@ type Plan struct {
 func (p Plan) validate() error {
 	switch {
 	case p.Scenario == nil || p.Scenario.Fn == nil:
-		return errors.New("jotaro: Plan.Scenario が未設定")
+		return errors.New("jotaro: Plan.Scenario is not set")
 	case p.Users > 0 && p.Arrival != nil:
-		return errors.New("jotaro: Plan.Users と Plan.Arrival は同時に指定できない")
+		return errors.New("jotaro: Plan.Users and Plan.Arrival cannot be set together")
 	case p.Users <= 0 && p.Arrival == nil:
-		return errors.New("jotaro: Plan.Users は 1 以上にする必要がある（または Plan.Arrival を指定する）")
+		return errors.New("jotaro: Plan.Users must be at least 1 (or set Plan.Arrival)")
 	case p.MaxUsers < 0:
-		return errors.New("jotaro: Plan.MaxUsers は 0 以上にする必要がある")
+		return errors.New("jotaro: Plan.MaxUsers must be at least 0")
 	case p.Duration <= 0:
-		return errors.New("jotaro: Plan.Duration は正の値にする必要がある")
+		return errors.New("jotaro: Plan.Duration must be positive")
 	}
 	if p.Arrival != nil {
 		return p.Arrival.validate()
@@ -133,7 +133,7 @@ func Run(ctx context.Context, p Plan) (*report.Report, error) {
 	rep := report.FromRaw(raw)
 	if p.Raw != nil {
 		if err := record.WriteRaw(p.Raw, raw); err != nil {
-			return rep, fmt.Errorf("jotaro: 生データの書き出しに失敗: %w", err)
+			return rep, fmt.Errorf("jotaro: failed to write raw data: %w", err)
 		}
 	}
 	return rep, nil
