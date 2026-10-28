@@ -45,8 +45,8 @@ func TestRunRate(t *testing.T) {
 	if !rep.Open || rep.Dropped != 0 {
 		t.Fatalf("Open=%v Dropped=%d", rep.Open, rep.Dropped)
 	}
-	// 100/s × 0.5s = 50 回。タイマーの揺れを見込んで幅を持たせる。
-	if n := rep.Scenarios[0].Iterations.Count; n < 40 || n > 51 {
+	// 100/s × 0.5s = 50 回。タイマーの揺れ（Windows では特に大きい）を見込んで幅を持たせる。
+	if n := rep.Scenarios[0].Iterations.Count; n < 40 || n > 56 {
 		t.Fatalf("Iterations = %d, 約 50 のはず", n)
 	}
 	if rep.Scenarios[0].Iterations.Failed != 0 {
