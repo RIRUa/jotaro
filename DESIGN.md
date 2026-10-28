@@ -1,36 +1,38 @@
-# jotaro 設計メモ
+# jotaro design notes
 
-シナリオ表現力に重点を置いた、Go 製の負荷試験ツール（ライブラリ＋薄い CLI）。
-壁打ちで決めた内容をまとめたもの。未決の項目は末尾に記載。
+[English](DESIGN.md) | [日本語](DESIGN_jp.md)
 
-- モジュール: `github.com/RIRUa/jotaro`
-- Go: 1.22 以上（`go.mod`）。開発では 1.27.3 を使う（`.mise.toml` で固定）。CI は 1.22 と最新の安定版で試す
+A Go load-testing tool (a library plus a thin CLI) focused on scenario expressiveness.
+It collects what was decided in design discussions. Undecided items are at the end.
 
-## 1. 動機
+- Module: `github.com/RIRUa/jotaro`
+- Go: 1.22 or later (`go.mod`). Development uses 1.27.3 (pinned in `.mise.toml`). CI tests with 1.22 and the latest stable release
 
-[vegeta](https://github.com/tsenart/vegeta) は固定レートで単発リクエストを撃つことに特化しており、状態を持つ流れ（ログイン → トークン取得 → 注文 → 確認）を表現できない。
+## 1. Motivation
 
-README と `pkg.go.dev`（v12.13.0）で確認した事実:
+[vegeta](https://github.com/tsenart/vegeta) specializes in firing single requests at a fixed rate and cannot express stateful flows (login → get a token → order → confirm).
 
-- ターゲットは独立しており、連鎖・値の抽出・スクリプトの記述は README に無い。
-- `type Targeter func(*Target) error` は直前のレスポンスを受け取れない。`Target` にユーザーやコンテキストを表す欄も無い。
-- `Pacer.Pace(elapsed, hits)` の単位は 1 リクエスト（ヒット）で、「シナリオ/秒」でペースを決められない。
-- `Result` は "a single Target hit" 単位で、シナリオ単位の成否・所要時間を持たない。
+Facts checked against the README and `pkg.go.dev` (v12.13.0):
 
-→ vegeta の上には載せず、**自前の実行エンジン**を作る。
+- Targets are independent; chaining, value extraction and scripting are not described in the README.
+- `type Targeter func(*Target) error` cannot receive the previous response. `Target` also has no field for a user or a context.
+- The unit of `Pacer.Pace(elapsed, hits)` is a single request (hit), so the pace cannot be set in "scenarios per second".
+- `Result` is per "a single Target hit" and has no scenario-level success or duration.
 
-## 2. 方針
+→ We do not build on top of vegeta. We build **our own execution engine**.
 
-| 項目 | 決定 |
+## 2. Approach
+
+| Item | Decision |
 |---|---|
-| 提供形態 | ライブラリ中心＋薄い CLI |
-| シナリオの書き方 | **案A: 素の Go 関数**で始める。案B（ビルダー）は後から A の糖衣として追加 |
-| 実行モデル | 1 ユーザー（シナリオの 1 回の実行）= 1 goroutine。`u.Step(name, fn)` でステップを区切る |
-| プロトコル | HTTP から。後で差し込めるようインターフェースは切る |
-| YAML | 後回し。実現するなら YAML → B（データ構造）→ A（実行）の片方向で、実行時に読み込む方式 |
-| リクエスト記述 | 内部でデータ構造として持つ（メソッド・パス・ヘッダー・ボディ・抽出・期待値）。YAML の道を残すため |
+| Form | Library first, plus a thin CLI |
+| How scenarios are written | Start with **option A: plain Go functions**. Option B (a builder) is added later as sugar over A |
+| Execution model | One user (one run of a scenario) = one goroutine. Steps are delimited with `u.Step(name, fn)` |
+| Protocol | HTTP first. Interfaces are cut so that others can be plugged in later |
+| YAML | Deferred. If done, one-way: YAML → B (data structures) → A (execution), loaded at run time |
+| Request description | Held internally as a data structure (method, path, headers, body, extraction, expectations), to keep the YAML path open |
 
-## 3. シナリオの書き心地（案A）
+## 3. How scenarios feel to write (option A)
 
 ```go
 var checkout = jotaro.NewScenario("checkout", func(ctx context.Context, u *jotaro.User) error {
@@ -53,136 +55,136 @@ var checkout = jotaro.NewScenario("checkout", func(ctx context.Context, u *jotar
 })
 ```
 
-実装では `Scenario` を型名として使うため、コンストラクタは `NewScenario` にした。
+`Scenario` is used as a type name in the implementation, so the constructor is called `NewScenario`.
 
-### エラーの扱い
+### Error handling
 
-- `Do()` が `error` を返すのは通信エラーのときだけ。HTTP 4xx/5xx はステータスとして記録し、Go のエラーにはしない（404 を期待するテストを書けるように）。
-- 期待値の検証は `ExpectStatus(201)` のように明示し、外れたら `error` を返す。
-- `fn` が `error` を返すとそのステップは失敗。シナリオを止めるかどうかは、呼び出し側が `return err` するかどうかで決める。
+- `Do()` returns an `error` only for network errors. HTTP 4xx/5xx are recorded as a status and are not Go errors (so that tests expecting a 404 can be written).
+- Expectations are checked explicitly, e.g. `ExpectStatus(201)`, and an `error` is returned on mismatch.
+- If `fn` returns an `error`, the step fails. Whether the scenario stops is up to the caller, depending on whether it does `return err`.
 
-### `User` が持つもの
+### What `User` holds
 
-ユーザー ID、何回目の実行か、ユーザーごとの Cookie jar 付き `http.Client`、`Think()`。
+The user ID, which run it is, an `http.Client` with a per-user cookie jar, and `Think()`.
 
-## 4. 負荷モデル
+## 4. Load models
 
 ```go
 jotaro.Run(ctx, jotaro.Plan{
     Scenario: checkout,
-    Users:    50,                          // クローズド: 固定同時ユーザー数
-    // Arrival: jotaro.Rate(10, time.Second) // オープン: 毎秒10シナリオ（Users とは排他）
+    Users:    50,                          // closed: a fixed number of concurrent users
+    // Arrival: jotaro.Rate(10, time.Second) // open: 10 scenarios per second (mutually exclusive with Users)
     Duration: time.Minute,
 })
 ```
 
-- `Users`（クローズド）: N 個の goroutine が逐次実行する。**実装済み**。
-- `Rate`（オープン）: 到着レート固定。vegeta の強みをシナリオ単位で再現する。**実装済み**。
+- `Users` (closed): N goroutines run sequentially. **Implemented**.
+- `Rate` (open): a fixed arrival rate. Reproduces vegeta's strength at the scenario level. **Implemented**.
 
-`Rate` モデルの動き:
+How the `Rate` model works:
 
-- 到着時刻は開始時刻からの累積（`i × 間隔`）で決める。ディスパッチャが遅れても間隔はずれず、遅れた分はまとめて起動する。
-- 同時実行数が `MaxUsers`（既定 1000）に達しているときの到着は、実行せず**ドロップ**として数える（`Report.Dropped`）。
-- イテレーションの最初のリクエストの `Scheduled` に予定到着時刻を入れる。`Record.Corrected()`（予定時刻から応答完了まで）が Coordinated Omission の補正後の値で、`RequestStats.Corrected` に集計する。2 つ目以降のリクエストは `Scheduled = Start`（前のリクエストの遅れは実際の遅延なので補正しない）。
-- 到着ごとに別のユーザーとして扱う（`User.ID` は到着の通し番号、`Iteration` は 0）。終了の仕方は `Users` と同じ（`Duration` / `Grace`）。
+- Arrival times are computed cumulatively from the start time (`i × interval`). Even if the dispatcher falls behind, the interval does not drift; the delayed arrivals are started together.
+- An arrival while concurrency is at `MaxUsers` (default 1000) is not run and is counted as a **drop** (`Report.Dropped`).
+- The scheduled arrival time is put into `Scheduled` of the first request of an iteration. `Record.Corrected()` (from the scheduled time to the response completion) is the value after Coordinated Omission correction and is aggregated into `RequestStats.Corrected`. For the second and later requests, `Scheduled = Start` (the delay of the previous request is real delay, so it is not corrected).
+- Each arrival is treated as a separate user (`User.ID` is the arrival's sequence number and `Iteration` is 0). It ends the same way as `Users` (`Duration` / `Grace`).
 
-`Users` モデルの終了の仕方:
+How the `Users` model ends:
 
-- `Duration` を過ぎたら、新しいイテレーションを始めない。
-- 実行中のイテレーションは `Grace`（既定 30 秒）まで完了を待つ。超えたものは中断して `canceled` として記録する。リクエスト自体のタイムアウト（`Timeout`、既定 30 秒）は `timeout` で、区別される。
-- 親の `ctx` が終わったら、実行中のものも含めてすぐ止まる。
-- そのため `Report.Elapsed` は `Duration` より少し長くなり、RPS はわずかに低めに出る。
+- After `Duration` has passed, no new iterations are started.
+- Running iterations are waited for up to `Grace` (default 30 seconds). Those that exceed it are aborted and recorded as `canceled`. A request's own timeout (`Timeout`, default 30 seconds) is `timeout`, which is distinguished from this.
+- When the parent `ctx` ends, everything, including running iterations, stops immediately.
+- As a result `Report.Elapsed` is slightly longer than `Duration`, and RPS comes out slightly low.
 
-### ユーザーごとのデータ（Feeder）
+### Per-user data (Feeder)
 
-`Feeder[T]` が、ユーザーごとに別のデータ（アカウント、入力値）を配る。全ユーザーから並行に呼べる。
+A `Feeder[T]` hands out different data (accounts, input values) to each user. It can be called concurrently from all users.
 
 ```go
-rows, _ := jotaro.LoadCSV(f) // 1 行目がヘッダー。列名をキーとする map の列
+rows, _ := jotaro.LoadCSV(f) // first row is the header; a list of maps keyed by column name
 accounts := jotaro.NewFeeder(rows, jotaro.Once)
 
-// シナリオの中で
+// inside a scenario
 acc, ok := accounts.Next()
 ```
 
-| モード | 動き | 向いているデータ |
+| Mode | Behavior | Suited for |
 |---|---|---|
-| `Circular` | 順に配り、末尾で先頭へ戻る | 同じアカウントを繰り返し使ってよい |
-| `Random` | 毎回ランダム | 商品 ID など |
-| `Once` | 使い切ったら `false` | 1 アカウント 1 回きり（新規登録など） |
+| `Circular` | Hands out in order and wraps to the start at the end | Data that may be reused |
+| `Random` | Random every time | Product IDs, etc. |
+| `Once` | Returns `false` once exhausted | One account, one use (sign-ups, etc.) |
 
-Feeder はシナリオの外で作り、クロージャで共有する（`User` には持たせない。シナリオごとに必要なデータが違うため）。
+A Feeder is created outside the scenario and shared through a closure (it is not held by `User`, because different scenarios need different data).
 
-## 5. 計測
+## 5. Measurement
 
-### 構造
+### Structure
 
-**リクエスト単位の生データを記録し、そこから集計する。** 3 階層で集計する: リクエスト / ステップ（ステップ名が集計キー）/ シナリオ。
+**Record raw data per request and aggregate from it.** Aggregation has three levels: request / step (the step name is the aggregation key) / scenario.
 
-記録の形は最初から全部入りにして、後から値を足しても構造を変えずに済むようにする。
+The shape of a record carries everything from the start, so that values can be added later without changing the structure.
 
-- `httptrace` の各時間（DNS / TCP / TLS / TTFB）
-- 送受信バイト数
-- **予定開始時刻と実際の開始時刻を分けて持つ**（Coordinated Omission の補正のため）
+- Each `httptrace` timing (DNS / TCP / TLS / TTFB)
+- Bytes sent and received
+- **The scheduled start time and the actual start time are kept separately** (for Coordinated Omission correction)
 
-メモリが問題になる場合は、ヒストグラム（HdrHistogram 系）に畳み込む層を挟む。
+If memory becomes a problem, a layer that folds records into a histogram (HdrHistogram style) will be inserted.
 
-### フェーズ
+### Phases
 
-| フェーズ | 内容 |
+| Phase | Contents |
 |---|---|
-| 1 (MVP, `Users`) | パーセンタイル（p50/p90/p95/p99/max）、エラー内訳（タイムアウト／接続拒否／DNS／TLS／HTTP 4xx・5xx／`Expect` 不一致、ステップ別）、スループット（実 RPS・イテレーション/秒）、TTFB、送受信バイト数、思考時間を除いたシナリオ時間 |
-| 2 (`Rate`) | ドロップされたイテレーション数、Coordinated Omission の補正（予定開始時刻からの遅延で測る）。**実装済み** |
-| 3 | 時系列（1 秒ごと）・同時実行数の推移、接続の再利用率と DNS/TCP/TLS 時間（時系列での推移を含む）、負荷生成側の健全性（CPU・ゴルーチン数）。**実装済み**（集計・JSON・結合・HTML のグラフ） |
+| 1 (MVP, `Users`) | Percentiles (p50/p90/p95/p99/max), error breakdown (timeout / connection refused / DNS / TLS / HTTP 4xx·5xx / `Expect` mismatch, per step), throughput (actual RPS, iterations per second), TTFB, bytes sent and received, scenario time excluding think time |
+| 2 (`Rate`) | Number of dropped iterations, Coordinated Omission correction (measuring delay from the scheduled start time). **Implemented** |
+| 3 | Time series (per second) and concurrency over time, connection reuse rate and DNS/TCP/TLS time (including their trend over time), health of the load generator (CPU, goroutine count). **Implemented** (aggregation, JSON, merging, HTML charts) |
 
-## 6. MVP の範囲
+## 6. MVP scope
 
-**入れる**: `Scenario` / `User` / `Step` / `Do()` / `ExpectStatus` / `Think` / `Plan`（`Users` のみ）/ ステップ単位のレイテンシとエラー数のコンソール出力（フェーズ1の計測）
+**In**: `Scenario` / `User` / `Step` / `Do()` / `ExpectStatus` / `Think` / `Plan` (`Users` only) / console output of per-step latency and error counts (phase 1 measurement)
 
-**後回し**（MVP の時点）: `Rate`（フェーズ 2 で実装済み）、レスポンスからの値の抽出ヘルパー（まずは `Decode`）、vegeta 互換出力（8 章で当面作らないと決めた）、案B（ビルダー）、YAML
+**Deferred** (at the MVP stage): `Rate` (implemented in phase 2), helpers to extract values from responses (just `Decode` for now), vegeta-compatible output (decided in chapter 8 not to build for now), option B (builder), YAML
 
-## 7. 実装状況
+## 7. Implementation status
 
-フェーズ 1（MVP）・フェーズ 2（`Rate`）・フェーズ 3（時系列・接続内訳・負荷生成側の健全性）は実装済み。`go run ./examples/checkout` で動作を確認できる。
+Phase 1 (MVP), phase 2 (`Rate`) and phase 3 (time series, connection breakdown, load-generator health) are implemented. You can check it works with `go run ./examples/checkout`.
 
-パッケージは 4 つ。使う人の入口は `jotaro`（負荷をかける側）で、結果を扱う側は `report`、記録は `record` に分けてある。依存は `jotaro` → `report` → `record`（`jotaro` は `record` にも依存する）の一方向で、`internal/histogram` は `report` だけが使う。
+There are four packages. The entry point for users is `jotaro` (the side that applies load); the side that handles results is `report`, and records live in `record`. Dependencies are one-way: `jotaro` → `report` → `record` (`jotaro` also depends on `record`), and `internal/histogram` is used only by `report`.
 
-| パッケージ | ファイル | 内容 |
+| Package | File | Contents |
 |---|---|---|
-| `jotaro` | `scenario.go` `user.go` `step.go` | `Scenario` / `User` / `Step`（`Think`、panic の回復を含む） |
-| | `request.go` `response.go` `exec.go` | リクエスト記述とビルダー、`httptrace` つきの実行、エラー分類 |
-| | `run.go` | `Plan` / `Run`（`Users` / `Arrival` の両モデル。`Plan.Raw` で生データを書く） |
+| `jotaro` | `scenario.go` `user.go` `step.go` | `Scenario` / `User` / `Step` (including `Think` and panic recovery) |
+| | `request.go` `response.go` `exec.go` | Request description and builder, execution with `httptrace`, error classification |
+| | `run.go` | `Plan` / `Run` (both the `Users` and `Arrival` models; `Plan.Raw` writes raw data) |
 | | `arrival.go` | `Arrival` / `Rate` / `Ramp` / `Stages` |
 | | `feeder.go` | `Feeder` / `LoadCSV` |
-| | `health.go` | 負荷生成側の健全性（ゴルーチン数・CPU）を 1 秒ごとにサンプリング |
+| | `health.go` | Samples the health of the load generator (goroutines, CPU) every second |
 | `record` | `record.go` | `Record` / `StepRecord` / `IterationRecord` / `Collector` / `ErrKind` / `ConnKind` / `HealthPoint` |
-| | `raw.go` | `Raw` / `WriteRaw` / `ReadRaw`（生データの JSON Lines） |
-| `report` | `report.go` `series.go` | `Report` / `Latency` と集計、時系列（1 秒ごと） |
-| | `print.go` `json.go` `html.go` `html_chart.go` `write.go` | テキスト・JSON・HTML の出力と、JSON の読み込み |
+| | `raw.go` | `Raw` / `WriteRaw` / `ReadRaw` (raw data as JSON Lines) |
+| `report` | `report.go` `series.go` | `Report` / `Latency` and aggregation, time series (per second) |
+| | `print.go` `json.go` `html.go` `html_chart.go` `write.go` | Text, JSON and HTML output, and reading JSON |
 | | `merge.go` | `MergeReports` |
-| | `health.go` | 負荷生成側の健全性の要約・結合 |
-| | `threshold.go` | `Threshold` / `ParseThreshold` / `Report.Check`（しきい値判定。[`docs/result.md`](docs/result.md) 5 章） |
-| `internal/histogram` | `histogram.go` | 結合のための対数ヒストグラム |
-| `cmd/jotaro` | `main.go` | CLI（`report` / `merge` / `check`） |
+| | `health.go` | Summarizing and merging load-generator health |
+| | `threshold.go` | `Threshold` / `ParseThreshold` / `Report.Check` (threshold checks; [`docs/result.md`](docs/result.md) chapter 5) |
+| `internal/histogram` | `histogram.go` | Logarithmic histogram for merging |
+| `cmd/jotaro` | `main.go` | CLI (`report` / `merge` / `check`) |
 
-実装中に決めたこと:
+Decisions made during implementation:
 
-- Cookie jar はイテレーションごとに新しくする（k6 の既定と同じ。毎回ログインし直す）。接続プールは全ユーザーで共有する。
-- パーセンタイルは、現状は全記録をソートして求める（nearest-rank）。集計中のコピーは避けてある（記録をコピーせず位置で持つ、一時スライスをその場でソートする、`Run` は `Collector.Take` で記録を受け取る）。100 万リクエストで集計中の確保が 1.4GB → 0.15GB。ただし記録そのもの（100 万件で約 240MB）は実行が終わるまで持つので、それが問題になったら、記録を逐次ヒストグラムに畳む形に変える。
-- リクエストのレイテンシには、通信エラー（タイムアウトなど）になったものも含める。TTFB は応答を受け取れたものだけ。
-- `BytesIn` / `BytesOut` はボディのバイト数（ヘッダーは含まない）。
+- The cookie jar is renewed for each iteration (same as k6's default; log in again every time). The connection pool is shared by all users.
+- Percentiles are currently computed by sorting all records (nearest-rank). Copies during aggregation are avoided (records are held by position instead of copied, temporary slices are sorted in place, and `Run` receives records via `Collector.Take`). For 1 million requests, allocation during aggregation went from 1.4GB to 0.15GB. However, the records themselves (about 240MB per million) are kept until the run ends; if that becomes a problem, we will switch to folding records into a histogram incrementally.
+- Request latency includes requests that ended in a network error (timeout, etc.). TTFB covers only those that received a response.
+- `BytesIn` / `BytesOut` are body bytes (headers are not included).
 
-## 8. 決めたことと未決
+## 8. Decisions and open questions
 
-### 決めたこと
+### Decided
 
-- **`Pacer` に近い抽象:** 自前の `Arrival` を持つ（vegeta の `lib` は import しない）。依存を増やさず、シナリオ単位で制御するため。可変レートは `Arrival` の実装を増やして対応する（`Ramp` で直線的なランプアップ、`Stages` で段階的な負荷を実装済み）。
-- **思考時間を含むシナリオ時間:** 併記する（実装済み）。`IterationStats.Active`（`Think` を除く）と `Total`（含む）を両方持ち、コンソール・JSON・HTML のどれにも両方出す。
-- **ステップが失敗したときの挙動:** ヘルパーは提供しない。`u.Step` は `fn` のエラーをそのまま返し、失敗は `StepRecord` に残る。止めるなら `return err`、続けるなら無視する。ふつうの Go の `if` で書けるのが案 A の利点で、ヘルパーを足すと「既定はどちらか」という暗黙の規則が増えるため。
-  - イテレーションの成否は、シナリオの関数が返したエラーで決まる。ステップが失敗しても続けて最後まで `nil` を返せば、そのイテレーションは成功として数える（ステップの失敗は、ステップ単位の集計 `StepStats.Failed` で見る）。
-  - 案 B（ビルダー）を作るときは、ステップの並びでの既定（続ける／止める）を決める必要がある。そのときに見直す。
-- **vegeta 互換:** 当面は作らない。vegeta の `Result` にするとシナリオ・ステップの情報が落ちる。生データ（JSON Lines。[`docs/result.md`](docs/result.md)）を出せるようになったので、変換は後から足せる。需要が出たら、生データを vegeta 形式に変換する `jotaro export` のようなサブコマンドで対応する（`lib` の型を直接使う案は採らない。`Pacer` と同じく依存を増やさないため）。
+- **An abstraction close to `Pacer`:** We have our own `Arrival` (vegeta's `lib` is not imported), to avoid adding dependencies and to control things at the scenario level. Variable rates are handled by adding `Arrival` implementations (`Ramp` for a linear ramp-up and `Stages` for staged load are implemented).
+- **Scenario time including think time:** Report both (implemented). `IterationStats` holds both `Active` (excluding `Think`) and `Total` (including it), and both appear in the console, JSON and HTML.
+- **Behavior when a step fails:** No helper is provided. `u.Step` returns `fn`'s error as is, and the failure remains in the `StepRecord`. To stop, `return err`; to continue, ignore it. Being able to write it with plain Go `if` is the advantage of option A, and a helper would add an implicit rule about which is the default.
+  - Whether an iteration succeeded is decided by the error the scenario function returned. If a step fails but the scenario continues to the end and returns `nil`, the iteration counts as successful (step failures are seen in the per-step aggregate `StepStats.Failed`).
+  - When option B (builder) is built, the default for a sequence of steps (continue / stop) will need to be decided. We will revisit it then.
+- **vegeta compatibility:** Not built for now. Turning results into vegeta's `Result` would lose scenario and step information. Now that raw data (JSON Lines; [`docs/result.md`](docs/result.md)) can be written, a conversion can be added later. If demand appears, we will handle it with a subcommand such as `jotaro export` that converts raw data into vegeta's format (we will not use `lib` types directly, for the same reason as `Pacer`: not adding dependencies).
 
-### 未決
+### Open
 
-- **値の受け渡しを型安全に保つ範囲:** A（Go の変数と `Decode`）だけなら問題ない。B・YAML では文字列キーになるので、案 B か YAML を作るときに決める。
+- **How far to keep value passing type-safe:** With A alone (Go variables and `Decode`) there is no problem. B and YAML would use string keys, so we will decide when building B or YAML.
