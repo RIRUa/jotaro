@@ -29,10 +29,15 @@ type Latency struct {
 }
 
 func newLatency(ds []time.Duration) Latency {
-	if len(ds) == 0 {
+	return newLatencyOwned(slices.Clone(ds))
+}
+
+// newLatencyOwned は newLatency と同じだが、s を並べ替える（コピーしない）。
+// 集計の中で作った一時的なスライスを渡して、巨大なコピーを避けるのに使う。
+func newLatencyOwned(s []time.Duration) Latency {
+	if len(s) == 0 {
 		return Latency{}
 	}
-	s := slices.Clone(ds)
 	slices.Sort(s)
 
 	var sum time.Duration
@@ -164,7 +169,7 @@ func BuildReport(reqs []record.Record, steps []record.StepRecord, iters []record
 	if elapsed == 0 {
 		elapsed = observedSpan(reqs, iters)
 	}
-	rep := &Report{StartedAt: observedStart(reqs, steps, iters), Elapsed: elapsed, Requests: requestStats(reqs)}
+	rep := &Report{StartedAt: observedStart(reqs, steps, iters), Elapsed: elapsed, Requests: requestStats(reqs, nil)}
 	rep.Series = buildSeries(rep.StartedAt, reqs, iters)
 
 	type stepKey struct{ scenario, step string }
@@ -172,8 +177,8 @@ func BuildReport(reqs []record.Record, steps []record.StepRecord, iters []record
 		scenarios []*ScenarioReport
 		byName    = map[string]*ScenarioReport{}
 		stepDurs  = map[stepKey][]time.Duration{}
-		stepAt    = map[stepKey]int{} // sc.Steps 内の位置。append で動くのでポインタでは持たない
-		stepReqs  = map[stepKey][]record.Record{}
+		stepAt    = map[stepKey]int{}   // sc.Steps 内の位置。append で動くのでポインタでは持たない
+		stepReqs  = map[stepKey][]int{} // reqs 内の位置。記録そのものはコピーしない
 	)
 	scenario := func(name string) *ScenarioReport {
 		sc, ok := byName[name]
@@ -185,9 +190,9 @@ func BuildReport(reqs []record.Record, steps []record.StepRecord, iters []record
 		return sc
 	}
 
-	for _, r := range reqs {
+	for i, r := range reqs {
 		k := stepKey{r.Scenario, r.Step}
-		stepReqs[k] = append(stepReqs[k], r)
+		stepReqs[k] = append(stepReqs[k], i)
 	}
 
 	// 開始時刻順に並べて、「最初に実行された順」を決める。
@@ -233,23 +238,34 @@ func BuildReport(reqs []record.Record, steps []record.StepRecord, iters []record
 	}
 
 	for _, sc := range scenarios {
-		sc.Iterations.Active = newLatency(activeDurs[sc.Name])
-		sc.Iterations.Total = newLatency(totalDurs[sc.Name])
+		sc.Iterations.Active = newLatencyOwned(activeDurs[sc.Name])
+		sc.Iterations.Total = newLatencyOwned(totalDurs[sc.Name])
 		for i := range sc.Steps {
 			ss := &sc.Steps[i]
 			k := stepKey{sc.Name, ss.Name}
-			ss.Duration = newLatency(stepDurs[k])
-			ss.Requests = requestStats(stepReqs[k])
+			ss.Duration = newLatencyOwned(stepDurs[k])
+			ss.Requests = requestStats(reqs, stepReqs[k])
 		}
 		rep.Scenarios = append(rep.Scenarios, *sc)
 	}
 	return rep
 }
 
-func requestStats(reqs []record.Record) RequestStats {
-	st := RequestStats{Count: len(reqs)}
-	var lat, ttfb, corrected, dns, connect, tlsd []time.Duration
-	for _, r := range reqs {
+// requestStats は reqs のうち at の位置にあるものを集計する。at が nil なら全部。
+func requestStats(reqs []record.Record, at []int) RequestStats {
+	n := len(reqs)
+	if at != nil {
+		n = len(at)
+	}
+	st := RequestStats{Count: n}
+	lat, corrected := make([]time.Duration, 0, n), make([]time.Duration, 0, n)
+	var ttfb, dns, connect, tlsd []time.Duration
+	for j := 0; j < n; j++ {
+		i := j
+		if at != nil {
+			i = at[j]
+		}
+		r := &reqs[i]
 		lat = append(lat, r.Latency)
 		corrected = append(corrected, r.Corrected())
 		if r.TTFB > 0 {
@@ -281,10 +297,10 @@ func requestStats(reqs []record.Record) RequestStats {
 		st.BytesIn += r.BytesIn
 		st.BytesOut += r.BytesOut
 	}
-	st.Latency = newLatency(lat)
-	st.TTFB = newLatency(ttfb)
-	st.Corrected = newLatency(corrected)
-	st.DNS, st.Connect, st.TLS = newLatency(dns), newLatency(connect), newLatency(tlsd)
+	st.Latency = newLatencyOwned(lat)
+	st.TTFB = newLatencyOwned(ttfb)
+	st.Corrected = newLatencyOwned(corrected)
+	st.DNS, st.Connect, st.TLS = newLatencyOwned(dns), newLatencyOwned(connect), newLatencyOwned(tlsd)
 	return st
 }
 

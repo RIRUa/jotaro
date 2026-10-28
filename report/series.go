@@ -93,8 +93,8 @@ func buildSeries(origin time.Time, reqs []record.Record, iters []record.Iteratio
 		}
 	}
 	for i := range pts {
-		pts[i].Latency = newLatency(lats[i])
-		pts[i].DNS, pts[i].Connect, pts[i].TLS = newLatency(dnss[i]), newLatency(connects[i]), newLatency(tlss[i])
+		pts[i].Latency = newLatencyOwned(lats[i])
+		pts[i].DNS, pts[i].Connect, pts[i].TLS = newLatencyOwned(dnss[i]), newLatencyOwned(connects[i]), newLatencyOwned(tlss[i])
 	}
 
 	// 同時実行数は、開始 (+1) と終了 (-1) の順に走査して区間ごとの最大値を求める。

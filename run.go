@@ -119,7 +119,7 @@ func Run(ctx context.Context, p Plan) (*report.Report, error) {
 	elapsed := time.Since(start)
 	healthPoints := health.stop()
 
-	reqs, steps, iters := r.col.Snapshot()
+	reqs, steps, iters := r.col.Take()
 	raw := &record.Raw{
 		Open:       p.Arrival != nil,
 		Dropped:    r.col.Dropped(),
