@@ -12,7 +12,6 @@ import (
 	"net/http/httptrace"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/RIRUa/jotaro/record"
@@ -179,7 +178,7 @@ func classify(err error) record.ErrKind {
 	case errors.As(err, &certErr), errors.As(err, &recHdr),
 		errors.As(err, &hostErr), errors.As(err, &authErr):
 		return record.ErrTLS
-	case errors.Is(err, syscall.ECONNREFUSED):
+	case isConnRefused(err):
 		return record.ErrConnRefused
 	case errors.Is(err, context.DeadlineExceeded),
 		errors.As(err, &netErr) && netErr.Timeout():
