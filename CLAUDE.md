@@ -2,7 +2,7 @@
 
 ## バージョン管理
 
-- バージョン管理操作には必ず Jujutsu (`jj`) を使う。`git` コマンドは使わない（`.claude/settings.json` で deny 済み）。
+- バージョン管理操作には Jujutsu (`jj`) を優先して使う。`git` コマンドは使わない。ただし `jj` が入っていない環境（Cloud など）では `git` を使ってよい（`deny` はしていない）。
 - このリポジトリは colocated（`.git` と `.jj` が共存）。GitHub との同期は `jj git fetch` / `jj git push` を使う。
 - 主な対応:
   - 状態確認: `jj st` / `jj log` / `jj diff`
