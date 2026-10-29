@@ -14,6 +14,7 @@ Requires Go 1.22 or later (the lowest version in `go.mod`).
 ```sh
 go vet ./...
 go test -race ./...
+go test -run='^$' -bench=. -benchmem ./...   # benchmarks (not run in CI; timings on shared runners are noisy)
 golangci-lint run   # optional locally; CI runs it with the version pinned in .github/workflows/ci.yml
 ```
 
