@@ -27,7 +27,7 @@ type User struct {
 
 	// think is the total time spent in Think so far, subtracted to get the active time.
 	think time.Duration
-	// scheduled は予定到着時刻。最初のリクエストが使い切ると 0 に戻る。
+	// scheduled is the scheduled arrival time. It goes back to zero once the first request has used it.
 	scheduled time.Time
 }
 

@@ -143,7 +143,7 @@ func (r *Request) Do() *Response {
 	return r.exec.do(r)
 }
 
-// withQuery は rawURL に q を足した URL を返す。rawURL にクエリがあれば、その後ろに足す。
+// withQuery returns rawURL with q added. If rawURL already has a query, q is appended after it.
 func withQuery(rawURL string, q url.Values) string {
 	if len(q) == 0 {
 		return rawURL

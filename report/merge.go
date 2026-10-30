@@ -32,12 +32,12 @@ func MergeReports(reps ...*Report) (*Report, error) {
 	var reportSeries []*Report
 	var (
 		first, last time.Time
-		allStarted  = true // すべてのレポートが StartedAt を持つか
+		allStarted  = true // whether every report has StartedAt
 	)
 	var (
 		scenarios []*ScenarioReport
 		byName    = map[string]*ScenarioReport{}
-		stepAt    = map[string]map[string]int{} // シナリオ名 → ステップ名 → Steps 内の位置
+		stepAt    = map[string]map[string]int{} // scenario name → step name → index into Steps
 	)
 	for i, r := range reps {
 		if r.Open != out.Open {
@@ -82,7 +82,7 @@ func MergeReports(reps ...*Report) (*Report, error) {
 		out.StartedAt = first
 		out.Elapsed = last.Sub(first)
 	}
-	// 時系列は、StartedAt の差だけ秒をずらして重ねる。StartedAt が無いレポートがあるときは先頭を揃える。
+	// Time series are overlaid, shifted by the difference in StartedAt. If any report lacks StartedAt, their starts are aligned.
 	for _, r := range reportSeries {
 		offset := 0
 		if allStarted {
@@ -161,7 +161,7 @@ func mergeErrs(a, b map[record.ErrKind]int) map[record.ErrKind]int {
 	return out
 }
 
-// mergeLatency は 2 つの分布をまとめる。件数 0 の側は無視する。
+// mergeLatency combines two distributions. A side with Count 0 is ignored.
 func mergeLatency(a, b Latency) Latency {
 	switch {
 	case a.Count == 0:
@@ -179,10 +179,10 @@ func mergeLatency(a, b Latency) Latency {
 		Mean:  avg(a.Mean, b.Mean),
 		Max:   max(a.Max, b.Max),
 	}
-	// ヒストグラムが両方にあり、件数と合っているときだけ、分布からパーセンタイルを求める。
+	// Percentiles are computed from the distribution only when both sides have a histogram that matches their counts.
 	if a.hist.Total() == a.Count && b.hist.Total() == b.Count {
 		out.hist = histogram.Merge(a.hist, b.hist)
-		// 代表値は範囲の外に出うるので、実測の Min / Max に収める。
+		// A representative value can fall outside the range, so clamp it to the observed Min / Max.
 		pct := func(p int) time.Duration { return min(max(out.hist.Percentile(p), out.Min), out.Max) }
 		out.P50, out.P90, out.P95, out.P99 = pct(50), pct(90), pct(95), pct(99)
 		return out

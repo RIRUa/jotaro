@@ -79,7 +79,7 @@ func (p Plan) validate() error {
 	return nil
 }
 
-// maxConcurrency は同時に動きうるイテレーション数の上限。
+// maxConcurrency is the upper limit of iterations that can run at the same time.
 //
 // It sizes the connection pool in Run and the slot channel in runOpen.
 func (p Plan) maxConcurrency() int {
@@ -115,12 +115,12 @@ func Run(ctx context.Context, p Plan) (*report.Report, error) {
 	tr.MaxIdleConnsPerHost = p.maxConcurrency()
 	defer tr.CloseIdleConnections()
 
-	// stopCtx: 新しいイテレーションを始めてよいか。
-	// runCtx:  実行中のイテレーションを続けてよいか。Duration + Grace で中断する。
+	// stopCtx: whether new iterations may be started.
+	// runCtx:  whether running iterations may continue. It is cancelled at Duration + Grace.
 	stopCtx, stop := context.WithTimeout(ctx, p.Duration)
 	defer stop()
-	// 期限切れではなくキャンセルで止める。DeadlineExceeded だと、
-	// リクエスト自体のタイムアウト(record.ErrTimeout)と区別できなくなる。
+	// Stop by cancellation, not by deadline. With DeadlineExceeded it could not be
+	// told apart from a request's own timeout (record.ErrTimeout).
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	defer time.AfterFunc(p.Duration+grace, cancel).Stop()
@@ -156,7 +156,7 @@ func Run(ctx context.Context, p Plan) (*report.Report, error) {
 	return rep, nil
 }
 
-// runner は 1 回の Run の間の状態。
+// runner is the state during one Run.
 type runner struct {
 	p       Plan
 	tr      http.RoundTripper
@@ -167,7 +167,7 @@ type runner struct {
 	runCtx  context.Context
 }
 
-// runClosed は Users 個のユーザーが、Duration が過ぎるまでシナリオを繰り返す。
+// runClosed has Users users repeat the scenario until Duration has passed.
 func (r *runner) runClosed() {
 	var wg sync.WaitGroup
 	for id := 0; id < r.p.Users; id++ {
@@ -179,18 +179,18 @@ func (r *runner) runClosed() {
 				if err != nil {
 					return
 				}
-				_ = r.p.Scenario.run(u) // エラーは IterationRecord に残る
+				_ = r.p.Scenario.run(u) // the error is kept in the IterationRecord
 			}
 		}()
 	}
 	wg.Wait()
 }
 
-// runOpen は Arrival の到着時刻にイテレーションを開始する。
+// runOpen starts iterations at the arrival times of Arrival.
 //
-// 到着時刻は開始時刻からの経過で決めるので、ディスパッチャが遅れても
-// 間隔はずれない。遅れた分はまとめて起動し、予定時刻を Scheduled に残す。
-// 同時実行数が上限に達しているときの到着はドロップする。
+// Arrival times are measured from the start time, so the spacing does not
+// drift even if the dispatcher falls behind. Late arrivals are started together, and the scheduled time is kept in Scheduled.
+// Arrivals that come in while concurrency is at the cap are dropped.
 func (r *runner) runOpen() {
 	slots := make(chan struct{}, r.p.maxConcurrency())
 
@@ -227,18 +227,18 @@ func (r *runner) runOpen() {
 		go func() {
 			defer wg.Done()
 			defer func() { <-slots }()
-			// オープンモデルでは到着ごとに別のユーザーとして扱う。
+			// In the open model, each arrival is treated as a separate user.
 			u, err := newUser(r.runCtx, r.p, i, 0, r.tr, r.timeout, r.col)
 			if err != nil {
 				return
 			}
 			u.scheduled = at
-			_ = r.p.Scenario.run(u) // エラーは IterationRecord に残る
+			_ = r.p.Scenario.run(u) // the error is kept in the IterationRecord
 		}()
 	}
 }
 
-// newUser はイテレーション 1 回分のユーザーを作る。Cookie jar は毎回新しい。
+// newUser creates the user for one iteration. The cookie jar is new every time.
 func newUser(ctx context.Context, p Plan, id, iter int, tr http.RoundTripper, timeout time.Duration, col *record.Collector) (*User, error) {
 	jar, err := cookiejar.New(nil)
 	if err != nil {

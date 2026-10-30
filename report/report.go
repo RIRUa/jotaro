@@ -29,7 +29,7 @@ type Latency struct {
 	P99 time.Duration
 	Max time.Duration
 
-	// hist は分布のヒストグラム。MergeReports がパーセンタイルを求め直すために使う。
+	// hist is the histogram of the distribution. MergeReports uses it to recompute percentiles.
 	hist histogram.H
 }
 
@@ -38,8 +38,8 @@ func newLatency(ds []time.Duration) Latency {
 	return newLatencyOwned(slices.Clone(ds))
 }
 
-// newLatencyOwned は newLatency と同じだが、s を並べ替える（コピーしない）。
-// 集計の中で作った一時的なスライスを渡して、巨大なコピーを避けるのに使う。
+// newLatencyOwned is like newLatency, but sorts s in place (no copy).
+// Pass it temporary slices built during aggregation to avoid huge copies.
 func newLatencyOwned(s []time.Duration) Latency {
 	if len(s) == 0 {
 		return Latency{}
@@ -63,7 +63,7 @@ func newLatencyOwned(s []time.Duration) Latency {
 	}
 }
 
-// percentile は昇順にソート済みの s から nearest-rank 法で p パーセンタイルを返す。
+// percentile returns the p-th percentile of the ascending-sorted s by the nearest-rank method.
 func percentile(s []time.Duration, p int) time.Duration {
 	rank := (p*len(s) + 99) / 100 // ceil(p/100 * n)
 	return s[max(rank, 1)-1]
@@ -187,8 +187,8 @@ func BuildReport(reqs []record.Record, steps []record.StepRecord, iters []record
 		scenarios []*ScenarioReport
 		byName    = map[string]*ScenarioReport{}
 		stepDurs  = map[stepKey][]time.Duration{}
-		stepAt    = map[stepKey]int{}   // sc.Steps 内の位置。append で動くのでポインタでは持たない
-		stepReqs  = map[stepKey][]int{} // reqs 内の位置。記録そのものはコピーしない
+		stepAt    = map[stepKey]int{}   // index into sc.Steps; not held as a pointer because append can move it
+		stepReqs  = map[stepKey][]int{} // indexes into reqs; the records themselves are not copied
 	)
 	scenario := func(name string) *ScenarioReport {
 		sc, ok := byName[name]
@@ -205,7 +205,7 @@ func BuildReport(reqs []record.Record, steps []record.StepRecord, iters []record
 		stepReqs[k] = append(stepReqs[k], i)
 	}
 
-	// 開始時刻順に並べて、「最初に実行された順」を決める。
+	// Sort by start time to decide the order in which things first ran.
 	sortedIters := slices.Clone(iters)
 	slices.SortStableFunc(sortedIters, func(a, b record.IterationRecord) int { return a.Start.Compare(b.Start) })
 	sortedSteps := slices.Clone(steps)
@@ -242,7 +242,7 @@ func BuildReport(reqs []record.Record, steps []record.StepRecord, iters []record
 		}
 		stepDurs[k] = append(stepDurs[k], st.Duration)
 	}
-	// ステップの記録が無くリクエストだけあるシナリオも拾う。
+	// Also pick up scenarios that have requests but no step records.
 	for k := range stepReqs {
 		scenario(k.scenario)
 	}
@@ -261,7 +261,7 @@ func BuildReport(reqs []record.Record, steps []record.StepRecord, iters []record
 	return rep
 }
 
-// requestStats は reqs のうち at の位置にあるものを集計する。at が nil なら全部。
+// requestStats aggregates the entries of reqs at the positions in at, or all of them if at is nil.
 func requestStats(reqs []record.Record, at []int) RequestStats {
 	n := len(reqs)
 	if at != nil {
@@ -324,7 +324,7 @@ func count(m map[record.ErrKind]int, k record.ErrKind) map[record.ErrKind]int {
 	return m
 }
 
-// observedSpan は記録から実行時間を推定する。
+// observedSpan estimates the run time from the records.
 func observedSpan(reqs []record.Record, iters []record.IterationRecord) time.Duration {
 	var first, last time.Time
 	extend := func(start time.Time, d time.Duration) {
@@ -347,7 +347,7 @@ func observedSpan(reqs []record.Record, iters []record.IterationRecord) time.Dur
 	return last.Sub(first)
 }
 
-// observedStart は記録の中で一番早い開始時刻を返す。記録が無ければ zero。
+// observedStart returns the earliest start time among the records, or zero if there are none.
 func observedStart(reqs []record.Record, steps []record.StepRecord, iters []record.IterationRecord) time.Time {
 	var first time.Time
 	extend := func(t time.Time) {
@@ -367,7 +367,7 @@ func observedStart(reqs []record.Record, steps []record.StepRecord, iters []reco
 	return wallUTC(first)
 }
 
-// wallUTC は単調時計とタイムゾーンを落とす。JSON を往復しても同じ値になる。
+// wallUTC drops the monotonic clock and the time zone, so the value is the same after a JSON round trip.
 func wallUTC(t time.Time) time.Time {
 	if t.IsZero() {
 		return time.Time{}

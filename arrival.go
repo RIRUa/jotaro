@@ -83,12 +83,12 @@ func (r ramp) validate() error {
 	return nil
 }
 
-// at は、開始から t 秒までの累積到着数 N(t) が i になる t を求める。
+// at finds the time t at which the cumulative number of arrivals N(t) since the start reaches i.
 //
-//	レート r(t) = from + (to-from)·t/over   (0 ≤ t ≤ over、単位は 1/秒)
+//	rate r(t) = from + (to-from)·t/over   (0 ≤ t ≤ over, in 1/second)
 //	N(t) = from·t + (to-from)·t²/(2·over)
 //
-// over を過ぎると、レートは to で一定になる。
+// After over has passed, the rate stays constant at to.
 //
 // Inside the ramp this solves a·t² + from·t = i for t with the quadratic formula
 // (a straight division when the slope is flat, where a is about 0).
@@ -151,11 +151,11 @@ func Stages(stages ...Stage) Arrival {
 // in Stages so that at can find the right stage without searching each time.
 type stagedArrival struct {
 	stages []Stage
-	starts []time.Duration // 各段階の開始時刻
-	counts []int           // 各段階の到着数
+	starts []time.Duration // start time of each stage
+	counts []int           // number of arrivals in each stage
 }
 
-// count は段階の中の到着数（到着時刻が For より前のもの）。
+// count is the number of arrivals in the stage (those whose arrival time is before For).
 func (st Stage) count() int {
 	if st.Arrival == nil || st.For <= 0 || st.Arrival.validate() != nil {
 		return 0
@@ -164,7 +164,7 @@ func (st Stage) count() int {
 		off, ok := st.Arrival.at(i)
 		return ok && off < st.For
 	}
-	// at は単調に増えるので、in が偽になる最初の i を二分探索で求める。
+	// at is monotonically increasing, so binary-search for the first i where in is false.
 	hi := 1
 	for in(hi) && hi < 1<<40 {
 		hi *= 2
@@ -173,7 +173,7 @@ func (st Stage) count() int {
 	if !in(0) {
 		return 0
 	}
-	for lo+1 < hi { // in(lo) は真、in(hi) は偽
+	for lo+1 < hi { // in(lo) is true, in(hi) is false
 		mid := lo + (hi-lo)/2
 		if in(mid) {
 			lo = mid

@@ -40,8 +40,8 @@ func (r *Report) Write(w io.Writer, f Format) error {
 	return fmt.Errorf("jotaro: unknown format %q", string(f))
 }
 
-// errWriter は最初の書き込みエラーを覚え、以降の書き込みを捨てる。
-// エラーを返さない Print から、書き込みの失敗を取り出すために使う。
+// errWriter remembers the first write error and drops later writes.
+// It is used to get write failures out of Print, which does not return errors.
 type errWriter struct {
 	w   io.Writer
 	err error

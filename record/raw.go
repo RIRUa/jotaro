@@ -33,9 +33,9 @@ type Raw struct {
 	Health []HealthPoint
 }
 
-// 出力用の型。1 行に 1 つ、type で種類を分ける。
-// 時間は集計の JSON と同じくナノ秒の整数（フィールド名は _ns で終える）。
-// 0 や空のものは省く（読むときは 0・空に戻る）。
+// Types for output. One per line, told apart by type.
+// As in the aggregated JSON, durations are integer nanoseconds (field names end in _ns).
+// Zero and empty values are omitted (they read back as zero and empty).
 
 // rawMeta is the first line of the stream. It carries the run-wide fields of Raw
 // and the format version, which ReadRaw checks before trusting the rest.
@@ -104,7 +104,7 @@ type rawHealth struct {
 	CPU        float64 `json:"cpu"`
 }
 
-// 時刻は UTC の RFC 3339 で書く。zero は省く（ポインタにする）。
+// Timestamps are written as UTC RFC 3339. A zero time is omitted (hence the pointer).
 //
 // utcPtr is for optional timestamps: nil makes omitempty drop the field.
 func utcPtr(t time.Time) *time.Time {
@@ -131,7 +131,7 @@ func derefTime(t *time.Time) time.Time {
 	return *t
 }
 
-// ns は d をナノ秒の整数にする。
+// ns converts d to integer nanoseconds.
 func ns(d time.Duration) int64 { return d.Nanoseconds() }
 
 // WriteRaw writes the raw data to w as JSON Lines (one record per line).

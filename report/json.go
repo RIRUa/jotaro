@@ -20,8 +20,8 @@ import (
 //	1: first version
 const JSONVersion = 3
 
-// 出力用の型。Report の内部表現を変えても JSON の形が変わらないよう、別に持つ。
-// 時間はすべてナノ秒の整数（フィールド名は _ns で終える）。
+// Types for output. They are kept separate so the JSON shape does not change when Report's internals do.
+// All durations are integer nanoseconds (field names end in _ns).
 
 // jsonLatency is the JSON form of Latency.
 type jsonLatency struct {
@@ -33,7 +33,7 @@ type jsonLatency struct {
 	P95NS  int64 `json:"p95_ns"`
 	P99NS  int64 `json:"p99_ns"`
 	MaxNS  int64 `json:"max_ns"`
-	// Buckets は対数ヒストグラム（バケット番号 → 件数）。結合時のパーセンタイルの再計算に使う。
+	// Buckets is the log histogram (bucket number → count). It is used to recompute percentiles when merging.
 	Buckets map[int]int `json:"buckets"`
 }
 
@@ -46,7 +46,7 @@ type jsonRequests struct {
 	DNS       jsonLatency `json:"dns"`
 	Connect   jsonLatency `json:"connect"`
 	TLS       jsonLatency `json:"tls"`
-	// ConnNew / ConnReused は接続を新しく張った / 再利用したリクエストの数。
+	// ConnNew / ConnReused are the number of requests that opened a new connection / reused one.
 	ConnNew    int            `json:"conn_new"`
 	ConnReused int            `json:"conn_reused"`
 	Status     map[string]int `json:"status"`
@@ -69,8 +69,8 @@ type jsonStep struct {
 type jsonIterations struct {
 	Count  int            `json:"count"`
 	Failed int            `json:"failed"`
-	Active jsonLatency    `json:"active"` // Think を除いた時間
-	Total  jsonLatency    `json:"total"`  // Think を含む時間
+	Active jsonLatency    `json:"active"` // time without Think
+	Total  jsonLatency    `json:"total"`  // time including Think
 	Errors map[string]int `json:"errors"`
 }
 
@@ -100,7 +100,7 @@ type jsonSeriesPoint struct {
 type jsonHealthPoint struct {
 	Second     int     `json:"second"`
 	Goroutines int     `json:"goroutines"`
-	CPU        float64 `json:"cpu"` // 0〜1。取得できなかったときは -1
+	CPU        float64 `json:"cpu"` // 0 to 1; -1 when it could not be obtained
 }
 
 // jsonReport is the top level of the JSON output, and the only thing ReadJSON decodes into.
@@ -135,7 +135,7 @@ func (r *Report) toJSON() jsonReport {
 		ElapsedNS: ns(r.Elapsed),
 		RPS:       r.RPS(),
 		Requests:  toJSONRequests(r.Requests),
-		Scenarios: []jsonScenario{}, // null ではなく [] にする
+		Scenarios: []jsonScenario{}, // use [] instead of null
 		Series:    []jsonSeriesPoint{},
 		Health:    []jsonHealthPoint{},
 	}
@@ -218,12 +218,12 @@ func toJSONLatency(l Latency) jsonLatency {
 		P95NS:  ns(l.P95),
 		P99NS:  ns(l.P99),
 		MaxNS:  ns(l.Max),
-		// null ではなく {} にする
+		// use {} instead of null
 		Buckets: maps.Clone(bucketsOrEmpty(l.hist)),
 	}
 }
 
-// errCounts は nil でも {} になるよう、空でも必ず map を返す。
+// errCounts always returns a map, even when empty, so that nil also becomes {}.
 func errCounts(m map[record.ErrKind]int) map[string]int {
 	out := make(map[string]int, len(m))
 	for k, v := range m {
@@ -253,7 +253,7 @@ func ReadJSON(r io.Reader) (*Report, error) {
 	return in.toReport(), nil
 }
 
-// toReport は toJSON の逆。空の map / スライスは nil に戻す（BuildReport の結果と同じ形）。
+// toReport is the inverse of toJSON. Empty maps and slices go back to nil (the same shape as the result of BuildReport).
 func (j jsonReport) toReport() *Report {
 	rep := &Report{
 		Open:      j.Open,
@@ -356,7 +356,7 @@ func fromErrCounts(m map[string]int) map[record.ErrKind]int {
 	return out
 }
 
-// bucketsOrEmpty は nil でも空の map を返す。
+// bucketsOrEmpty returns an empty map even for nil.
 func bucketsOrEmpty(h histogram.H) map[int]int {
 	if h == nil {
 		return map[int]int{}

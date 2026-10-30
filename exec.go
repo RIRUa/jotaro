@@ -17,16 +17,16 @@ import (
 	"github.com/RIRUa/jotaro/record"
 )
 
-// executor はリクエストを実行して record.Record を残す。
+// executor runs requests and leaves a record.Record for each.
 type executor struct {
 	ctx     context.Context
 	client  *http.Client
 	baseURL string
 
-	// tag は Scenario/Step/UserID/Iteration などを埋めた record.Record のひな形。
+	// tag is a template record.Record with Scenario, Step, UserID, Iteration and so on filled in.
 	tag record.Record
-	// sched は予定到着時刻の置き場所。最初のリクエストが Scheduled に使って 0 に戻す。
-	// ステップは順に実行されるので、ロックはしない。
+	// sched holds the scheduled arrival time. The first request uses it for Scheduled and resets it to zero.
+	// Steps run in order, so there is no locking.
 	sched *time.Time
 	sink  func(record.Record)
 }
@@ -101,8 +101,8 @@ func (e *executor) do(r *Request) *Response {
 	return resp
 }
 
-// tracer は httptrace のイベントから各区間の時間を求める。
-// イベントは別 goroutine から呼ばれることがあるので mutex で守る。
+// tracer derives the duration of each phase from httptrace events.
+// Events can be called from other goroutines, so a mutex guards the fields.
 type tracer struct {
 	start time.Time
 
@@ -120,7 +120,7 @@ func (t *tracer) clientTrace() *httptrace.ClientTrace {
 	return &httptrace.ClientTrace{
 		DNSStart: func(httptrace.DNSStartInfo) { t.set(&t.dnsStart, false) },
 		DNSDone:  func(httptrace.DNSDoneInfo) { t.set(&t.dnsEnd, true) },
-		// 複数アドレスへ順に接続する場合は、最初の開始から最後の完了までを測る。
+		// When connecting to several addresses in turn, measure from the first start to the last completion.
 		ConnectStart:      func(_, _ string) { t.set(&t.conStart, false) },
 		ConnectDone:       func(_, _ string, _ error) { t.set(&t.conEnd, true) },
 		TLSHandshakeStart: func() { t.set(&t.tlsStart, false) },
@@ -137,7 +137,7 @@ func (t *tracer) clientTrace() *httptrace.ClientTrace {
 	}
 }
 
-// set は overwrite が false なら最初の 1 回だけ記録する。
+// set records only the first call when overwrite is false.
 func (t *tracer) set(dst *time.Time, overwrite bool) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -160,7 +160,7 @@ func (t *tracer) fill(rec *record.Record) {
 	}
 }
 
-// span は両端が揃っているときだけ区間の長さを返す。
+// span returns the length of the interval only when both ends are set.
 func span(from, to time.Time) time.Duration {
 	if from.IsZero() || to.IsZero() || to.Before(from) {
 		return 0
@@ -168,7 +168,7 @@ func span(from, to time.Time) time.Duration {
 	return to.Sub(from)
 }
 
-// classify は通信エラーを record.ErrKind に分類する。
+// classify sorts a communication error into a record.ErrKind.
 func classify(err error) record.ErrKind {
 	var (
 		expect  *ExpectError

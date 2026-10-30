@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-// processCPUTime はプロセスがこれまでに使った CPU 時間（ユーザー + システム）。
+// processCPUTime is the CPU time (user + system) the process has used so far.
 func processCPUTime() (time.Duration, bool) {
 	var ru syscall.Rusage
 	if err := syscall.Getrusage(syscall.RUSAGE_SELF, &ru); err != nil {

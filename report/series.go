@@ -35,15 +35,15 @@ type SeriesPoint struct {
 	Concurrency int
 }
 
-// buildSeries は記録を 1 秒ごとに集計する。
-// 開始時刻の記録が無い（origin が zero）、または記録が空のときは nil を返す。
+// buildSeries aggregates the records per second.
+// It returns nil when there is no start time (origin is zero) or no records.
 func buildSeries(origin time.Time, reqs []record.Record, iters []record.IterationRecord) []SeriesPoint {
 	if origin.IsZero() {
 		return nil
 	}
 	index := func(t time.Time) int { return max(int(t.Sub(origin)/SeriesInterval), 0) }
 
-	// 記録がある最後の区間まで。
+	// Up to the last interval that has records.
 	n := 0
 	for _, r := range reqs {
 		n = max(n, index(r.Start)+1)
@@ -55,7 +55,7 @@ func buildSeries(origin time.Time, reqs []record.Record, iters []record.Iteratio
 		return nil
 	}
 
-	// 1 秒ごとの時間の記録。あとで分布にする。
+	// Durations per second, to be turned into distributions later.
 	var (
 		lats     = make([][]time.Duration, n)
 		dnss     = make([][]time.Duration, n)
@@ -97,7 +97,7 @@ func buildSeries(origin time.Time, reqs []record.Record, iters []record.Iteratio
 		pts[i].DNS, pts[i].Connect, pts[i].TLS = newLatencyOwned(dnss[i]), newLatencyOwned(connects[i]), newLatencyOwned(tlss[i])
 	}
 
-	// 同時実行数は、開始 (+1) と終了 (-1) の順に走査して区間ごとの最大値を求める。
+	// Concurrency is found by sweeping the starts (+1) and ends (-1) in time order and taking the maximum per interval.
 	type event struct {
 		at    time.Duration
 		delta int
@@ -107,7 +107,7 @@ func buildSeries(origin time.Time, reqs []record.Record, iters []record.Iteratio
 		start := max(it.Start.Sub(origin), 0)
 		events = append(events, event{start, +1}, event{start + max(it.Duration, 0), -1})
 	}
-	// 同時刻では終了を先に処理する（隣り合うイテレーションを重ねて数えない）。
+	// At the same instant, ends are handled first (so back-to-back iterations are not counted as overlapping).
 	slices.SortFunc(events, func(a, b event) int {
 		if a.at != b.at {
 			return int(a.at - b.at)
@@ -117,7 +117,7 @@ func buildSeries(origin time.Time, reqs []record.Record, iters []record.Iteratio
 	cur, e := 0, 0
 	for i := range pts {
 		end := time.Duration(i+1) * SeriesInterval
-		peak := cur // 区間の頭の時点
+		peak := cur // the value at the start of the interval
 		for ; e < len(events) && events[e].at < end; e++ {
 			cur += events[e].delta
 			peak = max(peak, cur)
@@ -127,8 +127,8 @@ func buildSeries(origin time.Time, reqs []record.Record, iters []record.Iteratio
 	return pts
 }
 
-// mergeSeries は offset 秒ずらした b を a に足し込む。
-// 件数は合計し、同時実行数は同時に動いていた前提で合計する（上限の見積り）。
+// mergeSeries adds b, shifted by offset seconds, into a.
+// Counts are summed, and concurrency is summed on the assumption that the runs overlapped (an upper bound).
 func mergeSeries(a, b []SeriesPoint, offset int) []SeriesPoint {
 	out := slices.Clone(a)
 	for _, p := range b {

@@ -48,17 +48,17 @@ const (
 	kindNumber                     // a plain number, such as requests per second
 )
 
-// metricScope は指標をどの単位で見られるか。
+// metricScope is the unit a metric can be evaluated at.
 type metricScope int
 
 const (
-	scopeRequests  metricScope = iota // 全体、または {step=...}
-	scopeIteration                    // 全体、または {scenario=...}
-	scopeGlobal                       // 全体のみ
+	scopeRequests  metricScope = iota // whole run, or {step=...}
+	scopeIteration                    // whole run, or {scenario=...}
+	scopeGlobal                       // whole run only
 )
 
-// metric は指標の定義。scope に合った 1 つの関数だけを持つ。
-// req と iter の ok が false なら、集計の元になるデータが無い。
+// metric is the definition of a metric. It holds only the one function that matches its scope.
+// If ok from req or iter is false, there is no data to aggregate.
 type metric struct {
 	kind  metricKind
 	scope metricScope
@@ -91,7 +91,7 @@ var (
 	}
 )
 
-// lookupMetric は指標の名前から定義を引く。
+// lookupMetric finds the definition from a metric name.
 func lookupMetric(name string) (metric, bool) {
 	switch name {
 	case "error_rate":
@@ -160,7 +160,7 @@ func ParseThreshold(s string) (Threshold, error) {
 		return Threshold{}, fmt.Errorf("jotaro: threshold %q: %s", s, fmt.Sprintf(format, a...))
 	}
 
-	// 演算子は {...} の外にある最初の < か >。
+	// The operator is the first < or > outside {...}.
 	depth, at := 0, -1
 scan:
 	for i, c := range s {
@@ -281,7 +281,7 @@ func (t Threshold) String() string {
 	return t.label() + t.Op + t.formatValue(t.Value)
 }
 
-// label は指標名と絞り込み（"p95{step=login}"）。
+// label is the metric name with its selector ("p95{step=login}").
 func (t Threshold) label() string {
 	var sel []string
 	if t.Scenario != "" {
