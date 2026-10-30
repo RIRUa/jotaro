@@ -31,6 +31,9 @@ type executor struct {
 	sink  func(record.Record)
 }
 
+// resolve turns a request path into a full URL.
+// Absolute http(s) URLs pass through, an empty path means the base URL itself,
+// and anything else is joined to the base URL with exactly one slash.
 func (e *executor) resolve(path string) string {
 	if strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://") {
 		return path
@@ -41,6 +44,12 @@ func (e *executor) resolve(path string) string {
 	return strings.TrimRight(e.baseURL, "/") + "/" + strings.TrimLeft(path, "/")
 }
 
+// do sends r, reads the whole response body, and hands one record.Record to sink.
+//
+// It never returns nil: failures are carried in Response.err so that callers can
+// chain Expect* checks without handling errors at every call.
+// A request that was already invalid when built (r.err) is returned as is and records nothing,
+// because nothing was sent.
 func (e *executor) do(r *Request) *Response {
 	if r.err != nil {
 		return &Response{err: r.err}
@@ -105,6 +114,8 @@ type tracer struct {
 	conn             record.ConnKind
 }
 
+// clientTrace returns the hooks to attach to the request context.
+// Start events keep the first call only; done events keep the last.
 func (t *tracer) clientTrace() *httptrace.ClientTrace {
 	return &httptrace.ClientTrace{
 		DNSStart: func(httptrace.DNSStartInfo) { t.set(&t.dnsStart, false) },
@@ -135,6 +146,8 @@ func (t *tracer) set(dst *time.Time, overwrite bool) {
 	}
 }
 
+// fill copies the measured phases into rec. A phase that never happened
+// (for example DNS on a reused connection) stays 0.
 func (t *tracer) fill(rec *record.Record) {
 	t.mu.Lock()
 	defer t.mu.Unlock()

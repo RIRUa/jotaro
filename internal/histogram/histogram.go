@@ -14,7 +14,10 @@ import (
 const Alpha = 0.01
 
 var (
-	gamma    = (1 + Alpha) / (1 - Alpha)
+	// gamma is the growth factor between neighbouring bucket boundaries.
+	// Choosing (1+Alpha)/(1-Alpha) is what bounds the relative error by Alpha.
+	gamma = (1 + Alpha) / (1 - Alpha)
+	// logGamma is cached because index runs once per observation.
 	logGamma = math.Log(gamma)
 )
 

@@ -21,6 +21,9 @@ func startHealthSampler(interval time.Duration) *healthSampler {
 	return h
 }
 
+// run is the sampling loop, run in its own goroutine until done is closed.
+// CPU is the CPU time used since the previous sample divided by the wall time
+// and by GOMAXPROCS, clamped to [0, 1]; it stays -1 where CPU time is unavailable.
 func (h *healthSampler) run() {
 	var pts []record.HealthPoint
 	ticker := time.NewTicker(h.interval)
