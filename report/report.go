@@ -14,20 +14,26 @@ import (
 )
 
 // Latency is a distribution of durations.
+//
+// Percentiles use the nearest-rank method, so each one is an actually observed value.
+// A Latency with Count 0 has every other field at 0.
 type Latency struct {
+	// Count is the number of observations.
 	Count int
 	Min   time.Duration
 	Mean  time.Duration
-	P50   time.Duration
-	P90   time.Duration
-	P95   time.Duration
-	P99   time.Duration
-	Max   time.Duration
+	// P50 to P99 are the 50th, 90th, 95th and 99th percentiles.
+	P50 time.Duration
+	P90 time.Duration
+	P95 time.Duration
+	P99 time.Duration
+	Max time.Duration
 
 	// hist は分布のヒストグラム。MergeReports がパーセンタイルを求め直すために使う。
 	hist histogram.H
 }
 
+// newLatency summarizes ds without modifying it.
 func newLatency(ds []time.Duration) Latency {
 	return newLatencyOwned(slices.Clone(ds))
 }
@@ -144,6 +150,7 @@ func (r *Report) RPS() float64 {
 	return perSecond(r.Requests.Count, r.Elapsed)
 }
 
+// perSecond is n divided by elapsed in seconds, or 0 when no time has passed.
 func perSecond(n int, elapsed time.Duration) float64 {
 	if elapsed <= 0 {
 		return 0
@@ -164,6 +171,9 @@ func FromRaw(raw *record.Raw) *Report {
 }
 
 // BuildReport aggregates from records.
+//
+// Scenarios and steps are listed in the order they first started, and each step's requests
+// are matched to it by scenario and step name.
 // When elapsed is 0, the run time is taken from the first start to the last end among the records.
 func BuildReport(reqs []record.Record, steps []record.StepRecord, iters []record.IterationRecord, elapsed time.Duration) *Report {
 	if elapsed == 0 {
@@ -304,6 +314,8 @@ func requestStats(reqs []record.Record, at []int) RequestStats {
 	return st
 }
 
+// count adds one to the tally of k. The map is created on first use,
+// so a stats value with no errors keeps a nil map (and is left out of JSON).
 func count(m map[record.ErrKind]int, k record.ErrKind) map[record.ErrKind]int {
 	if m == nil {
 		m = map[record.ErrKind]int{}

@@ -97,6 +97,7 @@ func MergeReports(reps ...*Report) (*Report, error) {
 	return out, nil
 }
 
+// mergeStep adds two StepStats of the same step by summing the counts and merging the distributions.
 func mergeStep(a, b StepStats) StepStats {
 	return StepStats{
 		Name:     a.Name,
@@ -108,6 +109,7 @@ func mergeStep(a, b StepStats) StepStats {
 	}
 }
 
+// mergeIterations adds two IterationStats in the same way as mergeStep.
 func mergeIterations(a, b IterationStats) IterationStats {
 	return IterationStats{
 		Count:  a.Count + b.Count,
@@ -118,6 +120,7 @@ func mergeIterations(a, b IterationStats) IterationStats {
 	}
 }
 
+// mergeRequests adds two RequestStats: counts and sizes are summed and distributions merged.
 func mergeRequests(a, b RequestStats) RequestStats {
 	out := RequestStats{
 		Count:       a.Count + b.Count,
@@ -144,6 +147,7 @@ func mergeRequests(a, b RequestStats) RequestStats {
 	return out
 }
 
+// mergeErrs sums two error tallies. The result stays nil when both are empty.
 func mergeErrs(a, b map[record.ErrKind]int) map[record.ErrKind]int {
 	var out map[record.ErrKind]int
 	for _, m := range []map[record.ErrKind]int{a, b} {

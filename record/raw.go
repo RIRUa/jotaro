@@ -37,6 +37,8 @@ type Raw struct {
 // 時間は集計の JSON と同じくナノ秒の整数（フィールド名は _ns で終える）。
 // 0 や空のものは省く（読むときは 0・空に戻る）。
 
+// rawMeta is the first line of the stream. It carries the run-wide fields of Raw
+// and the format version, which ReadRaw checks before trusting the rest.
 type rawMeta struct {
 	Type      string     `json:"type"` // "meta"
 	Version   int        `json:"version"`
@@ -46,6 +48,8 @@ type rawMeta struct {
 	ElapsedNS int64      `json:"elapsed_ns"`
 }
 
+// rawRequest is the line form of Record. Durations are nanoseconds (the _ns fields),
+// and optional fields are left out when zero to keep large files small.
 type rawRequest struct {
 	Type      string     `json:"type"` // "request"
 	Scenario  string     `json:"scenario"`
@@ -68,6 +72,7 @@ type rawRequest struct {
 	BytesIn   int64      `json:"bytes_in,omitempty"`
 }
 
+// rawStep is the line form of StepRecord.
 type rawStep struct {
 	Type       string    `json:"type"` // "step"
 	Scenario   string    `json:"scenario"`
@@ -79,6 +84,7 @@ type rawStep struct {
 	Err        string    `json:"err,omitempty"`
 }
 
+// rawIteration is the line form of IterationRecord.
 type rawIteration struct {
 	Type       string    `json:"type"` // "iteration"
 	Scenario   string    `json:"scenario"`
@@ -90,6 +96,7 @@ type rawIteration struct {
 	Err        string    `json:"err,omitempty"`
 }
 
+// rawHealth is the line form of HealthPoint. CPU is always written because -1 (unavailable) is meaningful.
 type rawHealth struct {
 	Type       string  `json:"type"` // "health"
 	Second     int     `json:"second"`
@@ -98,6 +105,8 @@ type rawHealth struct {
 }
 
 // 時刻は UTC の RFC 3339 で書く。zero は省く（ポインタにする）。
+//
+// utcPtr is for optional timestamps: nil makes omitempty drop the field.
 func utcPtr(t time.Time) *time.Time {
 	if t.IsZero() {
 		return nil
@@ -106,6 +115,7 @@ func utcPtr(t time.Time) *time.Time {
 	return &t
 }
 
+// utc converts a required timestamp to UTC. The zero time is kept as is so it round-trips unchanged.
 func utc(t time.Time) time.Time {
 	if t.IsZero() {
 		return t
@@ -113,6 +123,7 @@ func utc(t time.Time) time.Time {
 	return t.UTC()
 }
 
+// derefTime is the reading counterpart of utcPtr: a missing field becomes the zero time.
 func derefTime(t *time.Time) time.Time {
 	if t == nil {
 		return time.Time{}
@@ -193,6 +204,9 @@ func ReadRaw(r io.Reader) (*Raw, error) {
 	}
 }
 
+// addLine decodes one line and appends it to the matching slice of raw.
+// It peeks at "type" first, and a meta line with an unsupported version is an error.
+// An unknown type is ignored on purpose (see ReadRaw).
 func (raw *Raw) addLine(line json.RawMessage) error {
 	var head struct {
 		Type string `json:"type"`

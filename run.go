@@ -14,10 +14,14 @@ import (
 	"github.com/RIRUa/jotaro/report"
 )
 
+// Defaults applied when the matching Plan field is 0.
 const (
+	// defaultTimeout bounds one request (Plan.Timeout).
 	defaultTimeout = 30 * time.Second
-	defaultGrace   = 30 * time.Second
+	// defaultGrace is how long running iterations may outlive Plan.Duration (Plan.Grace).
+	defaultGrace = 30 * time.Second
 
+	// defaultMaxUsers caps concurrency in the open model (Plan.MaxUsers).
 	defaultMaxUsers = 1000
 )
 
@@ -28,8 +32,10 @@ const (
 //   - Users: a fixed number of users repeat the scenario until Duration has passed.
 //   - Arrival: scenarios start at a fixed rate, regardless of how long a scenario takes.
 type Plan struct {
+	// Scenario is the flow every virtual user runs.
 	Scenario *Scenario
-	BaseURL  string
+	// BaseURL is prepended to the relative paths of requests (for example "http://localhost:8080").
+	BaseURL string
 
 	// Users is the number of virtual users running at the same time.
 	Users int
@@ -52,6 +58,8 @@ type Plan struct {
 	Raw io.Writer
 }
 
+// validate checks that the Plan is runnable: a scenario is set, exactly one of Users and Arrival
+// is given, and Duration is positive. Run calls it first, so a bad Plan fails before any load is sent.
 func (p Plan) validate() error {
 	switch {
 	case p.Scenario == nil || p.Scenario.Fn == nil:
@@ -72,6 +80,8 @@ func (p Plan) validate() error {
 }
 
 // maxConcurrency は同時に動きうるイテレーション数の上限。
+//
+// It sizes the connection pool in Run and the slot channel in runOpen.
 func (p Plan) maxConcurrency() int {
 	if p.Arrival == nil {
 		return p.Users
@@ -83,6 +93,13 @@ func (p Plan) maxConcurrency() int {
 }
 
 // Run applies load according to the Plan, then aggregates and returns the result.
+//
+// Flow of a run:
+//
+//  1. validate the Plan, and clone the default Transport so connections are not shared with other code
+//  2. start the health sampler, then run the closed (Users) or open (Arrival) loop until Duration ends
+//  3. wait up to Grace for running iterations, then cancel them
+//  4. aggregate the collected records into a report, and write the raw data if Plan.Raw is set
 //
 // When ctx is done, everything stops at once, including running iterations,
 // and the results so far are returned. Report.Elapsed is the real time until all users have stopped.
@@ -238,6 +255,7 @@ func newUser(ctx context.Context, p Plan, id, iter int, tr http.RoundTripper, ti
 	}, nil
 }
 
+// cmpOr returns d, or fallback when d is 0. It is like cmp.Or, but only for durations.
 func cmpOr(d, fallback time.Duration) time.Duration {
 	if d != 0 {
 		return d

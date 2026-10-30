@@ -12,15 +12,20 @@ import (
 // ID is the number of the virtual user and does not change across iterations.
 // Client has its own cookie jar per iteration, so every iteration starts a fresh session.
 type User struct {
-	ID        int
+	// ID identifies the virtual user. In the open model every arrival gets its own ID.
+	ID int
+	// Iteration counts how many times this user has run the scenario (0-based).
 	Iteration int
-	Client    *http.Client
+	// Client sends the requests. Use it directly for anything the Step builders do not cover,
+	// but note that such requests are not recorded.
+	Client *http.Client
 
 	ctx      context.Context
 	scenario string
 	baseURL  string
 	col      *record.Collector
 
+	// think is the total time spent in Think so far, subtracted to get the active time.
 	think time.Duration
 	// scheduled は予定到着時刻。最初のリクエストが使い切ると 0 に戻る。
 	scheduled time.Time

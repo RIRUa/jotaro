@@ -8,6 +8,7 @@ import (
 // Format is the output format of a report.
 type Format string
 
+// The supported formats.
 const (
 	FormatText Format = "text" // a human-readable table (same as Print)
 	FormatJSON Format = "json" // durations are integer nanoseconds
@@ -46,6 +47,7 @@ type errWriter struct {
 	err error
 }
 
+// Write forwards to the underlying writer until the first error, which is then returned for every later call.
 func (e *errWriter) Write(p []byte) (int, error) {
 	if e.err != nil {
 		return 0, e.err

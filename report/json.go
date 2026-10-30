@@ -23,6 +23,7 @@ const JSONVersion = 3
 // 出力用の型。Report の内部表現を変えても JSON の形が変わらないよう、別に持つ。
 // 時間はすべてナノ秒の整数（フィールド名は _ns で終える）。
 
+// jsonLatency is the JSON form of Latency.
 type jsonLatency struct {
 	Count  int   `json:"count"`
 	MinNS  int64 `json:"min_ns"`
@@ -36,6 +37,7 @@ type jsonLatency struct {
 	Buckets map[int]int `json:"buckets"`
 }
 
+// jsonRequests is the JSON form of RequestStats.
 type jsonRequests struct {
 	Count     int         `json:"count"`
 	Latency   jsonLatency `json:"latency"`
@@ -53,6 +55,7 @@ type jsonRequests struct {
 	BytesOut   int64          `json:"bytes_out"`
 }
 
+// jsonStep is the JSON form of StepStats.
 type jsonStep struct {
 	Name     string         `json:"name"`
 	Count    int            `json:"count"`
@@ -62,6 +65,7 @@ type jsonStep struct {
 	Requests jsonRequests   `json:"requests"`
 }
 
+// jsonIterations is the JSON form of IterationStats.
 type jsonIterations struct {
 	Count  int            `json:"count"`
 	Failed int            `json:"failed"`
@@ -70,12 +74,14 @@ type jsonIterations struct {
 	Errors map[string]int `json:"errors"`
 }
 
+// jsonScenario is the JSON form of ScenarioReport.
 type jsonScenario struct {
 	Name       string         `json:"name"`
 	Iterations jsonIterations `json:"iterations"`
 	Steps      []jsonStep     `json:"steps"`
 }
 
+// jsonSeriesPoint is the JSON form of SeriesPoint.
 type jsonSeriesPoint struct {
 	Second      int         `json:"second"`
 	Requests    int         `json:"requests"`
@@ -90,12 +96,14 @@ type jsonSeriesPoint struct {
 	Concurrency int         `json:"concurrency"`
 }
 
+// jsonHealthPoint is the JSON form of record.HealthPoint.
 type jsonHealthPoint struct {
 	Second     int     `json:"second"`
 	Goroutines int     `json:"goroutines"`
 	CPU        float64 `json:"cpu"` // 0〜1。取得できなかったときは -1
 }
 
+// jsonReport is the top level of the JSON output, and the only thing ReadJSON decodes into.
 type jsonReport struct {
 	Version   int               `json:"version"`
 	Open      bool              `json:"open"`
@@ -116,6 +124,8 @@ func (r *Report) WriteJSON(w io.Writer) error {
 	return enc.Encode(r.toJSON())
 }
 
+// toJSON converts the report to its JSON form. Slices that would be nil are left empty here;
+// ReadJSON turns empty values back into the zero values of Report.
 func (r *Report) toJSON() jsonReport {
 	out := jsonReport{
 		Version:   JSONVersion,
@@ -174,6 +184,7 @@ func (r *Report) toJSON() jsonReport {
 	return out
 }
 
+// toJSONRequests converts RequestStats. It always sets the maps, so JSON shows {} instead of null.
 func toJSONRequests(q RequestStats) jsonRequests {
 	status := make(map[string]int, len(q.Status))
 	for k, v := range q.Status {
@@ -196,6 +207,7 @@ func toJSONRequests(q RequestStats) jsonRequests {
 	}
 }
 
+// toJSONLatency converts Latency, including the histogram buckets that MergeReports needs later.
 func toJSONLatency(l Latency) jsonLatency {
 	return jsonLatency{
 		Count:  l.Count,
@@ -220,6 +232,7 @@ func errCounts(m map[record.ErrKind]int) map[string]int {
 	return out
 }
 
+// ns is d as integer nanoseconds, the unit of every duration in the JSON.
 func ns(d time.Duration) int64 { return d.Nanoseconds() }
 
 // ReadJSON turns JSON written by WriteJSON back into a Report.
@@ -293,6 +306,7 @@ func (j jsonReport) toReport() *Report {
 	return rep
 }
 
+// fromJSONRequests is the inverse of toJSONRequests. Empty maps become nil, as in a fresh aggregate.
 func fromJSONRequests(q jsonRequests) RequestStats {
 	var status map[string]int
 	if len(q.Status) > 0 {
@@ -315,6 +329,7 @@ func fromJSONRequests(q jsonRequests) RequestStats {
 	}
 }
 
+// fromJSONLatency is the inverse of toJSONLatency.
 func fromJSONLatency(l jsonLatency) Latency {
 	return Latency{
 		Count: l.Count,
@@ -329,6 +344,7 @@ func fromJSONLatency(l jsonLatency) Latency {
 	}
 }
 
+// fromErrCounts is the inverse of errCounts: an empty map becomes nil.
 func fromErrCounts(m map[string]int) map[record.ErrKind]int {
 	if len(m) == 0 {
 		return nil
@@ -348,6 +364,7 @@ func bucketsOrEmpty(h histogram.H) map[int]int {
 	return h
 }
 
+// nilIfEmpty is the inverse of bucketsOrEmpty: an empty map becomes a nil histogram.
 func nilIfEmpty(m map[int]int) histogram.H {
 	if len(m) == 0 {
 		return nil

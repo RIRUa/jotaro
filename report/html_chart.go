@@ -12,23 +12,28 @@ import (
 
 // グラフは外部ライブラリも JavaScript も使わず、インライン SVG として出力する。
 
+// Chart geometry in SVG user units: the full size, then the margins
+// (left / right, top / bottom) around the plot area.
 const (
 	chartW, chartH = 640, 200
 	chartL, chartR = 48, 12 // 左右の余白（左は Y 軸の目盛り用）
 	chartT, chartB = 10, 24
 )
 
+// htmlTick is one axis tick: where it sits and what it says.
 type htmlTick struct {
 	Pos   string // SVG 上の座標
 	Label string
 }
 
+// htmlLine is one series drawn as a line. A gap in the data splits it into several polylines.
 type htmlLine struct {
 	Class  string   // l1〜l3。色は CSS で決める
 	Name   string   // 凡例
 	Points []string // 連続した区間ごとの polyline の points
 }
 
+// htmlChart is one SVG line chart, with every coordinate already computed for the template.
 type htmlChart struct {
 	Title  string
 	W, H   int
@@ -241,6 +246,7 @@ func niceStep(max float64) float64 {
 	return 10 * mag
 }
 
+// fmtNum formats an axis label without a trailing ".0" for whole numbers.
 func fmtNum(v float64) string {
 	if v == math.Trunc(v) {
 		return fmt.Sprintf("%d", int64(v))

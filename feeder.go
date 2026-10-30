@@ -26,6 +26,7 @@ const (
 type Feeder[T any] struct {
 	rows []T
 	mode FeedMode
+	// next is the shared cursor. Atomic, so concurrent users never get the same row in Circular or Once.
 	next atomic.Uint64
 }
 

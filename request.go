@@ -21,13 +21,20 @@ type RequestSpec struct {
 }
 
 // Request is a request builder. Send it with Do.
+//
+// Builder methods return the Request so calls can be chained. A failure while building
+// (for example JSON that cannot be encoded) is stored and returned later by the Response,
+// which keeps the chain free of error checks.
 type Request struct {
+	// Spec is the data form of the request. It can be edited directly before Do.
 	Spec RequestSpec
 
 	exec *executor
-	err  error
+	// err is the first build error. Do returns it in the Response without sending anything.
+	err error
 }
 
+// newRequest starts a request of the given method and path. The path is resolved against the base URL in Do.
 func newRequest(exec *executor, method, path string) *Request {
 	return &Request{
 		Spec: RequestSpec{Method: method, Path: path, Header: http.Header{}},
