@@ -133,7 +133,7 @@ func TestThinkReturnsOnCancel(t *testing.T) {
 	start := time.Now()
 	u.Think(5 * time.Second)
 	if time.Since(start) > time.Second {
-		t.Fatal("ctx のキャンセルで戻らなかった")
+		t.Fatal("did not return on ctx cancellation")
 	}
 }
 
@@ -144,7 +144,7 @@ func TestPanicBecomesIterationFailure(t *testing.T) {
 		panic("boom")
 	})
 	if err := sc.run(u); err == nil {
-		t.Fatal("panic はエラーとして返るはず")
+		t.Fatal("a panic should come back as an error")
 	}
 	_, _, iters := col.Snapshot()
 	if len(iters) != 1 || iters[0].Err != record.ErrOther {
@@ -180,9 +180,9 @@ func TestCookiesAreKeptWithinUserOnly(t *testing.T) {
 
 	u1.Step("login", func(s *Step) error { return s.Get("/login").Do().Err() })
 	if got := me(u1); got != 200 {
-		t.Fatalf("ログイン済みユーザーの /me = %d, want 200", got)
+		t.Fatalf("/me of a logged-in user = %d, want 200", got)
 	}
 	if got := me(u2); got != 401 {
-		t.Fatalf("別ユーザーの /me = %d, want 401", got)
+		t.Fatalf("/me of another user = %d, want 401", got)
 	}
 }

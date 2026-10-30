@@ -12,7 +12,7 @@ import (
 	"github.com/RIRUa/jotaro/report"
 )
 
-// writeSample は小さな結果を JSON にして path に書く。
+// writeSample writes a small result as JSON to path.
 func writeSample(t *testing.T, path string) {
 	t.Helper()
 	rep := report.BuildReport(
@@ -44,7 +44,7 @@ func TestReportToFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !strings.Contains(string(b), "<!doctype html>") || !strings.Contains(string(b), "checkout") {
-		t.Fatalf("HTML になっていない: %.200s", b)
+		t.Fatalf("not HTML: %.200s", b)
 	}
 }
 
@@ -59,7 +59,7 @@ func TestReportStdinToStdout(t *testing.T) {
 		t.Fatalf("code = %d, stderr = %s", code, stderr.String())
 	}
 	if !strings.Contains(stdout.String(), "=== Summary ===") {
-		t.Fatalf("text になっていない: %s", stdout.String())
+		t.Fatalf("not text: %s", stdout.String())
 	}
 }
 
@@ -73,12 +73,12 @@ func TestReportErrors(t *testing.T) {
 		args []string
 		want int
 	}{
-		{"引数なし", nil, 2},
-		{"未知のコマンド", []string{"nope"}, 2},
-		{"入力なし", []string{"report"}, 2},
-		{"未知の形式", []string{"report", "-format", "csv", bad}, 2},
-		{"ファイルが無い", []string{"report", filepath.Join(dir, "none.json")}, 1},
-		{"未対応の version", []string{"report", bad}, 1},
+		{"no arguments", nil, 2},
+		{"unknown command", []string{"nope"}, 2},
+		{"no input", []string{"report"}, 2},
+		{"unknown format", []string{"report", "-format", "csv", bad}, 2},
+		{"missing file", []string{"report", filepath.Join(dir, "none.json")}, 1},
+		{"unsupported version", []string{"report", bad}, 1},
 	}
 	for _, tt := range tests {
 		var stdout, stderr bytes.Buffer
@@ -105,10 +105,10 @@ func TestMerge(t *testing.T) {
 	defer f.Close()
 	rep, err := report.ReadJSON(f)
 	if err != nil {
-		t.Fatalf("結合結果が JSON として読めない: %v", err)
+		t.Fatalf("merged result is not readable as JSON: %v", err)
 	}
 	if rep.Requests.Count != 2 || rep.Scenarios[0].Iterations.Count != 2 {
-		t.Fatalf("2 件分が合計されていない: %+v", rep.Requests)
+		t.Fatalf("the two inputs were not summed: %+v", rep.Requests)
 	}
 }
 
@@ -122,9 +122,9 @@ func TestMergeErrors(t *testing.T) {
 		args []string
 		want int
 	}{
-		{"入力なし", []string{"merge"}, 2},
-		{"未知の形式", []string{"merge", "-format", "csv", ok}, 2},
-		{"ファイルが無い", []string{"merge", ok, filepath.Join(dir, "none.json")}, 1},
+		{"no input", []string{"merge"}, 2},
+		{"unknown format", []string{"merge", "-format", "csv", ok}, 2},
+		{"missing file", []string{"merge", ok, filepath.Join(dir, "none.json")}, 1},
 	}
 	for _, tt := range tests {
 		var stdout, stderr bytes.Buffer
@@ -144,10 +144,10 @@ func TestCheck(t *testing.T) {
 		code int
 		want string
 	}{
-		{"満たす", []string{"-t", "p95<100ms", "-t", "error_rate<1%", in}, 0, "OK: all 2 met"},
-		{"満たさない", []string{"-t", "p95<1ms", "-t", "error_rate<1%", in}, 1, "FAIL  p95<1ms"},
-		{"ステップを絞る", []string{"-t", "p95{step=login}<100ms", in}, 0, "[checkout/login]"},
-		{"ステップがない", []string{"-t", "p95{step=nothing}<100ms", in}, 1, "no matching step"},
+		{"met", []string{"-t", "p95<100ms", "-t", "error_rate<1%", in}, 0, "OK: all 2 met"},
+		{"not met", []string{"-t", "p95<1ms", "-t", "error_rate<1%", in}, 1, "FAIL  p95<1ms"},
+		{"select a step", []string{"-t", "p95{step=login}<100ms", in}, 0, "[checkout/login]"},
+		{"no such step", []string{"-t", "p95{step=nothing}<100ms", in}, 1, "no matching step"},
 	}
 	for _, tt := range tests {
 		var stdout, stderr bytes.Buffer
@@ -163,9 +163,9 @@ func TestCheckUsageErrors(t *testing.T) {
 	writeSample(t, in)
 
 	for name, args := range map[string][]string{
-		"しきい値がない":   {in},
-		"結果ファイルがない": {"-t", "p95<1s"},
-		"しきい値が読めない": {"-t", "p95", in},
+		"no threshold":         {in},
+		"no result file":       {"-t", "p95<1s"},
+		"unreadable threshold": {"-t", "p95", in},
 	} {
 		var stdout, stderr bytes.Buffer
 		if code := run(append([]string{"check"}, args...), nil, &stdout, &stderr); code != 2 {
@@ -175,11 +175,11 @@ func TestCheckUsageErrors(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	if code := run([]string{"check", "-t", "p95<1s", filepath.Join(t.TempDir(), "none.json")}, nil, &stdout, &stderr); code != 1 {
-		t.Errorf("ファイルが開けないとき code = %d, want 1", code)
+		t.Errorf("code = %d when the file cannot be opened, want 1", code)
 	}
 }
 
-// writeSampleRaw は writeSample と同じ内容を、生データ（JSON Lines）として path に書く。
+// writeSampleRaw writes the same content as writeSample to path, as raw data (JSON Lines).
 func writeSampleRaw(t *testing.T, path string) {
 	t.Helper()
 	t0 := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
@@ -207,14 +207,14 @@ func TestReportRaw(t *testing.T) {
 		t.Fatalf("code = %d, stderr = %s", code, stderr.String())
 	}
 	if out := stdout.String(); !strings.Contains(out, "requests:   1 ") || !strings.Contains(out, "checkout") {
-		t.Errorf("生データから集計できていない:\n%s", out)
+		t.Errorf("not aggregated from raw data:\n%s", out)
 	}
 
-	// -raw を付けずに生データを渡すと、集計済み JSON ではないのでエラーになる。
+	// Passing raw data without -raw is an error, since it is not aggregated JSON.
 	stdout.Reset()
 	stderr.Reset()
 	if code := run([]string{"report", in}, nil, &stdout, &stderr); code != 1 {
-		t.Errorf("-raw 無しで code = %d, want 1", code)
+		t.Errorf("code = %d without -raw, want 1", code)
 	}
 }
 
@@ -227,7 +227,7 @@ func TestReportRawStdinToJSONThenCheck(t *testing.T) {
 	if code := run([]string{"report", "-raw", "-format", "json", "-"}, bytes.NewReader(data), &stdout, &stderr); code != 0 {
 		t.Fatalf("code = %d, stderr = %s", code, stderr.String())
 	}
-	// 生データ → 集計済み JSON → しきい値判定、と続けられる。
+	// Raw data → aggregated JSON → threshold check can be chained.
 	var out bytes.Buffer
 	if code := run([]string{"check", "-t", "p95<100ms", "-"}, &stdout, &out, &stderr); code != 0 {
 		t.Fatalf("check: code = %d, stdout = %s, stderr = %s", code, out.String(), stderr.String())
@@ -259,6 +259,6 @@ func TestReadErrorsHaveSinglePrefix(t *testing.T) {
 		t.Fatalf("code = %d", code)
 	}
 	if strings.Contains(stderr.String(), "jotaro: jotaro:") {
-		t.Errorf("接頭辞が二重: %s", stderr.String())
+		t.Errorf("prefix doubled: %s", stderr.String())
 	}
 }

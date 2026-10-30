@@ -15,7 +15,7 @@ import (
 	"github.com/RIRUa/jotaro/record"
 )
 
-// testExec は結果の record.Record を records に集める executor を返す。
+// testExec returns an executor that collects the resulting record.Record values into records.
 func testExec(t *testing.T, baseURL string, client *http.Client) (*executor, *[]record.Record) {
 	t.Helper()
 	var (
@@ -62,7 +62,7 @@ func TestDoRecordsRequest(t *testing.T) {
 		t.Fatalf("Code=%d Err=%q", r.Code, r.Err)
 	}
 	if r.Scenario != "s" || r.Step != "st" || r.UserID != 7 || r.Iteration != 3 {
-		t.Fatalf("tag が引き継がれていない: %+v", r)
+		t.Fatalf("tag was not carried over: %+v", r)
 	}
 	if r.URL != srv.URL+"/login" || r.Method != "GET" {
 		t.Fatalf("URL/Method = %q %q", r.Method, r.URL)
@@ -74,7 +74,7 @@ func TestDoRecordsRequest(t *testing.T) {
 		t.Fatalf("BytesIn = %d", r.BytesIn)
 	}
 	if !r.Scheduled.Equal(r.Start) {
-		t.Fatalf("Users モデルでは Scheduled == Start のはず")
+		t.Fatalf("Scheduled should equal Start in the Users model")
 	}
 }
 
@@ -137,7 +137,7 @@ func TestConnectionRefused(t *testing.T) {
 	e, recs := testExec(t, url, nil)
 	resp := newRequest(e, "GET", "/").Do()
 	if resp.Err() == nil {
-		t.Fatal("エラーが返るはず")
+		t.Fatal("an error should be returned")
 	}
 	r := (*recs)[0]
 	if r.Err != record.ErrConnRefused || r.Code != 0 {
@@ -200,14 +200,14 @@ func TestJSONEncodeErrorIsNotRecorded(t *testing.T) {
 	e, recs := testExec(t, "http://unused", nil)
 	resp := newRequest(e, "POST", "/").JSON(make(chan int)).Do()
 	if resp.Err() == nil {
-		t.Fatal("エンコードできない値はエラーになるはず")
+		t.Fatal("an unencodable value should be an error")
 	}
 	if len(*recs) != 0 {
-		t.Fatalf("送信していないので記録は残らないはず: %d", len(*recs))
+		t.Fatalf("nothing was sent, so no record should remain: %d", len(*recs))
 	}
 }
 
-// 同じクライアントの 2 回目以降は接続を再利用し、DNS / Connect / TLS は計測されない。
+// From the second request on, the same client reuses the connection, and DNS / Connect / TLS are not measured.
 func TestConnReuse(t *testing.T) {
 	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
 	defer srv.Close()
@@ -223,13 +223,13 @@ func TestConnReuse(t *testing.T) {
 		t.Fatalf("records = %d", len(got))
 	}
 	if got[0].Conn != record.ConnNew {
-		t.Errorf("1 回目は新規接続のはず: %+v", got[0])
+		t.Errorf("the first should be a new connection: %+v", got[0])
 	}
-	// Windows は時計が粗く、ループバックの接続が 0 と測られることがある。
+	// Windows has a coarse clock, and a loopback connect can be measured as 0.
 	if runtime.GOOS != "windows" && (got[0].Connect <= 0 || got[0].TLS <= 0) {
-		t.Errorf("1 回目は新規接続で Connect/TLS を持つはず: %+v", got[0])
+		t.Errorf("the first should be a new connection with Connect/TLS: %+v", got[0])
 	}
 	if got[1].Conn != record.ConnReused || got[1].Connect != 0 || got[1].TLS != 0 || got[1].DNS != 0 {
-		t.Errorf("2 回目は再利用で区間を持たないはず: %+v", got[1])
+		t.Errorf("the second should reuse the connection with no phases: %+v", got[1])
 	}
 }

@@ -18,14 +18,14 @@ import (
 func TestRunValidate(t *testing.T) {
 	sc := NewScenario("s", func(ctx context.Context, u *User) error { return nil })
 	cases := map[string]Plan{
-		"シナリオなし":      {Users: 1, Duration: time.Second},
-		"Fn なし":       {Scenario: &Scenario{Name: "s"}, Users: 1, Duration: time.Second},
-		"Users が 0":   {Scenario: sc, Duration: time.Second},
-		"Duration なし": {Scenario: sc, Users: 1},
+		"no scenario": {Users: 1, Duration: time.Second},
+		"no Fn":       {Scenario: &Scenario{Name: "s"}, Users: 1, Duration: time.Second},
+		"Users is 0":  {Scenario: sc, Duration: time.Second},
+		"no Duration": {Scenario: sc, Users: 1},
 	}
 	for name, p := range cases {
 		if _, err := Run(context.Background(), p); err == nil {
-			t.Errorf("%s: エラーになるはず", name)
+			t.Errorf("%s: should be an error", name)
 		}
 	}
 }
@@ -76,7 +76,7 @@ func TestRunUsers(t *testing.T) {
 	if rep.Elapsed < 300*time.Millisecond || rep.RPS() <= 0 {
 		t.Fatalf("Elapsed=%v RPS=%v", rep.Elapsed, rep.RPS())
 	}
-	// Think を除いたシナリオ時間は、含む時間より短い。
+	// Scenario time without Think is shorter than the time with it.
 	if s.Iterations.Active.P50 >= s.Iterations.Total.P50 {
 		t.Fatalf("Active=%v Total=%v", s.Iterations.Active.P50, s.Iterations.Total.P50)
 	}
@@ -94,12 +94,12 @@ func TestRunAllUsersParticipate(t *testing.T) {
 	}
 	for id := range seen {
 		if !seen[id].Load() {
-			t.Errorf("User %d が一度も実行されていない", id)
+			t.Errorf("User %d never ran", id)
 		}
 	}
 }
 
-// Duration を過ぎても実行中のイテレーションは完了まで待つ。
+// Iterations still running after Duration are waited for until they finish.
 func TestRunLetsInflightIterationFinish(t *testing.T) {
 	sc := NewScenario("s", func(ctx context.Context, u *User) error {
 		u.Think(300 * time.Millisecond)
@@ -114,11 +114,11 @@ func TestRunLetsInflightIterationFinish(t *testing.T) {
 		t.Fatalf("Iterations = %+v", it)
 	}
 	if rep.Elapsed < 300*time.Millisecond {
-		t.Fatalf("Elapsed = %v: 実行中のイテレーションを待っていない", rep.Elapsed)
+		t.Fatalf("Elapsed = %v: did not wait for running iterations", rep.Elapsed)
 	}
 }
 
-// Grace を超えたら中断して record.ErrCanceled として記録する。
+// Past Grace, they are aborted and recorded as record.ErrCanceled.
 func TestRunAbortsAfterGrace(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		<-r.Context().Done()
@@ -138,7 +138,7 @@ func TestRunAbortsAfterGrace(t *testing.T) {
 		t.Fatal(err)
 	}
 	if took := time.Since(start); took > 3*time.Second {
-		t.Fatalf("中断されず %v かかった", took)
+		t.Fatalf("not aborted; took %v", took)
 	}
 	it := rep.Scenarios[0].Iterations
 	if it.Failed != it.Count || it.Errors[record.ErrCanceled] != it.Count {
@@ -162,7 +162,7 @@ func TestRunStopsOnParentCancel(t *testing.T) {
 		t.Fatal(err)
 	}
 	if took := time.Since(start); took > 3*time.Second {
-		t.Fatalf("親 ctx のキャンセルで止まらなかった: %v", took)
+		t.Fatalf("did not stop on cancellation of the parent ctx: %v", took)
 	}
 }
 
@@ -192,11 +192,11 @@ func TestRunWritesRaw(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(raw.Requests) != rep.Requests.Count || len(raw.Requests) == 0 {
-		t.Fatalf("リクエスト数: raw = %d, rep = %d", len(raw.Requests), rep.Requests.Count)
+		t.Fatalf("request count: raw = %d, rep = %d", len(raw.Requests), rep.Requests.Count)
 	}
-	// 生データから集計し直した結果が、Run の結果と一致する。
+	// The result re-aggregated from raw data matches the result of Run.
 	if again := report.FromRaw(raw); !reflect.DeepEqual(again, rep) {
-		t.Errorf("再集計の結果が Run の結果と違う:\n got %+v\nwant %+v", again, rep)
+		t.Errorf("the re-aggregated result differs from the result of Run:\n got %+v\nwant %+v", again, rep)
 	}
 }
 
@@ -207,9 +207,9 @@ func TestRunRawWriteErrorStillReturnsReport(t *testing.T) {
 	})
 	rep, err := Run(context.Background(), Plan{Scenario: sc, Users: 1, Duration: 50 * time.Millisecond, Raw: failWriter{}})
 	if err == nil {
-		t.Error("書き出しの失敗が error にならない")
+		t.Error("a write failure did not become an error")
 	}
 	if rep == nil || len(rep.Scenarios) == 0 {
-		t.Errorf("書き出しに失敗しても集計は返すはず: %+v", rep)
+		t.Errorf("the aggregate should be returned even if writing fails: %+v", rep)
 	}
 }

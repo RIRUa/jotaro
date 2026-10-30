@@ -13,7 +13,7 @@ func TestFeederCircular(t *testing.T) {
 	for range 7 {
 		v, ok := f.Next()
 		if !ok {
-			t.Fatal("Circular は常に値を返すはず")
+			t.Fatal("Circular should always return a value")
 		}
 		got = append(got, v)
 	}
@@ -30,7 +30,7 @@ func TestFeederOnce(t *testing.T) {
 		}
 	}
 	if _, ok := f.Next(); ok {
-		t.Fatal("使い切ったら false のはず")
+		t.Fatal("should be false once used up")
 	}
 }
 
@@ -43,11 +43,11 @@ func TestFeederRandomAndEmpty(t *testing.T) {
 		}
 	}
 	if _, ok := NewFeeder[int](nil, Circular).Next(); ok {
-		t.Fatal("空なら false のはず")
+		t.Fatal("should be false when empty")
 	}
 }
 
-// Once は並行に呼んでも、各行がちょうど 1 回ずつ配られる。
+// Even when called concurrently, Once hands out each row exactly once.
 func TestFeederOnceConcurrent(t *testing.T) {
 	const n = 1000
 	rows := make([]int, n)
@@ -78,11 +78,11 @@ func TestFeederOnceConcurrent(t *testing.T) {
 	}
 	wg.Wait()
 	if len(seen) != n {
-		t.Fatalf("配られた行 = %d, want %d", len(seen), n)
+		t.Fatalf("rows handed out = %d, want %d", len(seen), n)
 	}
 	for v, c := range seen {
 		if c != 1 {
-			t.Fatalf("行 %d が %d 回配られた", v, c)
+			t.Fatalf("row %d was handed out %d times", v, c)
 		}
 	}
 }
@@ -96,9 +96,9 @@ func TestLoadCSV(t *testing.T) {
 		t.Fatalf("rows = %v", rows)
 	}
 	if _, err := LoadCSV(strings.NewReader("")); err == nil {
-		t.Error("空の CSV はエラーのはず")
+		t.Error("an empty CSV should be an error")
 	}
 	if _, err := LoadCSV(strings.NewReader("a,b\n1\n")); err == nil {
-		t.Error("列数が合わない CSV はエラーのはず")
+		t.Error("a CSV with mismatched columns should be an error")
 	}
 }

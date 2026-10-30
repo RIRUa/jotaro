@@ -23,7 +23,7 @@ func TestWriteFormats(t *testing.T) {
 			t.Fatalf("%s: %v", tt.f, err)
 		}
 		if !strings.Contains(buf.String(), tt.want) {
-			t.Errorf("%s: 出力に %q が無い", tt.f, tt.want)
+			t.Errorf("%s: %q missing from output", tt.f, tt.want)
 		}
 	}
 }
@@ -31,10 +31,10 @@ func TestWriteFormats(t *testing.T) {
 func TestWriteUnknownFormat(t *testing.T) {
 	var buf bytes.Buffer
 	if err := sampleReport(false).Write(&buf, "xml"); err == nil {
-		t.Fatal("未知の形式はエラーになること")
+		t.Fatal("an unknown format must be an error")
 	}
 	if buf.Len() != 0 {
-		t.Fatal("未知の形式では何も書かないこと")
+		t.Fatal("nothing must be written for an unknown format")
 	}
 }
 
@@ -45,7 +45,7 @@ func (failWriter) Write([]byte) (int, error) { return 0, errors.New("disk full")
 func TestWriteReturnsWriteError(t *testing.T) {
 	for _, f := range []Format{FormatText, FormatJSON, FormatHTML} {
 		if err := sampleReport(false).Write(failWriter{}, f); err == nil {
-			t.Errorf("%s: 書き込みの失敗が返ること", f)
+			t.Errorf("%s: a write failure must be returned", f)
 		}
 	}
 }
@@ -57,6 +57,6 @@ func TestParseFormat(t *testing.T) {
 		}
 	}
 	if _, err := ParseFormat("csv"); err == nil {
-		t.Error("未知の形式はエラーになること")
+		t.Error("an unknown format must be an error")
 	}
 }

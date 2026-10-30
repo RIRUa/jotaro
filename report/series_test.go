@@ -15,12 +15,12 @@ func seriesRecords(t0 time.Time) ([]record.Record, []record.IterationRecord) {
 	reqs := []record.Record{
 		{Start: t0, Latency: 10 * ms, Code: 200},
 		{Start: t0.Add(500 * ms), Latency: 30 * ms, Err: record.ErrTimeout},
-		{Start: t0.Add(2100 * ms), Latency: 20 * ms, Code: 503}, // 1 秒目は空
+		{Start: t0.Add(2100 * ms), Latency: 20 * ms, Code: 503}, // second 1 is empty
 	}
 	iters := []record.IterationRecord{
 		{Start: t0, Duration: 1500 * ms},
 		{Start: t0.Add(200 * ms), Duration: 600 * ms},
-		{Start: t0.Add(1500 * ms), Duration: 700 * ms}, // 前のイテレーションの終了と同時
+		{Start: t0.Add(1500 * ms), Duration: 700 * ms}, // at the same instant the previous iteration ends
 	}
 	return reqs, iters
 }
@@ -40,7 +40,7 @@ func TestBuildSeries(t *testing.T) {
 	if s0.Concurrency != 2 {
 		t.Errorf("s0.Concurrency = %d, want 2", s0.Concurrency)
 	}
-	// 1 秒目: 0 秒開始のイテレーションが 1.5 秒まで続き、1.5 秒に次が始まる（重ねない）。
+	// Second 1: the iteration that started at 0s lasts until 1.5s, and the next starts at 1.5s (not counted as overlapping).
 	if s1.Requests != 0 || s1.Concurrency != 1 {
 		t.Errorf("s1 = %+v", s1)
 	}
@@ -81,7 +81,7 @@ func TestMergeSeriesOffset(t *testing.T) {
 	t0 := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	reqs, iters := seriesRecords(t0)
 	a := BuildReport(reqs, nil, iters, 0)
-	reqs2, iters2 := seriesRecords(t0.Add(2 * time.Second)) // 2 秒遅れて開始
+	reqs2, iters2 := seriesRecords(t0.Add(2 * time.Second)) // starts 2 seconds later
 	b := BuildReport(reqs2, nil, iters2, 0)
 
 	got, err := MergeReports(a, b)
@@ -91,7 +91,7 @@ func TestMergeSeriesOffset(t *testing.T) {
 	if len(got.Series) != 5 {
 		t.Fatalf("len = %d, want 5: %+v", len(got.Series), got.Series)
 	}
-	// 2 秒目は a の 2 秒目と b の 0 秒目が重なる。
+	// Second 2: a's second 2 overlaps b's second 0.
 	s2 := got.Series[2]
 	if s2.Requests != 1+2 || s2.Errors != 1 || s2.HTTP5xx != 1 || s2.Latency.Count != 3 || s2.Concurrency != 1+2 {
 		t.Errorf("s2 = %+v", s2)
@@ -108,7 +108,7 @@ func TestBuildSeriesConns(t *testing.T) {
 		{Start: t0, Latency: 10 * ms, Code: 200, Conn: record.ConnNew},
 		{Start: t0.Add(300 * ms), Latency: 10 * ms, Code: 200, Conn: record.ConnReused},
 		{Start: t0.Add(600 * ms), Latency: 10 * ms, Code: 200, Conn: record.ConnReused},
-		{Start: t0.Add(700 * ms), Latency: 10 * ms, Err: record.ErrDNS}, // 接続を得る前に失敗
+		{Start: t0.Add(700 * ms), Latency: 10 * ms, Err: record.ErrDNS}, // failed before getting a connection
 		{Start: t0.Add(1200 * ms), Latency: 10 * ms, Code: 200, Conn: record.ConnNew},
 	}
 	rep := BuildReport(reqs, nil, nil, 0)
@@ -129,7 +129,7 @@ func TestMergeSeriesConns(t *testing.T) {
 	a := []SeriesPoint{{Second: 0, NewConns: 1, ReusedConns: 2}, {Second: 1, NewConns: 3}}
 	b := []SeriesPoint{{Second: 0, NewConns: 4, ReusedConns: 5}}
 
-	got := mergeSeries(a, b, 1) // b を 1 秒ずらす → a の 1 秒目と重なる
+	got := mergeSeries(a, b, 1) // shift b by 1 second → overlaps a's second 1
 	if len(got) != 2 {
 		t.Fatalf("len = %d, want 2: %+v", len(got), got)
 	}
@@ -146,8 +146,8 @@ func TestBuildSeriesConnPhases(t *testing.T) {
 	ms := time.Millisecond
 	reqs := []record.Record{
 		{Start: t0, Latency: 50 * ms, Conn: record.ConnNew, DNS: 5 * ms, Connect: 10 * ms, TLS: 20 * ms},
-		{Start: t0.Add(100 * ms), Latency: 10 * ms, Conn: record.ConnReused},                              // 再利用は 0
-		{Start: t0.Add(200 * ms), Latency: 40 * ms, Conn: record.ConnNew, DNS: 15 * ms, Connect: 30 * ms}, // http は TLS なし
+		{Start: t0.Add(100 * ms), Latency: 10 * ms, Conn: record.ConnReused},                              // reused connections give 0
+		{Start: t0.Add(200 * ms), Latency: 40 * ms, Conn: record.ConnNew, DNS: 15 * ms, Connect: 30 * ms}, // no TLS over http
 		{Start: t0.Add(1100 * ms), Latency: 10 * ms, Conn: record.ConnReused},
 	}
 	rep := BuildReport(reqs, nil, nil, 0)
@@ -163,7 +163,7 @@ func TestBuildSeriesConnPhases(t *testing.T) {
 		t.Errorf("s0.TLS = %+v", s0.TLS)
 	}
 	if s1.DNS.Count != 0 || s1.Connect.Count != 0 || s1.TLS.Count != 0 {
-		t.Errorf("再利用だけの秒は空のはず: %+v", s1)
+		t.Errorf("a second with only reused connections should be empty: %+v", s1)
 	}
 }
 
@@ -212,7 +212,7 @@ func TestSeriesConnJSONRoundTrip(t *testing.T) {
 	}
 }
 
-// 接続内訳の無い（後から足す前の）series も読める。
+// A series without the connection breakdown (from before it was added) can still be read.
 func TestReadJSONSeriesWithoutConns(t *testing.T) {
 	const in = `{"version":3,"started_at":"2026-01-01T00:00:00Z","elapsed_ns":1000000000,
 "requests":{},"scenarios":[],

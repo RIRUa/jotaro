@@ -7,7 +7,7 @@ import (
 	"github.com/RIRUa/jotaro/record"
 )
 
-// benchRecords は 3 ステップ分の n 件のリクエスト記録を返す。
+// benchRecords returns n request records spread over 3 steps.
 func benchRecords(n int) []record.Record {
 	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	steps := []string{"login", "list", "order"}
@@ -21,7 +21,7 @@ func benchRecords(n int) []record.Record {
 			Code:     200,
 			Conn:     record.ConnReused,
 			Start:    start,
-			// 時刻をずらして遅延を持たせる
+			// offset the times to add delay
 			Scheduled: start.Add(-time.Duration(i%7) * time.Millisecond),
 			Latency:   time.Duration(i%5000+1) * time.Microsecond,
 			TTFB:      time.Duration(i%2000+1) * time.Microsecond,

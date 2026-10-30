@@ -31,18 +31,18 @@ func TestWriteHTML(t *testing.T) {
 
 	for _, want := range []string{"<!doctype html>", "closed (Users)", "2xx", "5xx", "timeout", "expect_mismatch", "p95"} {
 		if !strings.Contains(out, want) {
-			t.Errorf("出力に %q が無い", want)
+			t.Errorf("%q missing from output", want)
 		}
 	}
-	// シナリオ名はエスケープされる（HTML として解釈されない）
+	// Scenario names are escaped (not interpreted as HTML).
 	if strings.Contains(out, "s<b>") || !strings.Contains(out, "s&lt;b&gt;") {
-		t.Error("シナリオ名がエスケープされていない")
+		t.Error("the scenario name is not escaped")
 	}
 	if strings.Contains(out, "corrected (from scheduled start)") {
-		t.Error("Users モデルでは corrected を出さない")
+		t.Error("corrected must not be shown in the Users model")
 	}
 	if strings.Contains(out, "http://") || strings.Contains(out, "https://") {
-		t.Error("外部への参照を含めない")
+		t.Error("must not contain external references")
 	}
 }
 
@@ -56,7 +56,7 @@ func TestWriteHTMLOpen(t *testing.T) {
 	out := buf.String()
 	for _, want := range []string{"open (Rate)", "corrected (from scheduled start)", "dropped"} {
 		if !strings.Contains(out, want) {
-			t.Errorf("出力に %q が無い", want)
+			t.Errorf("%q missing from output", want)
 		}
 	}
 }
@@ -67,7 +67,7 @@ func TestWriteHTMLEmpty(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !strings.Contains(buf.String(), "</html>") {
-		t.Fatal("空のレポートでも完結した HTML になること")
+		t.Fatal("even an empty report must be complete HTML")
 	}
 }
 
@@ -81,11 +81,11 @@ func TestWriteHTMLTimeline(t *testing.T) {
 	out := buf.String()
 	for _, want := range []string{"Timeline (1s)", "<svg", "<polyline", "requests / s", "concurrency"} {
 		if !strings.Contains(out, want) {
-			t.Errorf("出力に %q が無い", want)
+			t.Errorf("%q missing from output", want)
 		}
 	}
 	if strings.Contains(out, "http://") || strings.Contains(out, "https://") {
-		t.Error("外部への参照を含めない")
+		t.Error("must not contain external references")
 	}
 }
 
@@ -95,7 +95,7 @@ func TestWriteHTMLNoTimeline(t *testing.T) {
 		t.Fatal(err)
 	}
 	if strings.Contains(buf.String(), "Timeline") {
-		t.Error("時系列が無いときはグラフを出さない")
+		t.Error("no chart without a time series")
 	}
 }
 
@@ -111,13 +111,13 @@ func TestWriteHTMLConnection(t *testing.T) {
 	}
 	for _, want := range []string{"connection reuse", "50.0% reused", "connection setup", "connect (tcp)", "<h3>tls</h3>"} {
 		if !strings.Contains(buf.String(), want) {
-			t.Errorf("出力に %q が無い", want)
+			t.Errorf("%q missing from output", want)
 		}
 	}
 	var text bytes.Buffer
 	rep.Print(&text)
 	if !strings.Contains(text.String(), "conns:      new=1 reused=1 (50.0% reused)") {
-		t.Errorf("text 出力: %s", text.String())
+		t.Errorf("text output: %s", text.String())
 	}
 }
 
@@ -137,19 +137,19 @@ func TestWriteHTMLTimelineConnections(t *testing.T) {
 	out := buf.String()
 	for _, want := range []string{"connections / s", "connection setup (ms, p95", "new</span>", "reused</span>", "dns</span>", "connect</span>", "tls</span>"} {
 		if !strings.Contains(out, want) {
-			t.Errorf("出力に %q が無い", want)
+			t.Errorf("%q missing from output", want)
 		}
 	}
-	// 1 秒目は新規接続が無いので、接続時間の線は 0 秒目と 2 秒目で切れる（polyline が複数）。
+	// Second 1 has no new connections, so the connect line breaks between seconds 0 and 2 (several polylines).
 	if strings.Count(out, "<polyline") < 3+2+3*2 {
-		t.Errorf("polyline が少ない: %d", strings.Count(out, "<polyline"))
+		t.Errorf("too few polylines: %d", strings.Count(out, "<polyline"))
 	}
 }
 
 func TestSeriesChartsConnPhasesOnlyWhatHappened(t *testing.T) {
 	t0 := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	ms := time.Millisecond
-	// IP 直指定の http: DNS も TLS も起きない。
+	// http to a bare IP: neither DNS nor TLS happens.
 	reqs := []record.Record{{Start: t0, Latency: 10 * ms, Code: 200, Conn: record.ConnNew, Connect: 2 * ms}}
 	charts := seriesCharts(BuildReport(reqs, nil, nil, 0).Series)
 
@@ -160,16 +160,16 @@ func TestSeriesChartsConnPhasesOnlyWhatHappened(t *testing.T) {
 		}
 	}
 	if setup == nil || len(setup.Lines) != 1 || setup.Lines[0].Name != "connect" {
-		t.Fatalf("connect だけの線になるはず: %+v", setup)
+		t.Fatalf("should be a connect-only line: %+v", setup)
 	}
 }
 
 func TestSeriesChartsWithoutConns(t *testing.T) {
 	t0 := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	reqs, iters := seriesRecords(t0) // Conn の記録が無い
+	reqs, iters := seriesRecords(t0) // no Conn records
 	for _, c := range seriesCharts(BuildReport(reqs, nil, iters, 0).Series) {
 		if strings.HasPrefix(c.Title, "connection") {
-			t.Errorf("接続の記録が無いのにグラフを出している: %s", c.Title)
+			t.Errorf("chart shown without connection records: %s", c.Title)
 		}
 	}
 }

@@ -89,6 +89,6 @@ func TestRequestBodyAndBasic(t *testing.T) {
 
 	e, _ = testExec(t, srv.URL, nil)
 	if err := newRequest(e, "POST", "/x").Body(make(chan int)).Do().ExpectStatus(200); err == nil {
-		t.Error("JSON にできない値でエラーにならない")
+		t.Error("an unencodable value did not cause an error")
 	}
 }

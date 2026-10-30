@@ -13,7 +13,7 @@ func ms(n int) time.Duration { return time.Duration(n) * time.Millisecond }
 
 func TestNewLatencyPercentiles(t *testing.T) {
 	var ds []time.Duration
-	for i := 100; i >= 1; i-- { // 逆順でも並べ替えられること
+	for i := 100; i >= 1; i-- { // reverse order must be sortable too
 		ds = append(ds, ms(i))
 	}
 	l := newLatency(ds)
@@ -27,17 +27,17 @@ func TestNewLatencyPercentiles(t *testing.T) {
 		t.Fatalf("Mean = %v", l.Mean)
 	}
 	if ds[0] != ms(100) {
-		t.Fatal("入力のスライスを並べ替えてはいけない")
+		t.Fatal("must not reorder the input slice")
 	}
 }
 
 func TestNewLatencyEdge(t *testing.T) {
 	if l := newLatency(nil); l.Count != 0 || l.Max != 0 {
-		t.Fatalf("空: %+v", l)
+		t.Fatalf("empty: %+v", l)
 	}
 	l := newLatency([]time.Duration{ms(7)})
 	if l.P50 != ms(7) || l.P99 != ms(7) || l.Min != ms(7) {
-		t.Fatalf("1件: %+v", l)
+		t.Fatalf("one item: %+v", l)
 	}
 }
 
@@ -79,7 +79,7 @@ func TestBuildReport(t *testing.T) {
 		t.Fatalf("Bytes = %d/%d", rep.Requests.BytesIn, rep.Requests.BytesOut)
 	}
 	if rep.Requests.TTFB.Count != 3 {
-		t.Fatalf("TTFB は応答のあるリクエストだけ: %d", rep.Requests.TTFB.Count)
+		t.Fatalf("TTFB counts only requests with a response: %d", rep.Requests.TTFB.Count)
 	}
 
 	if len(rep.Scenarios) != 1 {
@@ -89,7 +89,7 @@ func TestBuildReport(t *testing.T) {
 	if sc.Iterations.Count != 2 || sc.Iterations.Failed != 1 || sc.Iterations.Errors[record.ErrTimeout] != 1 {
 		t.Fatalf("Iterations = %+v", sc.Iterations)
 	}
-	// Active は Think を除く: 100ms と 1100ms
+	// Active excludes Think: 100ms and 1100ms
 	if sc.Iterations.Active.Min != ms(100) || sc.Iterations.Active.Max != ms(1100) {
 		t.Fatalf("Active = %+v", sc.Iterations.Active)
 	}
@@ -98,7 +98,7 @@ func TestBuildReport(t *testing.T) {
 	}
 
 	if len(sc.Steps) != 2 || sc.Steps[0].Name != "login" || sc.Steps[1].Name != "order" {
-		t.Fatalf("Steps の順序: %+v", sc.Steps)
+		t.Fatalf("order of Steps: %+v", sc.Steps)
 	}
 	order := sc.Steps[1]
 	if order.Count != 2 || order.Failed != 2 || order.Errors[record.ErrExpect] != 1 || order.Errors[record.ErrTimeout] != 1 {
@@ -112,7 +112,7 @@ func TestBuildReport(t *testing.T) {
 	}
 }
 
-// ステップが交互に現れても、それぞれの件数が正しく数えられること。
+// Even when steps appear alternately, each must be counted correctly.
 func TestBuildReportInterleavedSteps(t *testing.T) {
 	t0 := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	var steps []record.StepRecord
@@ -144,7 +144,7 @@ func TestBuildReportEmpty(t *testing.T) {
 		t.Fatalf("rep = %+v", rep)
 	}
 	var buf bytes.Buffer
-	rep.Print(&buf) // 空でも落ちない
+	rep.Print(&buf) // does not crash even when empty
 }
 
 func TestObservedSpan(t *testing.T) {
@@ -175,7 +175,7 @@ func TestPrint(t *testing.T) {
 		"login", "order",
 	} {
 		if !strings.Contains(out, want) {
-			t.Errorf("出力に %q が無い:\n%s", want, out)
+			t.Errorf("%q missing from output:\n%s", want, out)
 		}
 	}
 }
@@ -207,7 +207,7 @@ func TestConnStats(t *testing.T) {
 		{Step: "a", Code: 200, Latency: ms(10), Conn: record.ConnNew, DNS: ms(2), Connect: ms(1), TLS: ms(4)},
 		{Step: "a", Code: 200, Latency: ms(10), Conn: record.ConnReused},
 		{Step: "a", Code: 200, Latency: ms(10), Conn: record.ConnReused},
-		{Step: "a", Err: record.ErrConnRefused, Latency: ms(1)}, // 接続を得る前の失敗
+		{Step: "a", Err: record.ErrConnRefused, Latency: ms(1)}, // failure before getting a connection
 	}
 	q := BuildReport(reqs, nil, nil, time.Second).Requests
 	if q.NewConns != 1 || q.ReusedConns != 2 {
@@ -220,6 +220,6 @@ func TestConnStats(t *testing.T) {
 		t.Errorf("dns=%+v connect=%+v tls=%+v", q.DNS, q.Connect, q.TLS)
 	}
 	if (RequestStats{}).ReuseRate() != 0 {
-		t.Error("記録が無いときは 0")
+		t.Error("0 when there are no records")
 	}
 }

@@ -9,7 +9,7 @@ import (
 func TestHealthSampler(t *testing.T) {
 	h := startHealthSampler(20 * time.Millisecond)
 
-	// ゴルーチンを増やし（待機させる）、CPU も使う（1 つだけ回す）。
+	// Add goroutines (blocked) and use CPU too (spin only one).
 	stop := make(chan struct{})
 	for range 20 {
 		go func() { <-stop }()
@@ -19,7 +19,7 @@ func TestHealthSampler(t *testing.T) {
 			select {
 			case <-stop:
 				return
-			default: //nolint:staticcheck // CPU を使わせるために、わざと回し続ける
+			default: //nolint:staticcheck // spin on purpose to use CPU
 			}
 		}
 	}()
@@ -28,7 +28,7 @@ func TestHealthSampler(t *testing.T) {
 	close(stop)
 
 	if len(pts) < 2 {
-		t.Fatalf("点が少ない: %+v", pts)
+		t.Fatalf("too few points: %+v", pts)
 	}
 	_, hasCPU := processCPUTime()
 	for i, p := range pts {
@@ -36,24 +36,24 @@ func TestHealthSampler(t *testing.T) {
 			t.Errorf("pts[%d].Second = %d", i, p.Second)
 		}
 		if p.Goroutines < 20 {
-			t.Errorf("pts[%d].Goroutines = %d、20 以上のはず", i, p.Goroutines)
+			t.Errorf("pts[%d].Goroutines = %d, want at least 20", i, p.Goroutines)
 		}
 		switch {
 		case !hasCPU && p.CPU != -1:
-			t.Errorf("pts[%d].CPU = %v、取得できない環境では -1 のはず", i, p.CPU)
+			t.Errorf("pts[%d].CPU = %v, want -1 where it cannot be obtained", i, p.CPU)
 		case hasCPU && (p.CPU < 0 || p.CPU > 1):
-			t.Errorf("pts[%d].CPU = %v、0〜1 に収まるはず", i, p.CPU)
+			t.Errorf("pts[%d].CPU = %v, want within 0 to 1", i, p.CPU)
 		}
 	}
 	if last := pts[len(pts)-1]; hasCPU && last.CPU <= 0 {
-		t.Errorf("busy loop を回しているのに CPU = %v", last.CPU)
+		t.Errorf("CPU = %v despite a busy loop", last.CPU)
 	}
 }
 
 func TestHealthSamplerShortRun(t *testing.T) {
 	h := startHealthSampler(time.Hour)
 	time.Sleep(5 * time.Millisecond)
-	// 間隔の半分に満たなくても、1 点も無いよりは最後に 1 点残す。
+	// Even if shorter than half an interval, one last point is kept rather than none.
 	if pts := h.stop(); len(pts) != 1 || pts[0].Second != 0 || pts[0].Goroutines < 1 {
 		t.Errorf("pts = %+v", pts)
 	}
@@ -69,7 +69,7 @@ func TestRunRecordsHealth(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(rep.Health) == 0 {
-		t.Fatal("Run の結果に Health が入っていない")
+		t.Fatal("Health is missing from the result of Run")
 	}
 	if p := rep.Health[0]; p.Second != 0 || p.Goroutines < 1 {
 		t.Errorf("Health[0] = %+v", p)

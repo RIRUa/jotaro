@@ -5,7 +5,7 @@ import (
 	"time"
 )
 
-// samples は 1µs〜5ms に散らばった n 件の所要時間を返す。
+// samples returns n durations spread over 1µs to 5ms.
 func samples(n int) []time.Duration {
 	ds := make([]time.Duration, n)
 	for i := range ds {
