@@ -67,7 +67,11 @@ func TestDoRecordsRequest(t *testing.T) {
 	if r.URL != srv.URL+"/login" || r.Method != "GET" {
 		t.Fatalf("URL/Method = %q %q", r.Method, r.URL)
 	}
-	if r.Latency <= 0 || r.TTFB <= 0 || r.TTFB > r.Latency {
+	if r.TTFB < 0 || r.TTFB > r.Latency {
+		t.Fatalf("Latency=%v TTFB=%v", r.Latency, r.TTFB)
+	}
+	// Windows has a coarse clock, and a loopback request can be measured as 0.
+	if runtime.GOOS != "windows" && (r.Latency <= 0 || r.TTFB <= 0) {
 		t.Fatalf("Latency=%v TTFB=%v", r.Latency, r.TTFB)
 	}
 	if r.BytesIn != int64(len(`{"token":"abc"}`)) {
