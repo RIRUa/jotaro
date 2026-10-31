@@ -1,24 +1,30 @@
 # jotaro
 
-## バージョン管理
+## Language
 
-- バージョン管理操作には Jujutsu (`jj`) を優先して使う。`git` コマンドは使わない。ただし `jj` が入っていない環境（Cloud など）では `git` を使ってよい（`deny` はしていない）。
-- このリポジトリは colocated（`.git` と `.jj` が共存）。GitHub との同期は `jj git fetch` / `jj git push` を使う。
-- 主な対応:
-  - 状態確認: `jj st` / `jj log` / `jj diff`
-  - 最新取得: `jj git fetch` のあと、必要なら `jj new main`（または `jj rebase`）
-  - 作業の宣言: `jj describe -m "..."`（空の変更に書く）/ `jj new -m "..."`（変更を分ける）
-  - 作業の区切り: `jj new`
-  - プッシュ: `jj bookmark set <name> -r @-` → `jj git push`
-- PR 作成などの GitHub 操作は `gh` を使ってよい。
+- Reply in the same language the user used in their first message of the session. If the user switches language mid-session, follow the switch.
+- Keep code identifiers, commands, file paths and error messages in their original form regardless of the reply language.
+- Code comments, godoc, commit messages and PR descriptions are written in English, independent of the conversation language.
 
-## 作業の進め方（jj）
+## Version control
 
-jj は作業コピーそのものが常にコミットなので、**作業を終えてからメッセージを付けるのではなく、始める前に「何をするか」を宣言する**。
+- Prefer Jujutsu (`jj`) for version control operations. Do not use `git` commands. In environments where `jj` is not installed (e.g. Cloud), `git` is allowed (it is not denied).
+- This repository is colocated (`.git` and `.jj` coexist). Use `jj git fetch` / `jj git push` to sync with GitHub.
+- Common operations:
+  - Check state: `jj st` / `jj log` / `jj diff`
+  - Get the latest: `jj git fetch`, then `jj new main` (or `jj rebase`) if needed
+  - Declare work: `jj describe -m "..."` (write it on an empty change) / `jj new -m "..."` (split into a separate change)
+  - Finish a unit of work: `jj new`
+  - Push: `jj bookmark set <name> -r @-` → `jj git push`
+- `gh` may be used for GitHub operations such as creating PRs.
 
-1. 着手前に `jj describe -m "<やること>"` を実行する。今の変更が空で説明がなければそこに書く。すでに別の作業が入っていれば `jj new -m "<やること>"` で変更を分ける。
-2. そのあとで実装する。方針が変わったら `jj describe` で書き直す。
-3. 終わったら `jj new` で次の空の変更に進む。
+## Workflow (jj)
 
-- メッセージは日本語で、`feat:` / `fix:` / `docs:` / `chore:` などの接頭辞を付ける。
-- 1 つの変更には 1 つの目的だけを入れる。宣言と関係ない修正が混ざりそうなら、先に `jj new -m` で分ける。
+In jj the working copy is always a commit, so **declare what you are about to do before you start, instead of writing the message after you finish**.
+
+1. Before starting, run `jj describe -m "<what you will do>"`. If the current change is empty and has no description, write it there. If it already holds other work, split with `jj new -m "<what you will do>"`.
+2. Then implement. If the approach changes, rewrite the description with `jj describe`.
+3. When done, move on to the next empty change with `jj new`.
+
+- Write messages in English (see Language above) with a prefix such as `feat:` / `fix:` / `docs:` / `chore:`.
+- Put only one purpose in each change. If an unrelated fix is about to creep in, split it off first with `jj new -m`.
