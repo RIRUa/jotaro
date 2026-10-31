@@ -14,3 +14,6 @@ coverage.*
 .DS_Store
 .idea/
 .vscode/
+
+# pkgsight の出力
+pkgsight.html

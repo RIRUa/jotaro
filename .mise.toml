@@ -2,3 +2,5 @@
 go = "1.27.3"
 jj = "0.46.0"
 github-cli = "2.102.0"
+tmux = "3.7c"
+"github:mpyw/pkgsight" = "0.1.0"
