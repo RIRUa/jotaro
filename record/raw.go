@@ -33,10 +33,12 @@ type Raw struct {
 	Health []HealthPoint
 }
 
-// 出力用の型。1 行に 1 つ、type で種類を分ける。
-// 時間は集計の JSON と同じくナノ秒の整数（フィールド名は _ns で終える）。
-// 0 や空のものは省く（読むときは 0・空に戻る）。
+// Types for output. One per line, told apart by type.
+// As in the aggregated JSON, durations are integer nanoseconds (field names end in _ns).
+// Zero and empty values are omitted (they read back as zero and empty).
 
+// rawMeta is the first line of the stream. It carries the run-wide fields of Raw
+// and the format version, which ReadRaw checks before trusting the rest.
 type rawMeta struct {
 	Type      string     `json:"type"` // "meta"
 	Version   int        `json:"version"`
@@ -46,6 +48,8 @@ type rawMeta struct {
 	ElapsedNS int64      `json:"elapsed_ns"`
 }
 
+// rawRequest is the line form of Record. Durations are nanoseconds (the _ns fields),
+// and optional fields are left out when zero to keep large files small.
 type rawRequest struct {
 	Type      string     `json:"type"` // "request"
 	Scenario  string     `json:"scenario"`
@@ -68,6 +72,7 @@ type rawRequest struct {
 	BytesIn   int64      `json:"bytes_in,omitempty"`
 }
 
+// rawStep is the line form of StepRecord.
 type rawStep struct {
 	Type       string    `json:"type"` // "step"
 	Scenario   string    `json:"scenario"`
@@ -79,6 +84,7 @@ type rawStep struct {
 	Err        string    `json:"err,omitempty"`
 }
 
+// rawIteration is the line form of IterationRecord.
 type rawIteration struct {
 	Type       string    `json:"type"` // "iteration"
 	Scenario   string    `json:"scenario"`
@@ -90,6 +96,7 @@ type rawIteration struct {
 	Err        string    `json:"err,omitempty"`
 }
 
+// rawHealth is the line form of HealthPoint. CPU is always written because -1 (unavailable) is meaningful.
 type rawHealth struct {
 	Type       string  `json:"type"` // "health"
 	Second     int     `json:"second"`
@@ -97,7 +104,9 @@ type rawHealth struct {
 	CPU        float64 `json:"cpu"`
 }
 
-// 時刻は UTC の RFC 3339 で書く。zero は省く（ポインタにする）。
+// Timestamps are written as UTC RFC 3339. A zero time is omitted (hence the pointer).
+//
+// utcPtr is for optional timestamps: nil makes omitempty drop the field.
 func utcPtr(t time.Time) *time.Time {
 	if t.IsZero() {
 		return nil
@@ -106,6 +115,7 @@ func utcPtr(t time.Time) *time.Time {
 	return &t
 }
 
+// utc converts a required timestamp to UTC. The zero time is kept as is so it round-trips unchanged.
 func utc(t time.Time) time.Time {
 	if t.IsZero() {
 		return t
@@ -113,6 +123,7 @@ func utc(t time.Time) time.Time {
 	return t.UTC()
 }
 
+// derefTime is the reading counterpart of utcPtr: a missing field becomes the zero time.
 func derefTime(t *time.Time) time.Time {
 	if t == nil {
 		return time.Time{}
@@ -120,7 +131,7 @@ func derefTime(t *time.Time) time.Time {
 	return *t
 }
 
-// ns は d をナノ秒の整数にする。
+// ns converts d to integer nanoseconds.
 func ns(d time.Duration) int64 { return d.Nanoseconds() }
 
 // WriteRaw writes the raw data to w as JSON Lines (one record per line).
@@ -193,6 +204,9 @@ func ReadRaw(r io.Reader) (*Raw, error) {
 	}
 }
 
+// addLine decodes one line and appends it to the matching slice of raw.
+// It peeks at "type" first, and a meta line with an unsupported version is an error.
+// An unknown type is ignored on purpose (see ReadRaw).
 func (raw *Raw) addLine(line json.RawMessage) error {
 	var head struct {
 		Type string `json:"type"`

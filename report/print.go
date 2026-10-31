@@ -77,10 +77,13 @@ func (r *Report) Print(w io.Writer) {
 	}
 }
 
+// writeLatencyRow writes one tab-separated row (label, then the seven latency cells)
+// for a tabwriter owned by the caller.
 func writeLatencyRow(w io.Writer, label string, l Latency) {
 	fmt.Fprintf(w, "%s\t%s\n", label, latencyCells(l))
 }
 
+// latencyCells joins min, mean, p50, p90, p95, p99 and max with tabs.
 func latencyCells(l Latency) string {
 	return strings.Join([]string{
 		fmtDur(l.Min), fmtDur(l.Mean), fmtDur(l.P50), fmtDur(l.P90),
@@ -88,6 +91,7 @@ func latencyCells(l Latency) string {
 	}, "\t")
 }
 
+// fmtPercentiles is a one-line summary such as "p50=12ms p90=... max=...", or "-" with no observations.
 func fmtPercentiles(l Latency) string {
 	if l.Count == 0 {
 		return "-"
@@ -96,6 +100,7 @@ func fmtPercentiles(l Latency) string {
 		fmtDur(l.P50), fmtDur(l.P90), fmtDur(l.P95), fmtDur(l.P99), fmtDur(l.Max))
 }
 
+// fmtStatus lists status classes as "2xx=10 5xx=1", sorted by name, or "-" when empty.
 func fmtStatus(m map[string]int) string {
 	if len(m) == 0 {
 		return "-"
@@ -112,6 +117,7 @@ func fmtStatus(m map[string]int) string {
 	return strings.Join(parts, " ")
 }
 
+// fmtErrors lists error kinds as "timeout=3 dns=1", sorted by name, or "-" when empty.
 func fmtErrors(m map[record.ErrKind]int) string {
 	if len(m) == 0 {
 		return "-"
@@ -128,6 +134,8 @@ func fmtErrors(m map[record.ErrKind]int) string {
 	return strings.Join(parts, " ")
 }
 
+// fmtDur formats a duration for display, rounding to keep about three significant digits:
+// microseconds below 1ms, 10µs below 1s, otherwise milliseconds. Zero means "no data" and shows as "-".
 func fmtDur(d time.Duration) string {
 	switch {
 	case d == 0:
@@ -141,6 +149,7 @@ func fmtDur(d time.Duration) string {
 	}
 }
 
+// fmtBytes formats a byte count with binary units (1KB = 1024B), such as "1.5MB".
 func fmtBytes(n int64) string {
 	const unit = 1024
 	if n < unit {

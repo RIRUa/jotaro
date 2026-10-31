@@ -1,11 +1,11 @@
 version: "2"
 
 linters:
-  # 既定（errcheck / govet / ineffassign / staticcheck / unused）のまま使う。
+  # Use the defaults as is (errcheck / govet / ineffassign / staticcheck / unused).
   default: standard
   settings:
     errcheck:
-      # 書き込み先（io.Writer）へのエラーは無視する設計。読み込み側の Close も慣用的に無視する。
+      # By design, errors from write targets (io.Writer) are ignored. Close on the read side is idiomatically ignored too.
       exclude-functions:
         - fmt.Fprint
         - fmt.Fprintf
@@ -16,7 +16,7 @@ linters:
         - (io.ReadCloser).Close
   exclusions:
     rules:
-      # テストとサンプルでは、戻り値の確認を求めない。
+      # Do not require checking return values in tests and examples.
       - path: _test\.go
         linters:
           - errcheck

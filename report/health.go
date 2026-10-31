@@ -7,8 +7,8 @@ import (
 	"github.com/RIRUa/jotaro/record"
 )
 
-// mergeHealth は offset 秒ずらした b を a に足し込む。
-// ゴルーチン数は合計し、CPU は最大を取る（負荷生成側が複数あるときは、一番詰まっているものを見るため）。
+// mergeHealth adds b, shifted by offset seconds, into a.
+// Goroutine counts are summed and CPU takes the maximum (with several load generators, the most saturated one matters).
 func mergeHealth(a, b []record.HealthPoint, offset int) []record.HealthPoint {
 	out := slices.Clone(a)
 	for _, p := range b {
@@ -26,21 +26,21 @@ func mergeHealth(a, b []record.HealthPoint, offset int) []record.HealthPoint {
 	return out
 }
 
-// healthCPUWarn は、これ以上の CPU 使用率を「詰まっている疑いがある」とみなす境目。
+// healthCPUWarn is the CPU usage at or above which the load generator is suspected to be saturated.
 const healthCPUWarn = 0.9
 
 // healthSummary summarizes Health.
 type healthSummary struct {
-	HasCPU        bool    // CPU を取得できた点があるか
-	MaxCPU        float64 // 0〜1
-	AvgCPU        float64 // 0〜1
+	HasCPU        bool    // whether any point has CPU data
+	MaxCPU        float64 // 0 to 1
+	AvgCPU        float64 // 0 to 1
 	MaxGoroutines int
 }
 
 // Hot reports whether the CPU is close to its limit, so the load generator may be saturated and the measurements worse than reality.
 func (h healthSummary) Hot() bool { return h.HasCPU && h.MaxCPU >= healthCPUWarn }
 
-// summarizeHealth は点を要約する。点が無ければ ok が false。
+// summarizeHealth summarizes the points. ok is false when there are none.
 func summarizeHealth(pts []record.HealthPoint) (h healthSummary, ok bool) {
 	if len(pts) == 0 {
 		return h, false
@@ -63,7 +63,7 @@ func summarizeHealth(pts []record.HealthPoint) (h healthSummary, ok bool) {
 	return h, true
 }
 
-// String は "cpu max 62.1% (avg 41.0%), goroutines max 1234" の形。
+// String has the form "cpu max 62.1% (avg 41.0%), goroutines max 1234".
 func (h healthSummary) String() string {
 	cpu := "cpu n/a"
 	if h.HasCPU {
@@ -72,7 +72,7 @@ func (h healthSummary) String() string {
 	return fmt.Sprintf("%s, goroutines max %d", cpu, h.MaxGoroutines)
 }
 
-// warning は Hot のときの注意書き。
+// warning is the note shown when Hot.
 func (h healthSummary) warning() string {
 	return fmt.Sprintf("load generator CPU reached %.0f%%: measured latencies may be worse than the target's actual behavior", h.MaxCPU*100)
 }

@@ -10,8 +10,10 @@ import (
 
 // Scenario is the flow that a virtual user runs once.
 type Scenario struct {
+	// Name labels the scenario in every record and in the report.
 	Name string
-	Fn   func(ctx context.Context, u *User) error
+	// Fn is the flow itself. Returning an error marks the iteration as failed.
+	Fn func(ctx context.Context, u *User) error
 }
 
 // NewScenario creates a scenario.

@@ -7,20 +7,23 @@ import (
 	"github.com/RIRUa/jotaro/record"
 )
 
-// healthSampler は interval ごとにゴルーチン数と CPU 使用率を記録する。
+// healthSampler records the goroutine count and CPU usage every interval.
 type healthSampler struct {
 	interval time.Duration
 	done     chan struct{}
 	points   chan []record.HealthPoint
 }
 
-// startHealthSampler は記録を始める。stop を呼ぶと止まり、それまでの記録を返す。
+// startHealthSampler starts recording. Calling stop ends it and returns what was recorded.
 func startHealthSampler(interval time.Duration) *healthSampler {
 	h := &healthSampler{interval: interval, done: make(chan struct{}), points: make(chan []record.HealthPoint, 1)}
 	go h.run()
 	return h
 }
 
+// run is the sampling loop, run in its own goroutine until done is closed.
+// CPU is the CPU time used since the previous sample divided by the wall time
+// and by GOMAXPROCS, clamped to [0, 1]; it stays -1 where CPU time is unavailable.
 func (h *healthSampler) run() {
 	var pts []record.HealthPoint
 	ticker := time.NewTicker(h.interval)
@@ -42,7 +45,7 @@ func (h *healthSampler) run() {
 		case now := <-ticker.C:
 			sample(now)
 		case <-h.done:
-			// 最後の中途半端な区間も、半分以上あれば記録する。短い実行でも 1 点は残すため。
+			// Record the last partial interval too if it is at least half long, so even a short run leaves one point.
 			if now := time.Now(); len(pts) == 0 || now.Sub(lastAt) >= h.interval/2 {
 				sample(now)
 			}
@@ -52,7 +55,7 @@ func (h *healthSampler) run() {
 	}
 }
 
-// stop は記録を止めて、点を返す。
+// stop ends the recording and returns the points.
 func (h *healthSampler) stop() []record.HealthPoint {
 	close(h.done)
 	return <-h.points

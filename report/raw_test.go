@@ -43,9 +43,9 @@ func TestFromRaw(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// 書き出して読み戻した生データから集計しても、元の生データから集計した結果と変わらない。
+	// Aggregating raw data that was written and read back gives the same result as aggregating the original.
 	if direct, again := FromRaw(raw), FromRaw(got); !reflect.DeepEqual(direct, again) {
-		t.Errorf("生データから集計し直すと変わった:\n got %+v\nwant %+v", again, direct)
+		t.Errorf("changed when re-aggregated from raw data:\n got %+v\nwant %+v", again, direct)
 	}
 	rep := FromRaw(got)
 	if !rep.Open || rep.Dropped != 2 || rep.Elapsed != 3*time.Second || rep.Requests.Count != 2 || len(rep.Health) != 2 {
@@ -53,7 +53,7 @@ func TestFromRaw(t *testing.T) {
 	}
 }
 
-// meta が無い生データは、実行時間を記録から求める。
+// Raw data without meta derives the run time from the records.
 func TestFromRawWithoutMeta(t *testing.T) {
 	const in = `{"type":"iteration","scenario":"s","start":"2026-01-01T00:00:00Z","duration_ns":1000000}
 {"type":"request","scenario":"s","step":"a","start":"2026-01-01T00:00:00Z","latency_ns":2000000,"code":200}
@@ -63,6 +63,6 @@ func TestFromRawWithoutMeta(t *testing.T) {
 		t.Fatal(err)
 	}
 	if rep := FromRaw(raw); rep.Elapsed != 2*time.Millisecond || rep.Requests.Status["2xx"] != 1 {
-		t.Errorf("実行時間は記録から求めるはず: %+v", rep.Elapsed)
+		t.Errorf("the run time should be derived from the records: %+v", rep.Elapsed)
 	}
 }

@@ -43,7 +43,7 @@ func TestRawRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !reflect.DeepEqual(got, raw) {
-		t.Errorf("往復で変わった:\n got %+v\nwant %+v", got, raw)
+		t.Errorf("changed in round trip:\n got %+v\nwant %+v", got, raw)
 	}
 }
 
@@ -54,22 +54,22 @@ func TestWriteRawLines(t *testing.T) {
 	}
 	lines := strings.Split(strings.TrimSuffix(buf.String(), "\n"), "\n")
 	if len(lines) != 1+2+2+1+2 {
-		t.Fatalf("行数 = %d:\n%s", len(lines), buf.String())
+		t.Fatalf("line count = %d:\n%s", len(lines), buf.String())
 	}
 	if !strings.HasPrefix(lines[0], `{"type":"meta","version":1,"open":true,"dropped":2,"started_at":"2026-01-01T00:00:00Z"`) {
-		t.Errorf("先頭は meta: %s", lines[0])
+		t.Errorf("the first line should be meta: %s", lines[0])
 	}
 	if !strings.Contains(lines[1], `"url":"http://x/login?a=1&b=2"`) {
-		t.Errorf("URL の & をエスケープしない: %s", lines[1])
+		t.Errorf("& in the URL must not be escaped: %s", lines[1])
 	}
-	// 0 や空は省く。
+	// Zero and empty values are omitted.
 	if strings.Contains(lines[2], "dns_ns") || strings.Contains(lines[2], `"code"`) || strings.Contains(lines[2], "scheduled") {
-		t.Errorf("0・空は省くはず: %s", lines[2])
+		t.Errorf("zero and empty should be omitted: %s", lines[2])
 	}
 }
 
 func TestReadRawLenient(t *testing.T) {
-	// meta が無い、知らない type がある。
+	// No meta line, and an unknown type.
 	const in = `{"type":"future","x":1}
 {"type":"iteration","scenario":"s","start":"2026-01-01T00:00:00Z","duration_ns":1000000}
 {"type":"request","scenario":"s","step":"a","start":"2026-01-01T00:00:00Z","latency_ns":2000000,"code":200}
@@ -85,20 +85,20 @@ func TestReadRawLenient(t *testing.T) {
 
 func TestReadRawErrors(t *testing.T) {
 	cases := map[string]string{
-		"壊れた JSON":  `{"type":"meta","version":1}` + "\n" + `{"type":"request",`,
-		"新しすぎる版":    `{"type":"meta","version":99}`,
-		"版が無い meta": `{"type":"meta"}`,
-		"型が違う":      `{"type":"request","latency_ns":"x"}`,
+		"broken JSON":          `{"type":"meta","version":1}` + "\n" + `{"type":"request",`,
+		"version too new":      `{"type":"meta","version":99}`,
+		"meta without version": `{"type":"meta"}`,
+		"wrong type":           `{"type":"request","latency_ns":"x"}`,
 	}
 	for name, in := range cases {
 		if _, err := ReadRaw(strings.NewReader(in)); err == nil {
-			t.Errorf("%s: エラーになるはず", name)
+			t.Errorf("%s: should be an error", name)
 		}
 	}
-	// どの行で失敗したか分かる。
+	// The failing line can be identified.
 	_, err := ReadRaw(strings.NewReader(`{"type":"meta","version":1}` + "\n" + `{"type":"request","latency_ns":"x"}`))
 	if err == nil || !strings.Contains(err.Error(), "record 2") {
-		t.Errorf("err = %v、record 2 を含むはず", err)
+		t.Errorf("err = %v; it should include record 2", err)
 	}
 }
 
@@ -108,6 +108,6 @@ func (failWriter) Write([]byte) (int, error) { return 0, errors.New("disk full")
 
 func TestWriteRawError(t *testing.T) {
 	if err := WriteRaw(failWriter{}, sampleRaw()); err == nil {
-		t.Error("書き込み失敗がエラーにならない")
+		t.Error("a write failure did not become an error")
 	}
 }

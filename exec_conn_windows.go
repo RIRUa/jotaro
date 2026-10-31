@@ -7,11 +7,11 @@ import (
 	"syscall"
 )
 
-// wsaeConnRefused は WSAECONNREFUSED。Windows の syscall.ECONNREFUSED は
-// 実際に返ってくるエラー値と別物なので、errors.Is では一致しない。
+// wsaeConnRefused is WSAECONNREFUSED. Windows' syscall.ECONNREFUSED differs from
+// the error value actually returned, so errors.Is does not match it.
 const wsaeConnRefused = syscall.Errno(10061)
 
-// isConnRefused は err が接続拒否かを返す。
+// isConnRefused reports whether err is a refused connection.
 func isConnRefused(err error) bool {
 	return errors.Is(err, syscall.ECONNREFUSED) || errors.Is(err, wsaeConnRefused)
 }

@@ -29,7 +29,7 @@ func TestPercentileWithinAlpha(t *testing.T) {
 		t.Fatalf("Total = %d", h.Total())
 	}
 	for _, p := range []int{50, 90, 95, 99, 100} {
-		want := time.Duration(p*10) * time.Millisecond // nearest-rank の厳密値
+		want := time.Duration(p*10) * time.Millisecond // exact nearest-rank value
 		if got := h.Percentile(p); !within(got, want, Alpha) {
 			t.Errorf("p%d = %v, want %v ± %.0f%%", p, got, want, Alpha*100)
 		}
@@ -39,7 +39,7 @@ func TestPercentileWithinAlpha(t *testing.T) {
 func TestSmallValuesShareBucketZero(t *testing.T) {
 	h := New([]time.Duration{0, 1, -5})
 	if len(h) != 1 || h[0] != 3 {
-		t.Errorf("h = %v、1ns 以下はバケット 0 にまとまるはず", h)
+		t.Errorf("h = %v; everything at or below 1ns should fall into bucket 0", h)
 	}
 }
 
@@ -53,18 +53,18 @@ func TestMergeIsSumAndKeepsInputs(t *testing.T) {
 	}
 	for i, c := range got {
 		if c != a[i]+b[i] {
-			t.Errorf("バケット %d: %d, want %d", i, c, a[i]+b[i])
+			t.Errorf("bucket %d: %d, want %d", i, c, a[i]+b[i])
 		}
 	}
 	if a.Total() != 3 || b.Total() != 2 {
-		t.Error("Merge が引数を書き換えた")
+		t.Error("Merge modified its argument")
 	}
-	// 順序によらず同じ。
+	// The same regardless of order.
 	if m := Merge(b, a); m.Total() != got.Total() || len(m) != len(got) {
-		t.Error("Merge の結果が順序で変わった")
+		t.Error("the result of Merge depends on order")
 	}
-	// 片方が nil でもよい。
+	// Either side may be nil.
 	if Merge(nil, a).Total() != a.Total() {
-		t.Error("nil との結合")
+		t.Error("merge with nil")
 	}
 }

@@ -9,29 +9,36 @@ import (
 	"time"
 )
 
+// reportHTMLSrc is the template of the whole page. CSS is inline too, so the output needs no other file.
+//
 //go:embed report.html.tmpl
 var reportHTMLSrc string
 
+// reportHTML is parsed once at start-up. Template.Must makes a broken template fail on import, not at report time.
 var reportHTML = template.Must(template.New("report").Parse(reportHTMLSrc))
 
-// 表示用の型。テンプレートが計算をしなくて済むよう、文字列と割合は先に作る。
+// Types for display. Strings and percentages are prepared up front so the template does no computation.
 
+// htmlBar is one horizontal bar of a latency chart.
 type htmlBar struct {
 	Label string
 	Value string
-	Pct   float64 // 0〜100。最大値に対する割合
+	Pct   float64 // 0 to 100; the share relative to the maximum
 }
 
+// htmlCount is a label with a count, such as a status class ("2xx") or an error kind.
 type htmlCount struct {
 	Name  string
 	Count int
 }
 
+// htmlLatencyRow is one row of a latency table, with columns as in latencyHeaders.
 type htmlLatencyRow struct {
 	Label string
 	Cells []string // min, mean, p50, p90, p95, p99, max
 }
 
+// htmlStep is one row of the per-step table, already formatted as text.
 type htmlStep struct {
 	Name     string
 	Count    int
@@ -47,6 +54,7 @@ type htmlStep struct {
 	TTFBP95  string
 }
 
+// htmlScenario is the view of one ScenarioReport.
 type htmlScenario struct {
 	Name       string
 	Iterations int
@@ -57,6 +65,8 @@ type htmlScenario struct {
 	Steps      []htmlStep
 }
 
+// htmlView is everything the template needs. Fields that may be absent are empty (nil or ""),
+// and the template skips their sections.
 type htmlView struct {
 	Version   int
 	Model     string
@@ -68,19 +78,20 @@ type htmlView struct {
 	Bytes     string
 	Status    []htmlCount
 	Errors    []htmlCount
-	Latency   []htmlBar // リクエストのレイテンシ分布
-	Corrected []htmlBar // Open のときだけ
+	Latency   []htmlBar // latency distribution of requests
+	Corrected []htmlBar // only when Open
 	TTFB      []htmlBar
-	Conns     string // 接続の記録があるときだけ
-	LoadGen   string // 負荷生成側の健全性。記録があるときだけ
-	LoadWarn  string // 負荷生成側が詰まっている疑いがあるときの注意書き
+	Conns     string // only when connection records exist
+	LoadGen   string // health of the load generator; only when records exist
+	LoadWarn  string // note shown when the load generator may be saturated
 	DNS       []htmlBar
 	Connect   []htmlBar
 	TLS       []htmlBar
-	Charts    []htmlChart // 時系列。無ければ nil
+	Charts    []htmlChart // time series; nil if there is none
 	Scenarios []htmlScenario
 }
 
+// latencyHeaders are the column names that match the cells from latencyCellList.
 var latencyHeaders = []string{"min", "mean", "p50", "p90", "p95", "p99", "max"}
 
 // WriteHTML writes the report to w as a single self-contained HTML file.
@@ -88,6 +99,8 @@ func (r *Report) WriteHTML(w io.Writer) error {
 	return reportHTML.Execute(w, r.toHTMLView())
 }
 
+// toHTMLView converts the report to its display form: durations and sizes become strings,
+// and bar lengths become percentages, so the template does no arithmetic.
 func (r *Report) toHTMLView() htmlView {
 	v := htmlView{
 		Version:  JSONVersion,
@@ -153,9 +166,10 @@ func (r *Report) toHTMLView() htmlView {
 	return v
 }
 
-// LatencyHeaders は latencyCellList の列名。テンプレートから使う。
+// LatencyHeaders are the column names of latencyCellList, for use from the template.
 func (htmlView) LatencyHeaders() []string { return latencyHeaders }
 
+// latencyCellList formats min, mean, p50, p90, p95, p99 and max of l, in that order.
 func latencyCellList(l Latency) []string {
 	ds := []time.Duration{l.Min, l.Mean, l.P50, l.P90, l.P95, l.P99, l.Max}
 	out := make([]string, len(ds))
@@ -165,7 +179,7 @@ func latencyCellList(l Latency) []string {
 	return out
 }
 
-// latencyBars は p50〜max を、max に対する割合つきで返す。件数が無ければ nil。
+// latencyBars returns p50 to max with each as a share of max. It returns nil when there are no observations.
 func latencyBars(l Latency) []htmlBar {
 	if l.Count == 0 || l.Max <= 0 {
 		return nil
@@ -181,6 +195,7 @@ func latencyBars(l Latency) []htmlBar {
 	return bars
 }
 
+// sortedCounts turns a tally into a list sorted by name, so the page does not change between runs.
 func sortedCounts(m map[string]int) []htmlCount {
 	out := make([]htmlCount, 0, len(m))
 	for k, n := range m {

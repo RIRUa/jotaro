@@ -8,6 +8,7 @@ import (
 // Format is the output format of a report.
 type Format string
 
+// The supported formats.
 const (
 	FormatText Format = "text" // a human-readable table (same as Print)
 	FormatJSON Format = "json" // durations are integer nanoseconds
@@ -39,13 +40,14 @@ func (r *Report) Write(w io.Writer, f Format) error {
 	return fmt.Errorf("jotaro: unknown format %q", string(f))
 }
 
-// errWriter は最初の書き込みエラーを覚え、以降の書き込みを捨てる。
-// エラーを返さない Print から、書き込みの失敗を取り出すために使う。
+// errWriter remembers the first write error and drops later writes.
+// It is used to get write failures out of Print, which does not return errors.
 type errWriter struct {
 	w   io.Writer
 	err error
 }
 
+// Write forwards to the underlying writer until the first error, which is then returned for every later call.
 func (e *errWriter) Write(p []byte) (int, error) {
 	if e.err != nil {
 		return 0, e.err

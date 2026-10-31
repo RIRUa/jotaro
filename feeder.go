@@ -26,6 +26,7 @@ const (
 type Feeder[T any] struct {
 	rows []T
 	mode FeedMode
+	// next is the shared cursor. Atomic, so concurrent users never get the same row in Circular or Once.
 	next atomic.Uint64
 }
 
@@ -79,7 +80,7 @@ func LoadCSV(r io.Reader) ([]map[string]string, error) {
 		}
 		row := make(map[string]string, len(header))
 		for i, h := range header {
-			row[h] = rec[i] // 列数の不一致は csv.Reader がエラーにする
+			row[h] = rec[i] // csv.Reader reports a column-count mismatch as an error
 		}
 		rows = append(rows, row)
 	}

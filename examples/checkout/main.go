@@ -1,4 +1,4 @@
-// checkout is a sample that shows how to use jotaro.
+// Command checkout is a sample that shows how to use jotaro.
 // It starts its own mock server and applies load to the flow login → product list → order.
 //
 //	go run ./examples/checkout            # 20 fixed users (closed)
@@ -27,6 +27,7 @@ import (
 	"github.com/RIRUa/jotaro/report"
 )
 
+// item is a product in the mock shop. Price is in the smallest currency unit.
 type item struct {
 	ID    int `json:"id"`
 	Price int `json:"price"`
@@ -38,6 +39,8 @@ var accounts = jotaro.NewFeeder([]map[string]string{
 	{"user": "alice"}, {"user": "bob"}, {"user": "carol"},
 }, jotaro.Circular)
 
+// checkout is the flow every virtual user runs: log in, list the items, think for a moment, then order one at random.
+// Each u.Step shows up under its own name in the report, and a step that returns an error counts as failed.
 var checkout = jotaro.NewScenario("checkout", func(ctx context.Context, u *jotaro.User) error {
 	var login struct {
 		Token string `json:"token"`
@@ -72,6 +75,9 @@ var checkout = jotaro.NewScenario("checkout", func(ctx context.Context, u *jotar
 	})
 })
 
+// main builds a Plan from the flags, runs it against a local mock server, and writes the report.
+// Without -rate it uses the closed model (20 fixed users); with -rate it uses the open model
+// (constant, -ramp, or -stages). Ctrl-C stops the run early and still prints the results so far.
 func main() {
 	rate := flag.Int("rate", 0, "scenarios started per second; 0 means the Users model")
 	ramp := flag.Duration("ramp", 0, "time to reach -rate; 0 means constant from the start")

@@ -30,7 +30,7 @@ func TestWriteJSON(t *testing.T) {
 
 	var got map[string]any
 	if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
-		t.Fatalf("JSON として読めない: %v\n%s", err, buf.String())
+		t.Fatalf("not readable as JSON: %v\n%s", err, buf.String())
 	}
 	if got["version"] != float64(JSONVersion) {
 		t.Fatalf("version = %v", got["version"])
@@ -43,7 +43,7 @@ func TestWriteJSON(t *testing.T) {
 	if err := json.Unmarshal(buf.Bytes(), &typed); err != nil {
 		t.Fatal(err)
 	}
-	// ナノ秒の整数がそのまま出ること（丸めない）
+	// integer nanoseconds come out as they are (no rounding)
 	if typed.Requests.Latency.MinNS != 1500 {
 		t.Fatalf("min_ns = %d, want 1500", typed.Requests.Latency.MinNS)
 	}
@@ -68,7 +68,7 @@ func TestWriteJSONEmpty(t *testing.T) {
 	if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
 		t.Fatal(err)
 	}
-	// 空でも null ではなく []・{} になる（読む側が分岐しなくて済む）
+	// Even when empty it is [] or {}, not null (readers need no branching).
 	if s, ok := got["scenarios"].([]any); !ok || len(s) != 0 {
 		t.Fatalf("scenarios = %v", got["scenarios"])
 	}
@@ -92,7 +92,7 @@ func TestReadJSONRoundTrip(t *testing.T) {
 			t.Fatal(err)
 		}
 		if !reflect.DeepEqual(got, want) {
-			t.Fatalf("open=%v: 往復で変わった\ngot  %+v\nwant %+v", open, got, want)
+			t.Fatalf("open=%v: changed in round trip\ngot  %+v\nwant %+v", open, got, want)
 		}
 	}
 }
@@ -114,12 +114,12 @@ func TestReadJSONEmptyRoundTrip(t *testing.T) {
 
 func TestReadJSONErrors(t *testing.T) {
 	for name, in := range map[string]string{
-		"壊れた JSON":     `{`,
-		"version が無い":  `{}`,
-		"未対応の version": `{"version": 999}`,
+		"broken JSON":         `{`,
+		"no version":          `{}`,
+		"unsupported version": `{"version": 999}`,
 	} {
 		if _, err := ReadJSON(strings.NewReader(in)); err == nil {
-			t.Errorf("%s: error になること", name)
+			t.Errorf("%s: must be an error", name)
 		}
 	}
 }
@@ -137,14 +137,14 @@ func TestReadJSONStartedAtAndBucketsRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !strings.Contains(buf.String(), `"started_at": "2026-05-06T07:08:09.123456789Z"`) || !strings.Contains(buf.String(), `"buckets"`) {
-		t.Fatalf("started_at / buckets が出ていない:\n%s", buf.String())
+		t.Fatalf("started_at / buckets missing:\n%s", buf.String())
 	}
 	got, err := ReadJSON(&buf)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("往復で変わった\ngot  %+v\nwant %+v", got, want)
+		t.Fatalf("changed in round trip\ngot  %+v\nwant %+v", got, want)
 	}
 }
 
@@ -163,17 +163,17 @@ func TestReadJSONRejectsTrailingData(t *testing.T) {
 	if err := record.WriteRaw(&buf, rawFixture()); err != nil {
 		t.Fatal(err)
 	}
-	// 生データの先頭行（meta）は version 1 の JSON として読めてしまうので、後ろのデータで弾く。
+	// The first line of raw data (meta) can be read as version 1 JSON, so it is rejected by the data after it.
 	if _, err := ReadJSON(&buf); err == nil || !strings.Contains(err.Error(), "record.ReadRaw") {
-		t.Errorf("err = %v、生データを渡したことが分かるはず", err)
+		t.Errorf("err = %v; it should show that raw data was passed", err)
 	}
 
 	var ok bytes.Buffer
 	if err := sampleReport(false).WriteJSON(&ok); err != nil {
 		t.Fatal(err)
 	}
-	ok.WriteString("\n\n  ") // 末尾の空白・改行は構わない
+	ok.WriteString("\n\n  ") // trailing whitespace and newlines are fine
 	if _, err := ReadJSON(&ok); err != nil {
-		t.Errorf("末尾の空白で失敗した: %v", err)
+		t.Errorf("failed on trailing whitespace: %v", err)
 	}
 }

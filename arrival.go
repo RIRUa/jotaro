@@ -13,6 +13,8 @@ type Arrival interface {
 	// at is the time since the start of the i-th arrival (0-based).
 	// It is false when there is no arrival from the i-th on (the rate has dropped to 0).
 	at(i int) (time.Duration, bool)
+	// validate reports a misconfigured Arrival (non-positive counts or periods, and so on).
+	// Run calls it before starting, so at never sees an invalid value.
 	validate() error
 }
 
@@ -22,11 +24,14 @@ func Rate(n int, per time.Duration) Arrival {
 	return rate{n: n, per: per}
 }
 
+// rate is the Arrival behind Rate: n arrivals evenly spaced across every per.
 type rate struct {
 	n   int
 	per time.Duration
 }
 
+// validate rejects counts below 1, non-positive periods, and rates so high
+// that the spacing between arrivals would round down to 0ns.
 func (r rate) validate() error {
 	switch {
 	case r.n <= 0:
@@ -39,6 +44,7 @@ func (r rate) validate() error {
 	return nil
 }
 
+// at places the i-th arrival at i times the fixed interval per/n. A constant rate never ends.
 func (r rate) at(i int) (time.Duration, bool) {
 	return time.Duration(i) * (r.per / time.Duration(r.n)), true
 }
@@ -52,11 +58,15 @@ func Ramp(from, to int, per, over time.Duration) Arrival {
 	return ramp{from: from, to: to, per: per, over: over}
 }
 
+// ramp is the Arrival behind Ramp: the rate moves linearly from from to to
+// (both counts per per) over the duration over, then stays at to.
 type ramp struct {
 	from, to  int
 	per, over time.Duration
 }
 
+// validate rejects negative counts, a ramp that is 0 at both ends (it would never arrive),
+// non-positive durations, and rates so high that the interval would round down to 0ns.
 func (r ramp) validate() error {
 	switch {
 	case r.from < 0 || r.to < 0:
@@ -73,12 +83,16 @@ func (r ramp) validate() error {
 	return nil
 }
 
-// at は、開始から t 秒までの累積到着数 N(t) が i になる t を求める。
+// at finds the time t at which the cumulative number of arrivals N(t) since the start reaches i.
 //
-//	レート r(t) = from + (to-from)·t/over   (0 ≤ t ≤ over、単位は 1/秒)
+//	rate r(t) = from + (to-from)·t/over   (0 ≤ t ≤ over, in 1/second)
 //	N(t) = from·t + (to-from)·t²/(2·over)
 //
-// over を過ぎると、レートは to で一定になる。
+// After over has passed, the rate stays constant at to.
+//
+// Inside the ramp this solves a·t² + from·t = i for t with the quadratic formula
+// (a straight division when the slope is flat, where a is about 0).
+// After the ramp it continues at the constant rate to; if to is 0 there are no more arrivals.
 func (r ramp) at(i int) (time.Duration, bool) {
 	per, over := r.per.Seconds(), r.over.Seconds()
 	from, to := float64(r.from)/per, float64(r.to)/per
@@ -104,8 +118,10 @@ func (r ramp) at(i int) (time.Duration, bool) {
 
 // Stage is one stage of Stages. It keeps Arrival going for For.
 type Stage struct {
+	// Arrival decides when scenarios start within this stage, counted from the stage's own start.
 	Arrival Arrival
-	For     time.Duration
+	// For is how long the stage lasts. Arrivals that would fall at or after For are dropped.
+	For time.Duration
 }
 
 // Stages runs several stages in order.
@@ -131,13 +147,15 @@ func Stages(stages ...Stage) Arrival {
 	return s
 }
 
+// stagedArrival is the Arrival behind Stages. starts and counts are precomputed
+// in Stages so that at can find the right stage without searching each time.
 type stagedArrival struct {
 	stages []Stage
-	starts []time.Duration // 各段階の開始時刻
-	counts []int           // 各段階の到着数
+	starts []time.Duration // start time of each stage
+	counts []int           // number of arrivals in each stage
 }
 
-// count は段階の中の到着数（到着時刻が For より前のもの）。
+// count is the number of arrivals in the stage (those whose arrival time is before For).
 func (st Stage) count() int {
 	if st.Arrival == nil || st.For <= 0 || st.Arrival.validate() != nil {
 		return 0
@@ -146,7 +164,7 @@ func (st Stage) count() int {
 		off, ok := st.Arrival.at(i)
 		return ok && off < st.For
 	}
-	// at は単調に増えるので、in が偽になる最初の i を二分探索で求める。
+	// at is monotonically increasing, so binary-search for the first i where in is false.
 	hi := 1
 	for in(hi) && hi < 1<<40 {
 		hi *= 2
@@ -155,7 +173,7 @@ func (st Stage) count() int {
 	if !in(0) {
 		return 0
 	}
-	for lo+1 < hi { // in(lo) は真、in(hi) は偽
+	for lo+1 < hi { // in(lo) is true, in(hi) is false
 		mid := lo + (hi-lo)/2
 		if in(mid) {
 			lo = mid
@@ -166,6 +184,8 @@ func (st Stage) count() int {
 	return lo + 1
 }
 
+// validate requires at least one stage, and a non-nil Arrival and a positive For on every stage.
+// An error from a stage's own Arrival is wrapped with the stage number (1-based).
 func (s stagedArrival) validate() error {
 	if len(s.stages) == 0 {
 		return errors.New("jotaro: Stages needs at least one stage")
@@ -184,6 +204,8 @@ func (s stagedArrival) validate() error {
 	return nil
 }
 
+// at walks the stages, subtracting each stage's arrival count from i until i falls inside one,
+// and then shifts that stage's local time by its start offset.
 func (s stagedArrival) at(i int) (time.Duration, bool) {
 	for k, st := range s.stages {
 		if i < s.counts[k] {

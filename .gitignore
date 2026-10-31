@@ -1,4 +1,4 @@
-# examples / CLI が書き出す結果
+# Results written by the examples / CLI
 result.html
 result.json
 raw.jsonl
@@ -10,7 +10,7 @@ merged.json
 coverage.*
 /dist/
 
-# エディタ・OS
+# Editors and OS
 .DS_Store
 .idea/
 .vscode/

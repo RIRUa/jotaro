@@ -10,25 +10,30 @@ import (
 	"github.com/RIRUa/jotaro/record"
 )
 
-// グラフは外部ライブラリも JavaScript も使わず、インライン SVG として出力する。
+// Charts are emitted as inline SVG, with no external library or JavaScript.
 
+// Chart geometry in SVG user units: the full size, then the margins
+// (left / right, top / bottom) around the plot area.
 const (
 	chartW, chartH = 640, 200
-	chartL, chartR = 48, 12 // 左右の余白（左は Y 軸の目盛り用）
+	chartL, chartR = 48, 12 // left / right margins (the left one holds the Y-axis labels)
 	chartT, chartB = 10, 24
 )
 
+// htmlTick is one axis tick: where it sits and what it says.
 type htmlTick struct {
-	Pos   string // SVG 上の座標
+	Pos   string // position in the SVG
 	Label string
 }
 
+// htmlLine is one series drawn as a line. A gap in the data splits it into several polylines.
 type htmlLine struct {
-	Class  string   // l1〜l3。色は CSS で決める
-	Name   string   // 凡例
-	Points []string // 連続した区間ごとの polyline の points
+	Class  string   // l1 to l3; the colors are set in CSS
+	Name   string   // legend
+	Points []string // points of one polyline per continuous run
 }
 
+// htmlChart is one SVG line chart, with every coordinate already computed for the template.
 type htmlChart struct {
 	Title  string
 	W, H   int
@@ -41,7 +46,7 @@ type htmlChart struct {
 	Lines  []htmlLine
 }
 
-// seriesCharts は時系列から折れ線グラフを作る。時系列が無ければ nil。
+// seriesCharts builds line charts from the time series. It returns nil when there is no series.
 func seriesCharts(pts []SeriesPoint) []htmlChart {
 	if len(pts) == 0 {
 		return nil
@@ -77,13 +82,13 @@ func seriesCharts(pts []SeriesPoint) []htmlChart {
 	return append(charts, connCharts(pts, build)...)
 }
 
-// connPhase は接続を張るときの区間（DNS・TCP・TLS）のひとつ。
+// connPhase is one phase of opening a connection (DNS, TCP, TLS).
 type connPhase struct {
 	name string
 	get  func(SeriesPoint) Latency
 }
 
-// connCharts は接続のグラフ。接続の記録が無ければ（古い JSON など）何も返さない。
+// connCharts builds the connection charts. With no connection records (for example old JSON) it returns nothing.
 func connCharts(pts []SeriesPoint, build func(title string, names []string, valid func(SeriesPoint) bool, val func(SeriesPoint) []float64) htmlChart) []htmlChart {
 	var charts []htmlChart
 	if slices.ContainsFunc(pts, func(p SeriesPoint) bool { return p.NewConns+p.ReusedConns > 0 }) {
@@ -92,7 +97,7 @@ func connCharts(pts []SeriesPoint, build func(title string, names []string, vali
 			func(p SeriesPoint) []float64 { return []float64{float64(p.NewConns), float64(p.ReusedConns)} }))
 	}
 
-	// 区間が一度でも起きた（DNS が無い IP 直指定、http の TLS など）ものだけ線にする。
+	// Only phases that happened at least once become lines (not DNS for a bare IP, not TLS over plain http, and so on).
 	phases := []connPhase{
 		{"dns", func(p SeriesPoint) Latency { return p.DNS }},
 		{"connect", func(p SeriesPoint) Latency { return p.Connect }},
@@ -119,14 +124,14 @@ func connCharts(pts []SeriesPoint, build func(title string, names []string, vali
 				if l := ph.get(p); l.Count > 0 {
 					vals[i] = ms(l.P95)
 				} else {
-					vals[i] = math.NaN() // その秒に起きなかった区間は線を切る
+					vals[i] = math.NaN() // a phase that did not happen in that second breaks the line
 				}
 			}
 			return vals
 		}))
 }
 
-// healthCharts は負荷生成側のゴルーチン数と CPU のグラフ。記録が無ければ nil。
+// healthCharts builds the goroutine and CPU charts of the load generator. It returns nil when there are no records.
 func healthCharts(pts []record.HealthPoint) []htmlChart {
 	if len(pts) == 0 {
 		return nil
@@ -148,14 +153,14 @@ func healthCharts(pts []record.HealthPoint) []htmlChart {
 	return charts
 }
 
-// seriesCol は 1 秒分の、系列ごとの値。値が無い系列は NaN。
+// seriesCol is the value of each series for one second. A series with no value is NaN.
 type seriesCol struct {
 	sec  int
 	vals []float64
 }
 
-// lineChart は x が 0..n-1 秒、系列ごとの値を折れ線にする。
-// 秒が飛んでいる（データが無い）ところでは線を切る。
+// lineChart draws the values of each series as a line, with x running over seconds 0..n-1.
+// The line is broken where seconds are skipped (no data).
 func lineChart(title string, names []string, n int, cols []seriesCol) htmlChart {
 	maxV := 0.0
 	for _, c := range cols {
@@ -199,7 +204,7 @@ func lineChart(title string, names []string, n int, cols []seriesCol) htmlChart 
 				return
 			}
 			if len(run) == 1 {
-				run = append(run, run[0]) // 1 点だけの区間は丸い点として描く
+				run = append(run, run[0]) // a run of a single point is drawn as a dot
 			}
 			line.Points = append(line.Points, strings.Join(run, " "))
 			run = nil
@@ -210,7 +215,7 @@ func lineChart(title string, names []string, n int, cols []seriesCol) htmlChart 
 				flush()
 			}
 			prev = sec
-			if math.IsNaN(c.vals[i]) { // 値が無い秒。線を切る
+			if math.IsNaN(c.vals[i]) { // a second with no value; break the line
 				flush()
 				prev = -2
 				continue
@@ -223,7 +228,7 @@ func lineChart(title string, names []string, n int, cols []seriesCol) htmlChart 
 	return ch
 }
 
-// niceStep は max を 4 区間前後に割る、1・2・5 × 10^k の刻み幅を返す。
+// niceStep returns a step of 1, 2 or 5 × 10^k that divides max into about 4 intervals.
 func niceStep(max float64) float64 {
 	if max <= 0 {
 		return 1
@@ -241,6 +246,7 @@ func niceStep(max float64) float64 {
 	return 10 * mag
 }
 
+// fmtNum formats an axis label without a trailing ".0" for whole numbers.
 func fmtNum(v float64) string {
 	if v == math.Trunc(v) {
 		return fmt.Sprintf("%d", int64(v))

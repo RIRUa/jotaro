@@ -9,17 +9,23 @@ import (
 // Response is the result of a single request.
 // HTTP 4xx/5xx are not network errors, so Err stays nil and the status goes into Code.
 type Response struct {
-	Code   int
+	// Code is the HTTP status code. It is 0 when no response was received.
+	Code int
+	// Header holds the response headers. It is nil when no response was received.
 	Header http.Header
-	Body   []byte
+	// Body is the whole body, already read.
+	Body []byte
 
+	// err is the network or build error, if any.
 	err error
 }
 
 // ExpectError reports that the status code did not match what ExpectStatus expected.
 type ExpectError struct {
+	// Want is the status code that was expected.
 	Want int
-	Got  int
+	// Got is the status code that came back.
+	Got int
 }
 
 // Error implements the error interface.

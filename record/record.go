@@ -10,14 +10,14 @@ import (
 type ErrKind string
 
 const (
-	ErrNone        ErrKind = ""
-	ErrTimeout     ErrKind = "timeout"
-	ErrConnRefused ErrKind = "connection_refused"
-	ErrDNS         ErrKind = "dns"
-	ErrTLS         ErrKind = "tls"
-	ErrCanceled    ErrKind = "canceled"
-	ErrExpect      ErrKind = "expect_mismatch"
-	ErrOther       ErrKind = "other"
+	ErrNone        ErrKind = ""                   // success
+	ErrTimeout     ErrKind = "timeout"            // a deadline passed or the network timed out
+	ErrConnRefused ErrKind = "connection_refused" // nothing was listening at the address
+	ErrDNS         ErrKind = "dns"                // the host name could not be resolved
+	ErrTLS         ErrKind = "tls"                // the handshake or certificate verification failed
+	ErrCanceled    ErrKind = "canceled"           // the run was stopped while the request was in flight
+	ErrExpect      ErrKind = "expect_mismatch"    // the response arrived but an Expect* check failed
+	ErrOther       ErrKind = "other"              // any failure that fits none of the above
 )
 
 // ConnKind is where the connection used by a request came from. Empty means it failed before getting a connection.
@@ -108,22 +108,26 @@ type Collector struct {
 	dropped    int
 }
 
+// NewCollector returns an empty Collector ready for concurrent use.
 func NewCollector() *Collector {
 	return &Collector{}
 }
 
+// AddRequest stores the record of one HTTP request. It is safe to call from many goroutines.
 func (c *Collector) AddRequest(r Record) {
 	c.mu.Lock()
 	c.requests = append(c.requests, r)
 	c.mu.Unlock()
 }
 
+// AddStep stores the record of one finished step. It is safe to call from many goroutines.
 func (c *Collector) AddStep(r StepRecord) {
 	c.mu.Lock()
 	c.steps = append(c.steps, r)
 	c.mu.Unlock()
 }
 
+// AddIteration stores the record of one finished scenario run. It is safe to call from many goroutines.
 func (c *Collector) AddIteration(r IterationRecord) {
 	c.mu.Lock()
 	c.iterations = append(c.iterations, r)

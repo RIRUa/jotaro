@@ -45,11 +45,11 @@ func TestMergeReports(t *testing.T) {
 		t.Fatalf("requests: %+v", got.Requests)
 	}
 	l := got.Requests.Latency
-	// Mean は正確: (10*1 + 30*3) / 4 = 25ms
+	// Mean is exact: (10*1 + 30*3) / 4 = 25ms
 	if l.Count != 4 || l.Min != 10*time.Millisecond || l.Max != 30*time.Millisecond || l.Mean != 25*time.Millisecond {
 		t.Fatalf("latency: %+v", l)
 	}
-	// P50 はヒストグラムから求める。半分以上が 30ms なので 30ms 付近（重み付き平均の 25ms にはならない）
+	// P50 comes from the histogram. Over half are 30ms, so it is near 30ms (not the weighted average of 25ms).
 	if !within(l.P50, 30*time.Millisecond, histogram.Alpha) {
 		t.Fatalf("P50 = %v, want ≈30ms", l.P50)
 	}
@@ -75,12 +75,12 @@ func TestMergeReportsSingleIsIdentity(t *testing.T) {
 
 func TestMergeReportsErrors(t *testing.T) {
 	if _, err := MergeReports(); err == nil {
-		t.Error("空はエラーにする")
+		t.Error("empty input must be an error")
 	}
 	a := mergeSample(false, time.Millisecond, 1, time.Second, "")
 	b := mergeSample(true, time.Millisecond, 1, time.Second, "")
 	if _, err := MergeReports(a, b); err == nil {
-		t.Error("Open が違うものはエラーにする")
+		t.Error("mixing different Open must be an error")
 	}
 }
 
@@ -88,12 +88,12 @@ func within(got, want time.Duration, rel float64) bool {
 	return float64(got) >= float64(want)*(1-rel) && float64(got) <= float64(want)*(1+rel)
 }
 
-// 分割して結合した結果が、全データを一度に集計した結果に近いこと。
+// The result of splitting and merging should be close to aggregating all the data at once.
 func TestMergeReportsPercentilesMatchWhole(t *testing.T) {
 	rng := rand.New(rand.NewPCG(1, 2))
 	var all, left, right []record.Record
 	for i := 0; i < 20000; i++ {
-		// 裾の重い分布 (対数正規風)。A と B で分布の中心をずらす。
+		// A heavy-tailed distribution (log-normal like). A and B have different centers.
 		lat := time.Duration(float64(5*time.Millisecond) * (1 + rng.ExpFloat64()*rng.ExpFloat64()*3))
 		r := record.Record{Scenario: "s", Step: "a", Code: 200, Latency: lat}
 		all = append(all, r)
@@ -115,7 +115,7 @@ func TestMergeReportsPercentilesMatchWhole(t *testing.T) {
 		"P50": {g.P50, w.P50}, "P90": {g.P90, w.P90}, "P95": {g.P95, w.P95}, "P99": {g.P99, w.P99},
 	} {
 		if !within(pair[0], pair[1], 2*histogram.Alpha) {
-			t.Errorf("%s = %v, want ≈%v (誤差 %.2f%%)", name, pair[0], pair[1], 100*(float64(pair[0])/float64(pair[1])-1))
+			t.Errorf("%s = %v, want ≈%v (error %.2f%%)", name, pair[0], pair[1], 100*(float64(pair[0])/float64(pair[1])-1))
 		}
 	}
 	if g.Min != w.Min || g.Max != w.Max || g.Count != w.Count {
@@ -128,19 +128,19 @@ func TestMergeReportsElapsedFromStartedAt(t *testing.T) {
 	a := mergeSample(false, time.Millisecond, 1, 10*time.Second, "")
 	b := mergeSample(false, time.Millisecond, 1, 10*time.Second, "")
 
-	// 同時: 5 秒ずらして開始 → 全体は 15 秒
+	// Concurrent: started 5 seconds apart → 15 seconds overall
 	a.StartedAt, b.StartedAt = base, base.Add(5*time.Second)
 	got, _ := MergeReports(a, b)
 	if got.Elapsed != 15*time.Second || !got.StartedAt.Equal(base) {
 		t.Fatalf("overlap: elapsed = %v, started = %v", got.Elapsed, got.StartedAt)
 	}
-	// 順次: 1 分後に開始 → 間も含めて 70 秒（RPS が実際より高く出ない）
+	// Sequential: started 1 minute later → 70 seconds including the gap (RPS must not come out higher than reality)
 	b.StartedAt = base.Add(time.Minute)
 	got, _ = MergeReports(a, b)
 	if got.Elapsed != 70*time.Second {
 		t.Fatalf("sequential: elapsed = %v", got.Elapsed)
 	}
-	// StartedAt が無いものが混じる → Elapsed の最大値
+	// Some lack StartedAt → the largest Elapsed
 	b.StartedAt = time.Time{}
 	got, _ = MergeReports(a, b)
 	if got.Elapsed != 10*time.Second || !got.StartedAt.IsZero() {
@@ -148,7 +148,7 @@ func TestMergeReportsElapsedFromStartedAt(t *testing.T) {
 	}
 }
 
-// ヒストグラムの無い version 1 の JSON は、読めて、重み付き平均で結合できる。
+// Version 1 JSON without a histogram can be read and merged by weighted average.
 func TestMergeReportsVersion1Fallback(t *testing.T) {
 	v1 := func(lat time.Duration, n int) *Report {
 		rep := mergeSample(false, lat, n, time.Second, "")
@@ -161,7 +161,7 @@ func TestMergeReportsVersion1Fallback(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		// v1 には無いフィールドを落として、本物の v1 に近づける
+		// drop fields v1 did not have, to look like real v1
 		got.Requests.Latency.hist = nil
 		return got
 	}
@@ -170,7 +170,7 @@ func TestMergeReportsVersion1Fallback(t *testing.T) {
 		t.Fatal(err)
 	}
 	if got.Requests.Latency.P50 != 25*time.Millisecond {
-		t.Fatalf("P50 = %v, want 25ms (重み付き平均)", got.Requests.Latency.P50)
+		t.Fatalf("P50 = %v, want 25ms (weighted average)", got.Requests.Latency.P50)
 	}
 }
 
@@ -186,7 +186,7 @@ func TestMergeConnStats(t *testing.T) {
 		return BuildReport(reqs, nil, nil, time.Second)
 	}
 	var buf bytes.Buffer
-	if err := mk(1, 3).WriteJSON(&buf); err != nil { // JSON を経由しても残る
+	if err := mk(1, 3).WriteJSON(&buf); err != nil { // survives going through JSON
 		t.Fatal(err)
 	}
 	a, err := ReadJSON(&buf)

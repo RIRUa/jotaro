@@ -39,21 +39,21 @@ func TestParseThreshold(t *testing.T) {
 func TestParseThresholdErrors(t *testing.T) {
 	for _, in := range []string{
 		"",
-		"p95",                           // 演算子がない
-		"p95<",                          // 値がない
-		"p95<200",                       // 単位がない
-		"p42<200ms",                     // 知らない指標
-		"error_rate<abc",                // 割合として読めない
-		"p95{step=login<100ms",          // } がない
-		"p95{step}<100ms",               // key=value でない
-		"p95{user=1}<100ms",             // 知らないキー
-		"p95{scenario=checkout}<100ms",  // step が無いと絞り込めない
-		"rps{step=login}>10",            // 全体でしか見られない
-		"iteration_fail_rate{step=a}<1", // step は使えない
-		"p95=200ms",                     // = は演算子ではない
+		"p95",                           // no operator
+		"p95<",                          // no value
+		"p95<200",                       // no unit
+		"p42<200ms",                     // unknown metric
+		"error_rate<abc",                // not readable as a ratio
+		"p95{step=login<100ms",          // missing }
+		"p95{step}<100ms",               // not key=value
+		"p95{user=1}<100ms",             // unknown key
+		"p95{scenario=checkout}<100ms",  // cannot select by scenario without step
+		"rps{step=login}>10",            // can only be evaluated for the whole run
+		"iteration_fail_rate{step=a}<1", // step cannot be used
+		"p95=200ms",                     // = is not an operator
 	} {
 		if _, err := ParseThreshold(in); err == nil {
-			t.Errorf("ParseThreshold(%q) はエラーになるはず", in)
+			t.Errorf("ParseThreshold(%q) should fail", in)
 		}
 	}
 }
@@ -71,15 +71,15 @@ func TestThresholdString(t *testing.T) {
 		}
 		again, err := ParseThreshold(th.String())
 		if err != nil {
-			t.Fatalf("String() = %q が読めない: %v", th.String(), err)
+			t.Fatalf("cannot parse String() = %q: %v", th.String(), err)
 		}
 		if again != th {
-			t.Errorf("%q: 往復で変わった: %+v → %+v", in, th, again)
+			t.Errorf("%q: changed in round trip: %+v → %+v", in, th, again)
 		}
 	}
 }
 
-// checkReport は 2 シナリオ・3 ステップの小さな結果。
+// checkReport is a small result with 2 scenarios and 3 steps.
 func checkReport() *Report {
 	ms := time.Millisecond
 	reqs := []record.Record{
@@ -112,7 +112,7 @@ func checkOne(t *testing.T, rep *Report, expr string) CheckResult {
 	}
 	cs := rep.Check(th)
 	if len(cs) != 1 {
-		t.Fatalf("%s: 結果が %d 件: %+v", expr, len(cs), cs)
+		t.Fatalf("%s: %d results: %+v", expr, len(cs), cs)
 	}
 	return cs[0]
 }
@@ -146,39 +146,39 @@ func TestCheck(t *testing.T) {
 func TestCheckIterationFailRate(t *testing.T) {
 	rep := checkReport()
 	if r := checkOne(t, rep, "iteration_fail_rate<=34%"); !r.Pass {
-		t.Errorf("全体は 1/3: %+v", r)
+		t.Errorf("whole run should be 1/3: %+v", r)
 	}
 	if r := checkOne(t, rep, "iteration_fail_rate<30%"); r.Pass {
-		t.Errorf("全体は 1/3: %+v", r)
+		t.Errorf("whole run should be 1/3: %+v", r)
 	}
 	if r := checkOne(t, rep, "iteration_fail_rate{scenario=checkout}<=50%"); !r.Pass || r.Actual != 0.5 {
-		t.Errorf("checkout は 1/2: %+v", r)
+		t.Errorf("checkout should be 1/2: %+v", r)
 	}
 	if r := checkOne(t, rep, "iteration_fail_rate{scenario=browse}<1%"); !r.Pass {
-		t.Errorf("browse は 0: %+v", r)
+		t.Errorf("browse should be 0: %+v", r)
 	}
 }
 
 func TestCheckStepScope(t *testing.T) {
 	rep := checkReport()
 
-	// scenario まで指定すれば 1 件。
+	// Specifying the scenario too gives one result.
 	r := checkOne(t, rep, "max{scenario=checkout,step=order}<=200ms")
 	if !r.Pass || r.Target != "checkout/order" {
 		t.Errorf("%+v", r)
 	}
 	if r := checkOne(t, rep, "error_rate{scenario=checkout,step=order}<50%"); r.Pass {
-		t.Errorf("order の通信エラーは 1/2: %+v", r)
+		t.Errorf("network errors of order should be 1/2: %+v", r)
 	}
 
-	// login は 2 つのシナリオにあるので、別々に確かめる。
+	// login is in two scenarios, so check them separately.
 	th, _ := ParseThreshold("max{step=login}<=20ms")
 	cs := rep.Check(th)
 	if len(cs) != 2 {
-		t.Fatalf("結果が %d 件: %+v", len(cs), cs)
+		t.Fatalf("%d results: %+v", len(cs), cs)
 	}
 	if cs.Passed() {
-		t.Error("browse/login は 30ms なので満たさないはず")
+		t.Error("browse/login is 30ms, so it should not be met")
 	}
 	got := map[string]bool{}
 	for _, c := range cs {
@@ -194,19 +194,19 @@ func TestCheckFailsWithoutTarget(t *testing.T) {
 	for _, expr := range []string{
 		"p95{step=nothing}<1s",
 		"iteration_fail_rate{scenario=nothing}<50%",
-		"ttfb_p95<1s", // TTFB の記録が無い
-		"dns_p95<1s",  // 区間が起きていない
+		"ttfb_p95<1s", // no TTFB records
+		"dns_p95<1s",  // the phase did not happen
 	} {
 		r := checkOne(t, rep, expr)
 		if r.Pass || r.Note == "" {
-			t.Errorf("%s: 対象やデータが無いときは満たさない扱いにする: %+v", expr, r)
+			t.Errorf("%s: with no target or data, it should count as not met: %+v", expr, r)
 		}
 	}
 
-	// リクエストが 0 件の結果は、割合も満たさない。
+	// A result with 0 requests does not meet a ratio either.
 	empty := BuildReport(nil, nil, nil, time.Second)
 	if r := checkOne(t, empty, "error_rate<1%"); r.Pass {
-		t.Errorf("0 件で成功にしてはいけない: %+v", r)
+		t.Errorf("must not succeed with 0 requests: %+v", r)
 	}
 }
 
@@ -222,14 +222,14 @@ func TestChecksPrint(t *testing.T) {
 	}
 	cs := rep.Check(ts...)
 	if cs.Passed() {
-		t.Fatal("満たさないものが入っている")
+		t.Fatal("contains one that is not met")
 	}
 	var buf bytes.Buffer
 	cs.Print(&buf)
 	out := buf.String()
 	for _, want := range []string{"PASS  max<=200ms", "FAIL  p50<10ms", "no matching step", "NG: 2 of 3 not met"} {
 		if !strings.Contains(out, want) {
-			t.Errorf("出力に %q が無い:\n%s", want, out)
+			t.Errorf("%q missing from output:\n%s", want, out)
 		}
 	}
 }

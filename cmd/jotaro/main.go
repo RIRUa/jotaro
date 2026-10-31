@@ -1,4 +1,12 @@
-// jotaro is a CLI that works with result files.
+// Command jotaro is a CLI that works with result files saved by the jotaro library.
+//
+// Subcommands:
+//
+//   - report: build a report in text, JSON or HTML from a saved result
+//   - merge: combine results from several runs (for example several load generators) into one
+//   - check: compare a result with thresholds and exit with code 1 if any fail, which suits CI
+//
+// Usage:
 //
 //	jotaro report [-raw] [-format html|text|json] [-o output] <result.json | ->
 //	jotaro merge  [-raw] [-format html|text|json] [-o output] <result.json>...
@@ -18,6 +26,7 @@ import (
 	"github.com/RIRUa/jotaro/report"
 )
 
+// usage is the top-level help text, printed for -h and for usage errors.
 const usage = `usage: jotaro <command> [flags]
 
 commands:
@@ -26,6 +35,7 @@ commands:
   check    check whether a result meets the thresholds (e.g. p95<200ms); exit code 1 if not
 `
 
+// main only forwards to run, which holds the logic and can be tested.
 func main() {
 	os.Exit(run(os.Args[1:], os.Stdin, os.Stdout, os.Stderr))
 }
@@ -52,6 +62,8 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	}
 }
 
+// runReport implements "jotaro report". It returns the exit code:
+// 0 on success, 1 when reading or writing fails, 2 for bad usage.
 func runReport(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("report", flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -104,6 +116,9 @@ func emit(rep *report.Report, f report.Format, out string, stdout, stderr io.Wri
 	return 0
 }
 
+// runMerge implements "jotaro merge", with the same exit codes as runReport.
+// Every input is read with the same -raw setting. The default output is JSON,
+// so that the merged result can be merged or reported again.
 func runMerge(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("merge", flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -151,8 +166,10 @@ func runMerge(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 // thresholdFlags lets -t be given repeatedly.
 type thresholdFlags []report.Threshold
 
+// String is required by flag.Value. The value is never shown as a default.
 func (t *thresholdFlags) String() string { return "" }
 
+// Set parses one -t value and appends it. A bad expression fails flag parsing (exit code 2).
 func (t *thresholdFlags) Set(s string) error {
 	th, err := report.ParseThreshold(s)
 	if err != nil {
@@ -162,6 +179,8 @@ func (t *thresholdFlags) Set(s string) error {
 	return nil
 }
 
+// runCheck implements "jotaro check". It prints each check and returns 1 if any failed,
+// so the exit code can gate a CI job. Bad usage is 2, and unreadable input is 1.
 func runCheck(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("check", flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -203,6 +222,7 @@ func errMessage(err error) string {
 	return strings.TrimPrefix(err.Error(), "jotaro: ")
 }
 
+// rawUsage is the shared help text of the -raw flag.
 const rawUsage = "read the input as raw JSON Lines data and re-aggregate it"
 
 // readReport reads a result from path (stdin if "-"). With raw, it aggregates raw data.

@@ -34,7 +34,7 @@ func TestSnapshotIsCopy(t *testing.T) {
 
 	again, _, _ := c.Snapshot()
 	if again[0].Code != 200 {
-		t.Fatalf("Snapshot が内部のスライスを共有している: %d", again[0].Code)
+		t.Fatalf("Snapshot shares the internal slice: %d", again[0].Code)
 	}
 }
 

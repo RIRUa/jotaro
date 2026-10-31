@@ -7,7 +7,7 @@ import (
 	"syscall"
 )
 
-// isConnRefused は err が接続拒否かを返す。
+// isConnRefused reports whether err is a refused connection.
 func isConnRefused(err error) bool {
 	return errors.Is(err, syscall.ECONNREFUSED)
 }

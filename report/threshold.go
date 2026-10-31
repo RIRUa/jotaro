@@ -38,25 +38,27 @@ type Threshold struct {
 	Value float64
 }
 
+// metricKind is the unit of a metric's value. It decides how the right-hand side of a threshold
+// is parsed (parseThresholdValue) and how values are shown (formatValue).
 type metricKind int
 
 const (
-	kindDuration metricKind = iota
-	kindRatio
-	kindNumber
+	kindDuration metricKind = iota // "200ms", held in nanoseconds
+	kindRatio                      // "1%" or "0.01", held as 0 to 1
+	kindNumber                     // a plain number, such as requests per second
 )
 
-// metricScope は指標をどの単位で見られるか。
+// metricScope is the unit a metric can be evaluated at.
 type metricScope int
 
 const (
-	scopeRequests  metricScope = iota // 全体、または {step=...}
-	scopeIteration                    // 全体、または {scenario=...}
-	scopeGlobal                       // 全体のみ
+	scopeRequests  metricScope = iota // whole run, or {step=...}
+	scopeIteration                    // whole run, or {scenario=...}
+	scopeGlobal                       // whole run only
 )
 
-// metric は指標の定義。scope に合った 1 つの関数だけを持つ。
-// req と iter の ok が false なら、集計の元になるデータが無い。
+// metric is the definition of a metric. It holds only the one function that matches its scope.
+// If ok from req or iter is false, there is no data to aggregate.
 type metric struct {
 	kind  metricKind
 	scope metricScope
@@ -65,7 +67,10 @@ type metric struct {
 	glob  func(r *Report) float64
 }
 
+// The two tables below build metric names such as "corrected_p95" from a prefix (which distribution)
+// and a statistic (which number of it).
 var (
+	// latencyParts maps a metric prefix to the distribution it reads.
 	latencyParts = map[string]func(q RequestStats) Latency{
 		"":           func(q RequestStats) Latency { return q.Latency },
 		"corrected_": func(q RequestStats) Latency { return q.Corrected },
@@ -74,6 +79,7 @@ var (
 		"connect_":   func(q RequestStats) Latency { return q.Connect },
 		"tls_":       func(q RequestStats) Latency { return q.TLS },
 	}
+	// latencyStats maps a metric suffix to the statistic it reads.
 	latencyStats = map[string]func(l Latency) time.Duration{
 		"min":  func(l Latency) time.Duration { return l.Min },
 		"mean": func(l Latency) time.Duration { return l.Mean },
@@ -85,7 +91,7 @@ var (
 	}
 )
 
-// lookupMetric は指標の名前から定義を引く。
+// lookupMetric finds the definition from a metric name.
 func lookupMetric(name string) (metric, bool) {
 	switch name {
 	case "error_rate":
@@ -134,6 +140,8 @@ func lookupMetric(name string) (metric, bool) {
 	return metric{}, false
 }
 
+// requestRatio is a ratio metric: n(q) of the requests, as a share of all requests.
+// With no requests there is nothing to divide, so it reports no data.
 func requestRatio(n func(q RequestStats) int) metric {
 	return metric{kind: kindRatio, scope: scopeRequests, req: func(q RequestStats) (float64, bool) {
 		if q.Count == 0 {
@@ -143,6 +151,7 @@ func requestRatio(n func(q RequestStats) int) metric {
 	}}
 }
 
+// thresholdOps lists the operators. Two-character ones come first so that "<=" is not read as "<".
 var thresholdOps = []string{"<=", ">=", "<", ">"}
 
 // ParseThreshold turns a string such as "p95<200ms" into a Threshold.
@@ -151,7 +160,7 @@ func ParseThreshold(s string) (Threshold, error) {
 		return Threshold{}, fmt.Errorf("jotaro: threshold %q: %s", s, fmt.Sprintf(format, a...))
 	}
 
-	// 演算子は {...} の外にある最初の < か >。
+	// The operator is the first < or > outside {...}.
 	depth, at := 0, -1
 scan:
 	for i, c := range s {
@@ -233,6 +242,8 @@ scan:
 	return t, nil
 }
 
+// parseThresholdValue parses the right-hand side of a threshold in the unit of kind
+// (for example "200ms" for a duration, "1%" for a ratio).
 func parseThresholdValue(kind metricKind, s string) (float64, error) {
 	if s == "" {
 		return 0, fmt.Errorf("no value")
@@ -270,7 +281,7 @@ func (t Threshold) String() string {
 	return t.label() + t.Op + t.formatValue(t.Value)
 }
 
-// label は指標名と絞り込み（"p95{step=login}"）。
+// label is the metric name with its selector ("p95{step=login}").
 func (t Threshold) label() string {
 	var sel []string
 	if t.Scenario != "" {
@@ -285,6 +296,7 @@ func (t Threshold) label() string {
 	return t.Metric + "{" + strings.Join(sel, ",") + "}"
 }
 
+// formatValue shows v in the unit of the threshold's metric, for example "200ms" or "1.5%".
 func (t Threshold) formatValue(v float64) string {
 	m, ok := lookupMetric(t.Metric)
 	if !ok {
@@ -299,6 +311,7 @@ func (t Threshold) formatValue(v float64) string {
 	return strconv.FormatFloat(v, 'g', 4, 64)
 }
 
+// holds reports whether actual satisfies the threshold (actual Op Value).
 func (t Threshold) holds(actual float64) bool {
 	switch t.Op {
 	case "<":
@@ -345,6 +358,11 @@ func (r *Report) Check(ts ...Threshold) Checks {
 	return out
 }
 
+// check evaluates one threshold. The metric's scope decides how many results come back:
+// global and iteration metrics give one, and a request metric gives one for the whole run,
+// or one per matching step when the threshold selects a step.
+// Anything that cannot be judged (unknown metric, no matching scenario or step, no data)
+// comes back as a failing result with a Note, so a typo in CI cannot pass silently.
 func (r *Report) check(t Threshold) []CheckResult {
 	m, ok := lookupMetric(t.Metric)
 	if !ok {
@@ -431,6 +449,7 @@ func (c Checks) Print(w io.Writer) {
 	fmt.Fprintf(w, "NG: %d of %d not met\n", failed, len(c))
 }
 
+// actualText is the measured value for display, or "-" when the result could not be judged.
 func actualText(r CheckResult) string {
 	if r.Note != "" {
 		return "-"
