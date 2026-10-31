@@ -9,7 +9,7 @@ Thanks for your interest in jotaro! Bug reports, ideas and pull requests are all
 
 ## Development
 
-Requires Go 1.22 or later (the lowest version in `go.mod`).
+Requires Go 1.25 or later (the lowest version in `go.mod`).
 
 ```sh
 go vet ./...
@@ -27,7 +27,7 @@ golangci-lint run   # optional locally; CI runs it with the version pinned in .g
 
 - Keep one purpose per pull request.
 - Use a short prefix in the title: `feat:` / `fix:` / `docs:` / `chore:` / `ci:`.
-- CI (vet, test with `-race` on Go 1.22 and stable, golangci-lint) must pass.
+- CI (vet, test with `-race` on Go 1.25 and stable, golangci-lint) must pass.
 
 ## License
 

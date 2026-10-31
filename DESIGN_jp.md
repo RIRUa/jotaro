@@ -6,7 +6,7 @@
 壁打ちで決めた内容をまとめたもの。未決の項目は末尾に記載。
 
 - モジュール: `github.com/RIRUa/jotaro`
-- Go: 1.22 以上（`go.mod`）。開発では 1.27.3 を使う（`.mise.toml` で固定）。CI は 1.22 と最新の安定版で試す
+- Go: 1.25 以上（`go.mod`）。開発では 1.27.3 を使う（`.mise.toml` で固定）。CI は 1.25 と最新の安定版で試す
 
 ## 1. 動機
 
@@ -165,7 +165,8 @@ Feeder はシナリオの外で作り、クロージャで共有する（`User` 
 | | `health.go` | 負荷生成側の健全性の要約・結合 |
 | | `threshold.go` | `Threshold` / `ParseThreshold` / `Report.Check`（しきい値判定。[`docs/result_jp.md`](docs/result_jp.md) 5 章） |
 | `internal/histogram` | `histogram.go` | 結合のための対数ヒストグラム |
-| `cmd/jotaro` | `main.go` | CLI（`report` / `merge` / `check`） |
+| `cmd/jotaro` | `main.go` | CLI（`report` / `merge` / `check` / `mcp`） |
+| `internal/mcpserver` | `server.go` `resources.go` `tools.go` `check.go` `lint.go` `prompts.go` | `jotaro mcp` の MCP サーバー（シナリオ作成の補助。ガイドの resource、`check_scenario`、`validate_threshold`） |
 
 実装中に決めたこと:
 
