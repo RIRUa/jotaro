@@ -25,5 +25,5 @@ checksum:
   name_template: checksums.txt
 
 changelog:
-  # CHANGELOG.md を正とするので、リリースノートに自動生成の一覧は付けない
+  # CHANGELOG.md is the source of truth, so do not attach an auto-generated list to the release notes.
   disable: true

@@ -32,8 +32,8 @@ const healthCPUWarn = 0.9
 // healthSummary summarizes Health.
 type healthSummary struct {
 	HasCPU        bool    // whether any point has CPU data
-	MaxCPU        float64 // 0〜1
-	AvgCPU        float64 // 0〜1
+	MaxCPU        float64 // 0 to 1
+	AvgCPU        float64 // 0 to 1
 	MaxGoroutines int
 }
 

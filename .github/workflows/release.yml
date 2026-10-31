@@ -1,6 +1,6 @@
 name: release
 
-# v* のタグを push すると、CLI のバイナリをビルドして GitHub Release に載せる。
+# Pushing a v* tag builds the CLI binaries and attaches them to a GitHub Release.
 on:
   push:
     tags: ['v*']
