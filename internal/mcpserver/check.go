@@ -103,7 +103,7 @@ func buildScenario(ctx context.Context, code, dir string) ([]Diagnostic, error) 
 	if err != nil {
 		return nil, err
 	}
-	defer os.RemoveAll(tmp)
+	defer func() { _ = os.RemoveAll(tmp) }() // best-effort cleanup of a scratch directory
 
 	file := filepath.Join(tmp, "scenario.go")
 	if err := os.WriteFile(file, []byte(code), 0o600); err != nil {
