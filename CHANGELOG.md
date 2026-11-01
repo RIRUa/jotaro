@@ -4,7 +4,9 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ## [Unreleased]
 
-First public release (planned as v0.1.0).
+## [0.1.0] - 2026-11-02
+
+First public release.
 
 ### Added
 
