@@ -75,6 +75,8 @@ func TestReportErrors(t *testing.T) {
 	}{
 		{"no arguments", nil, 2},
 		{"unknown command", []string{"nope"}, 2},
+		{"mcp with arguments", []string{"mcp", "extra"}, 2},
+		{"mcp with unknown flag", []string{"mcp", "-x"}, 2},
 		{"no input", []string{"report"}, 2},
 		{"unknown format", []string{"report", "-format", "csv", bad}, 2},
 		{"missing file", []string{"report", filepath.Join(dir, "none.json")}, 1},

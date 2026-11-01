@@ -45,7 +45,7 @@ go run ./examples/marketplace -users 10 -pace 0.2     # クローズドモデル
 go get github.com/RIRUa/jotaro
 ```
 
-Go 1.22 以上が必要です。
+Go 1.25 以上が必要です。
 
 ### 1. シナリオを書く
 
@@ -172,6 +172,22 @@ jotaro check -t 'p95<200ms' -t 'error_rate<1%' -t 'p99{step=login}<100ms' result
 
 対象が無い、またはデータが無いときは「満たさなかった」扱いになります。ステップ名の打ち間違いで通ってしまわないようにするためです。詳しくは [`docs/result_jp.md`](docs/result_jp.md) の 5 章を見てください。
 
+## MCP サーバー（シナリオ作成の補助）
+
+`jotaro mcp` は、AI アシスタントがシナリオを書くのを助ける [MCP](https://modelcontextprotocol.io) サーバーを起動します。stdio で通信し、チェック対象のシナリオを実行することはありません。
+
+```sh
+claude mcp add jotaro -- jotaro mcp     # Claude Code の場合。他のクライアントも同じコマンドを登録する
+```
+
+| 種類 | 名前 | 用途 |
+|---|---|---|
+| Resource | `jotaro://guide` | シナリオの書き方（雛形・API の概要・負荷モデル・チェックリスト） |
+| Resource | `jotaro://thresholds` | しきい値の文法と指標 |
+| Prompt | `write_scenario` | 指定したフローのシナリオを書き、チェックまで行う |
+| Tool | `check_scenario` | シナリオを検査する。Go の構文、jotaro 固有の lint（`Users` と `Arrival` はどちらか一方、レスポンス未検証、Step 名の重複など）、コンパイルによる型チェック。`dir`（jotaro を require している module）を渡すとその jotaro のバージョンで検査し、省略すると最新の jotaro を使う一時 module を作る（ネットワークが必要） |
+| Tool | `validate_threshold` | `p99{step=login}<100ms` のようなしきい値をパースする |
+
 ## パッケージ
 
 | パッケージ | 内容 |
@@ -179,7 +195,7 @@ jotaro check -t 'p95<200ms' -t 'error_rate<1%' -t 'p99{step=login}<100ms' result
 | `jotaro` | シナリオ（`Scenario` / `User` / `Step`）と負荷のかけ方（`Plan` / `Run` / `Rate` / `Ramp` / `Stages`）。使う人の入口 |
 | `report` | 結果（`Report`）の集計・出力（text / JSON / HTML）・結合・しきい値判定 |
 | `record` | リクエスト単位の記録と、生データ（JSON Lines）の読み書き |
-| `cmd/jotaro` | CLI（`report` / `merge` / `check`） |
+| `cmd/jotaro` | CLI（`report` / `merge` / `check` / `mcp`） |
 
 ## 注意
 

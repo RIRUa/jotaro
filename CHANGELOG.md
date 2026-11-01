@@ -14,4 +14,5 @@ First public release (planned as v0.1.0).
 - Per-step latency (p50 / p90 / p95 / p99 / max), error breakdown, throughput, TTFB, DNS / TCP / TLS time and connection reuse rate; a per-second time series and the health of the load generator (CPU, goroutines).
 - Reports as text, JSON and a self-contained HTML file; raw data as JSON Lines (`Plan.Raw`).
 - `jotaro` CLI: `report`, `merge` and `check` (thresholds such as `p95<200ms`, exit code 1 when not met).
-- Runs on Go 1.22 or later; CI on Linux, macOS and Windows.
+- `jotaro mcp`: an MCP server (stdio) that helps write scenarios. It serves the authoring guide and the threshold syntax as resources, a `write_scenario` prompt, and the tools `check_scenario` (syntax, jotaro-specific lint, type check; nothing is executed) and `validate_threshold`.
+- Runs on Go 1.25 or later; CI on Linux, macOS and Windows.

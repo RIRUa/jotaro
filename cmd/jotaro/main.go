@@ -5,23 +5,28 @@
 //   - report: build a report in text, JSON or HTML from a saved result
 //   - merge: combine results from several runs (for example several load generators) into one
 //   - check: compare a result with thresholds and exit with code 1 if any fail, which suits CI
+//   - mcp: run an MCP server over stdio that helps an AI assistant write scenarios
 //
 // Usage:
 //
 //	jotaro report [-raw] [-format html|text|json] [-o output] <result.json | ->
 //	jotaro merge  [-raw] [-format html|text|json] [-o output] <result.json>...
 //	jotaro check  [-raw] -t <threshold> [-t <threshold>]... <result.json | ->
+//	jotaro mcp
 //
 // With -raw, the input is read as raw JSON Lines data (the output of Plan.Raw) and re-aggregated.
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"strings"
 
+	"github.com/RIRUa/jotaro/internal/mcpserver"
 	"github.com/RIRUa/jotaro/record"
 	"github.com/RIRUa/jotaro/report"
 )
@@ -33,6 +38,7 @@ commands:
   report   build a report from a saved JSON result
   merge    combine several JSON results into one
   check    check whether a result meets the thresholds (e.g. p95<200ms); exit code 1 if not
+  mcp      run an MCP server over stdio that helps write scenarios
 `
 
 // main only forwards to run, which holds the logic and can be tested.
@@ -53,6 +59,8 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return runMerge(args[1:], stdin, stdout, stderr)
 	case "check":
 		return runCheck(args[1:], stdin, stdout, stderr)
+	case "mcp":
+		return runMCP(args[1:], stderr)
 	case "-h", "-help", "--help", "help":
 		fmt.Fprint(stdout, usage)
 		return 0
@@ -60,6 +68,36 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "jotaro: unknown command %q\n\n%s", args[0], usage)
 		return 2
 	}
+}
+
+// runMCP implements "jotaro mcp". It serves MCP over the process's standard input and output
+// until the client disconnects or the process is interrupted, so it takes no input or output
+// from the caller. The exit code is 0 on a normal stop, 1 on a server error, 2 for bad usage.
+func runMCP(args []string, stderr io.Writer) int {
+	fs := flag.NewFlagSet("mcp", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	fs.Usage = func() {
+		fmt.Fprintln(stderr, "usage: jotaro mcp")
+		fmt.Fprintln(stderr, "  Serves MCP over stdin/stdout. Register it in an MCP client, e.g. claude mcp add jotaro -- jotaro mcp")
+	}
+	if err := fs.Parse(args); err != nil {
+		if err == flag.ErrHelp {
+			return 0
+		}
+		return 2
+	}
+	if fs.NArg() != 0 {
+		fs.Usage()
+		return 2
+	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+	if err := mcpserver.Run(ctx); err != nil && ctx.Err() == nil {
+		fmt.Fprintln(stderr, "jotaro:", err)
+		return 1
+	}
+	return 0
 }
 
 // runReport implements "jotaro report". It returns the exit code:

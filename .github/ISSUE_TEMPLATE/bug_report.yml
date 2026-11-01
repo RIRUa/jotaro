@@ -24,4 +24,4 @@ body:
     id: env
     attributes:
       label: Go version and OS
-      placeholder: go1.22 / linux-amd64
+      placeholder: go1.25 / linux-amd64

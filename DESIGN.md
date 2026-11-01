@@ -6,7 +6,7 @@ A Go load-testing tool (a library plus a thin CLI) focused on scenario expressiv
 It collects what was decided in design discussions. Undecided items are at the end.
 
 - Module: `github.com/RIRUa/jotaro`
-- Go: 1.22 or later (`go.mod`). Development uses 1.27.3 (pinned in `.mise.toml`). CI tests with 1.22 and the latest stable release
+- Go: 1.25 or later (`go.mod`). Development uses 1.27.3 (pinned in `.mise.toml`). CI tests with 1.25 and the latest stable release
 
 ## 1. Motivation
 
@@ -165,7 +165,8 @@ There are four packages. The entry point for users is `jotaro` (the side that ap
 | | `health.go` | Summarizing and merging load-generator health |
 | | `threshold.go` | `Threshold` / `ParseThreshold` / `Report.Check` (threshold checks; [`docs/result.md`](docs/result.md) chapter 5) |
 | `internal/histogram` | `histogram.go` | Logarithmic histogram for merging |
-| `cmd/jotaro` | `main.go` | CLI (`report` / `merge` / `check`) |
+| `cmd/jotaro` | `main.go` | CLI (`report` / `merge` / `check` / `mcp`) |
+| `internal/mcpserver` | `server.go` `resources.go` `tools.go` `check.go` `lint.go` `prompts.go` | MCP server behind `jotaro mcp` (scenario authoring: guide resources, `check_scenario`, `validate_threshold`) |
 
 Decisions made during implementation:
 
