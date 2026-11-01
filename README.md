@@ -21,22 +21,11 @@ For the design rationale see [`DESIGN.md`](DESIGN.md); for the result format and
 
 ## Try it
 
-A sample that starts its own mock server is included.
+Runnable samples that start their own mock server are in [`examples/`](examples/README.md).
 
 ```sh
-go run ./examples/checkout                                    # 20 fixed users
-go run ./examples/checkout -rate 50                           # 50 scenarios per second
-go run ./examples/checkout -rate 100 -duration 12s -stages    # ramp up → hold → ramp down
-go run ./examples/checkout -format html -o result.html        # HTML report
-go run ./examples/checkout -raw raw.jsonl                     # also write raw data (JSON Lines)
-```
-
-A deeper sample, `examples/marketplace`, runs one scenario that plays five kinds of visitors (browsing, member, sign-up, buy-then-cancel, abandoned cart) against a stateful mock shop. It shows expiring sessions with CSRF tokens and automatic re-login, pagination, conditional GETs, retries with backoff and an `Idempotency-Key` on a rate-limited checkout, polling an asynchronous payment, and thresholds that fail the run.
-
-```sh
-go run ./examples/marketplace                         # 20 s: ramp up → hold → spike → hold → ramp down
-go run ./examples/marketplace -rate 50                # heavy enough to trip the thresholds (exit status 1)
-go run ./examples/marketplace -users 10 -pace 0.2     # closed model, think times at 20%
+go run ./examples/checkout       # a short flow: login → product list → order
+go run ./examples/marketplace    # a deeper scenario with five kinds of visitors
 ```
 
 ## Use as a library
