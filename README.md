@@ -127,7 +127,7 @@ A CLI for processing and judging saved results afterwards.
 go install github.com/RIRUa/jotaro/cmd/jotaro@latest
 ```
 
-Prebuilt binaries (Linux / macOS / Windows) are attached to each [GitHub Release](https://github.com/RIRUa/jotaro/releases).
+Prebuilt binaries (Linux / macOS / Windows) are attached to each [GitHub Release](https://github.com/RIRUa/jotaro/releases). `jotaro version` prints the version (please include it in bug reports).
 
 Put options **before** the file names.
 

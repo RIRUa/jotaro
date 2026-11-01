@@ -127,7 +127,7 @@ if !checks.Passed() {
 go install github.com/RIRUa/jotaro/cmd/jotaro@latest
 ```
 
-ビルド済みのバイナリ（Linux / macOS / Windows）は、[GitHub Release](https://github.com/RIRUa/jotaro/releases) ごとに添付します。
+ビルド済みのバイナリ（Linux / macOS / Windows）は、[GitHub Release](https://github.com/RIRUa/jotaro/releases) ごとに添付します。`jotaro version` でバージョンを表示します（バグ報告に添えてください）。
 
 オプションは、ファイル名より**前**に書きます。
 
