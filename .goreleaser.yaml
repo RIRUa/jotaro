@@ -25,6 +25,6 @@ archives:
 checksum:
   name_template: checksums.txt
 
-changelog:
-  # CHANGELOG.md is the source of truth, so do not attach an auto-generated list to the release notes.
-  disable: true
+# No "changelog" section on purpose: the release notes are the matching CHANGELOG.md section,
+# passed with --release-notes by .github/workflows/release.yml (which overrides the auto-generated
+# list). Do not set "changelog.disable: true": it also skips --release-notes and leaves the body empty.
