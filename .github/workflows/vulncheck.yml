@@ -1,0 +1,24 @@
+name: vulncheck
+
+# Reports known vulnerabilities (Go vulnerability database) that the code actually calls, in
+# dependencies and in the standard library. A new advisory can turn this red without any change in
+# the repository, so it is not a required check; the weekly run is what notices it.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: '0 3 * * 1'
+
+permissions:
+  contents: read
+
+jobs:
+  govulncheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: stable
+      - run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
