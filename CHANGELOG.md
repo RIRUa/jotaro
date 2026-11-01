@@ -4,6 +4,16 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-11-02
+
+### Added
+
+- `jotaro version` (also `-version` / `--version`) prints the version. Release binaries report the release tag and commit; `go install ...@vX.Y.Z` reports the module version; other builds report `dev`.
+
+### Fixed
+
+- The GitHub Release is now published with the matching `CHANGELOG.md` section as its notes. The v0.1.0 release was published with an empty body because the GoReleaser configuration skipped the release notes file.
+
 ## [0.1.0] - 2026-11-02
 
 First public release.

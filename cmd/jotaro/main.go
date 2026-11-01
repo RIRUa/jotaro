@@ -6,6 +6,7 @@
 //   - merge: combine results from several runs (for example several load generators) into one
 //   - check: compare a result with thresholds and exit with code 1 if any fail, which suits CI
 //   - mcp: run an MCP server over stdio that helps an AI assistant write scenarios
+//   - version: print the version
 //
 // Usage:
 //
@@ -13,6 +14,7 @@
 //	jotaro merge  [-raw] [-format html|text|json] [-o output] <result.json>...
 //	jotaro check  [-raw] -t <threshold> [-t <threshold>]... <result.json | ->
 //	jotaro mcp
+//	jotaro version
 //
 // With -raw, the input is read as raw JSON Lines data (the output of Plan.Raw) and re-aggregated.
 package main
@@ -39,6 +41,7 @@ commands:
   merge    combine several JSON results into one
   check    check whether a result meets the thresholds (e.g. p95<200ms); exit code 1 if not
   mcp      run an MCP server over stdio that helps write scenarios
+  version  print the version
 `
 
 // main only forwards to run, which holds the logic and can be tested.
@@ -61,6 +64,9 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return runCheck(args[1:], stdin, stdout, stderr)
 	case "mcp":
 		return runMCP(args[1:], stderr)
+	case "version", "-version", "--version":
+		fmt.Fprintln(stdout, versionString())
+		return 0
 	case "-h", "-help", "--help", "help":
 		fmt.Fprint(stdout, usage)
 		return 0
