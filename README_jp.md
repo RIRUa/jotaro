@@ -21,22 +21,11 @@
 
 ## 試してみる
 
-自前のモックサーバーを立てるサンプルが付いています。
+自前のモックサーバーを立てるサンプルを [`examples/`](examples/README_jp.md) に用意しています。
 
 ```sh
-go run ./examples/checkout                                    # 20 ユーザー固定
-go run ./examples/checkout -rate 50                           # 毎秒 50 シナリオ
-go run ./examples/checkout -rate 100 -duration 12s -stages    # 上げる → 保つ → 下げる
-go run ./examples/checkout -format html -o result.html        # HTML レポート
-go run ./examples/checkout -raw raw.jsonl                     # 生データ（JSON Lines）も書き出す
-```
-
-もう少し深いサンプル `examples/marketplace` では、状態を持つモックショップに対し、1 つのシナリオが 5 種類の訪問者（閲覧のみ・会員・新規登録・購入後キャンセル・カート放棄）を演じます。CSRF トークン付きで失効するセッションと自動再ログイン、ページネーション、条件付き GET、レート制限された決済確定への `Idempotency-Key` 付きバックオフ再試行、非同期決済のポーリング、実行を失敗させるしきい値を扱います。
-
-```sh
-go run ./examples/marketplace                         # 20 秒: 上げる → 保つ → スパイク → 保つ → 下げる
-go run ./examples/marketplace -rate 50                # しきい値を割る負荷（終了ステータス 1）
-go run ./examples/marketplace -users 10 -pace 0.2     # クローズドモデル、思考時間を 20% に
+go run ./examples/checkout       # 短いフロー: ログイン → 商品一覧 → 注文
+go run ./examples/marketplace    # 5 種類の訪問者を演じる、より深いシナリオ
 ```
 
 ## ライブラリとして使う
