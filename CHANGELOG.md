@@ -15,4 +15,5 @@ First public release (planned as v0.1.0).
 - Reports as text, JSON and a self-contained HTML file; raw data as JSON Lines (`Plan.Raw`).
 - `jotaro` CLI: `report`, `merge` and `check` (thresholds such as `p95<200ms`, exit code 1 when not met).
 - `jotaro mcp`: an MCP server (stdio) that helps write scenarios. It serves the authoring guide and the threshold syntax as resources, a `write_scenario` prompt, and the tools `check_scenario` (syntax, jotaro-specific lint, type check; nothing is executed) and `validate_threshold`.
+- `THIRD_PARTY_NOTICES.md` (license texts of the bundled modules) is included in the release archives.
 - Runs on Go 1.25 or later; CI on Linux, macOS and Windows.
