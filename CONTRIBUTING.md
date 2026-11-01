@@ -30,6 +30,17 @@ golangci-lint run   # optional locally; CI runs it with the version pinned in .g
 - Use a short prefix in the title: `feat:` / `fix:` / `docs:` / `chore:` / `ci:`.
 - CI (vet, test with `-race` on Go 1.25 and stable, golangci-lint) must pass.
 
+## Releasing (maintainers)
+
+Releases are cut by merging a `release/vX.Y.Z` branch into `main`.
+
+1. Create the branch `release/vX.Y.Z` from the latest `main`.
+2. Run `scripts/prepare-release.sh X.Y.Z`. It turns `[Unreleased]` in `CHANGELOG.md` into `[X.Y.Z] - <today>`. Review the entries and commit.
+3. Open a pull request to `main` with the `ci:`/`chore:` prefix and wait for CI to pass.
+4. Merge it. [`release.yml`](.github/workflows/release.yml) then tags the merge commit `vX.Y.Z`, builds the binaries with GoReleaser and publishes a GitHub Release. The release notes are the `[X.Y.Z]` section of `CHANGELOG.md`; the workflow fails if that section is missing or empty, or if the tag already exists on another commit.
+
+If publishing fails after the tag was pushed, fix the cause and run the `release` workflow from the Actions tab (`workflow_dispatch` on `main`) with the same version. It reuses the existing tag.
+
 ## License
 
 By contributing you agree that your contribution is licensed under the [MIT License](LICENSE).
