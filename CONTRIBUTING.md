@@ -21,6 +21,7 @@ golangci-lint run   # optional locally; CI runs it with the version pinned in .g
 - Format with `gofmt`.
 - Add or update tests together with the change. Behaviour of the result format and the threshold syntax is documented in [`docs/result.md`](docs/result.md); update it when you change either.
 - Exported identifiers need a doc comment in English.
+- When you add, remove or update a dependency, run `scripts/gen-third-party-notices.sh` and commit the updated `THIRD_PARTY_NOTICES.md`. Binaries that include a dependency must ship its license text, and the release archives include this file.
 - The README, `DESIGN.md` and `docs/result.md` have Japanese counterparts (`*_jp.md`). If you can only update the English version, say so in the pull request and the Japanese one will be brought in line.
 
 ## Pull requests
