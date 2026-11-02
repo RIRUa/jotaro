@@ -237,3 +237,43 @@ func TestConnReuse(t *testing.T) {
 		t.Errorf("the second should reuse the connection with no phases: %+v", got[1])
 	}
 }
+
+func TestDoBodyLimit(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write(make([]byte, 100))
+	}))
+	defer srv.Close()
+
+	cases := map[string]struct {
+		limit   int64
+		wantErr bool
+	}{
+		"under the limit":   {limit: 101},
+		"exactly the limit": {limit: 100},
+		"over the limit":    {limit: 99, wantErr: true},
+		"no limit":          {limit: -1},
+		"default limit":     {limit: 0},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			e, recs := testExec(t, srv.URL, nil)
+			e.maxBody = c.limit
+			resp := newRequest(e, "GET", "/").Do()
+			if c.wantErr {
+				if !errors.Is(resp.Err(), ErrBodyTooLarge) {
+					t.Fatalf("err = %v, want ErrBodyTooLarge", resp.Err())
+				}
+				if len(resp.Body) != 0 {
+					t.Errorf("body kept: %d bytes", len(resp.Body))
+				}
+				if got := (*recs)[0].Err; got == record.ErrNone {
+					t.Errorf("record error kind = %q, want a failure", got)
+				}
+				return
+			}
+			if resp.Err() != nil || len(resp.Body) != 100 {
+				t.Fatalf("err = %v, body = %d bytes, want nil and 100", resp.Err(), len(resp.Body))
+			}
+		})
+	}
+}

@@ -23,6 +23,7 @@ type User struct {
 	ctx      context.Context
 	scenario string
 	baseURL  string
+	maxBody  int64
 	col      *record.Collector
 
 	// think is the total time spent in Think so far, subtracted to get the active time.
@@ -40,6 +41,7 @@ func (u *User) Step(name string, fn func(s *Step) error) error {
 			ctx:     u.ctx,
 			client:  u.Client,
 			baseURL: u.baseURL,
+			maxBody: u.maxBody,
 			tag: record.Record{
 				Scenario:  u.scenario,
 				Step:      name,

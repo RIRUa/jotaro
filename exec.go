@@ -6,6 +6,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -17,11 +18,20 @@ import (
 	"github.com/RIRUa/jotaro/record"
 )
 
+// defaultMaxBodyBytes is the response body limit applied when Plan.MaxBodyBytes is 0.
+const defaultMaxBodyBytes = 10 << 20
+
+// ErrBodyTooLarge is returned (wrapped) when a response body is larger than Plan.MaxBodyBytes.
+// The request is recorded as failed, and the body is not kept.
+var ErrBodyTooLarge = errors.New("jotaro: response body exceeds Plan.MaxBodyBytes")
+
 // executor runs requests and leaves a record.Record for each.
 type executor struct {
 	ctx     context.Context
 	client  *http.Client
 	baseURL string
+	// maxBody is the largest response body to read. 0 means defaultMaxBodyBytes, negative means no limit.
+	maxBody int64
 
 	// tag is a template record.Record with Scenario, Step, UserID, Iteration and so on filled in.
 	tag record.Record
@@ -86,7 +96,7 @@ func (e *executor) do(r *Request) *Response {
 		resp.Code = hr.StatusCode
 		resp.Header = hr.Header
 		rec.Code = hr.StatusCode
-		resp.Body, err = io.ReadAll(hr.Body)
+		resp.Body, err = e.readBody(hr.Body)
 		hr.Body.Close()
 	}
 	rec.Latency = time.Since(rec.Start)
@@ -99,6 +109,24 @@ func (e *executor) do(r *Request) *Response {
 	}
 	e.sink(rec)
 	return resp
+}
+
+// readBody reads the whole response body, failing with ErrBodyTooLarge instead of
+// holding more than the limit in memory. The oversized body is discarded.
+func (e *executor) readBody(r io.Reader) ([]byte, error) {
+	limit := e.maxBody
+	if limit < 0 {
+		return io.ReadAll(r)
+	}
+	if limit == 0 {
+		limit = defaultMaxBodyBytes
+	}
+	// Read one byte past the limit to tell "exactly at the limit" from "over it".
+	body, err := io.ReadAll(io.LimitReader(r, limit+1))
+	if err == nil && int64(len(body)) > limit {
+		return nil, fmt.Errorf("%w (limit %d bytes)", ErrBodyTooLarge, limit)
+	}
+	return body, err
 }
 
 // tracer derives the duration of each phase from httptrace events.

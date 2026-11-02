@@ -58,6 +58,10 @@ type Plan struct {
 	// Those that exceed it are aborted and recorded as record.ErrCanceled. 0 means 30 seconds.
 	Grace time.Duration
 
+	// MaxBodyBytes is the largest response body that is read into memory. A larger body fails the
+	// request with ErrBodyTooLarge. 0 means 10 MiB; a negative value means no limit.
+	MaxBodyBytes int64
+
 	// Warn receives non-fatal warnings found before the run starts (for example, a concurrency
 	// that exceeds the open file limit). nil means the warning is written to standard error.
 	Warn func(msg string)
@@ -287,6 +291,7 @@ func newUser(ctx context.Context, p Plan, id, iter int, tr http.RoundTripper, ti
 		ctx:       ctx,
 		scenario:  p.Scenario.Name,
 		baseURL:   p.BaseURL,
+		maxBody:   p.MaxBodyBytes,
 		col:       col,
 	}, nil
 }
