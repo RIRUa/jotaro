@@ -58,6 +58,10 @@ type Plan struct {
 	// Those that exceed it are aborted and recorded as record.ErrCanceled. 0 means 30 seconds.
 	Grace time.Duration
 
+	// Warn receives non-fatal warnings found before the run starts (for example, a concurrency
+	// that exceeds the open file limit). nil means the warning is written to standard error.
+	Warn func(msg string)
+
 	// If Raw is not nil, the raw data is written as JSON Lines when Run finishes (record.WriteRaw).
 	// Even if writing fails, the aggregated Report is returned (together with an error).
 	Raw io.Writer
@@ -118,6 +122,7 @@ func Run(ctx context.Context, p Plan) (*report.Report, error) {
 	if err := p.validate(); err != nil {
 		return nil, err
 	}
+	p.checkFDLimit()
 	timeout := cmpOr(p.Timeout, defaultTimeout)
 	grace := cmpOr(p.Grace, defaultGrace)
 
