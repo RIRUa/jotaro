@@ -68,3 +68,21 @@ func TestMergeIsSumAndKeepsInputs(t *testing.T) {
 		t.Error("merge with nil")
 	}
 }
+
+// Add one by one must give the same histogram as New over the same values.
+func TestAddMatchesNew(t *testing.T) {
+	ds := []time.Duration{time.Millisecond, 2 * time.Millisecond, 2 * time.Millisecond, 5 * time.Second, 0}
+	var h H
+	for _, d := range ds {
+		h.Add(d)
+	}
+	want := New(ds)
+	if len(h) != len(want) {
+		t.Fatalf("got %v, want %v", h, want)
+	}
+	for i, c := range want {
+		if h[i] != c {
+			t.Errorf("bucket %d = %d, want %d", i, h[i], c)
+		}
+	}
+}

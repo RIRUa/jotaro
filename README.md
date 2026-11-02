@@ -189,7 +189,7 @@ claude mcp add jotaro -- jotaro mcp     # Claude Code; other clients take the sa
 ## Caveats
 
 - Only HTTP can be measured
-- Percentiles such as p50 are currently computed by sorting all records, which uses memory on long, high-load runs
+- Without `Plan.Raw`, percentiles such as p50 are approximations within 1% relative error (records are folded into histograms as they arrive, so memory does not grow with the run). Count, min, max and mean stay exact. With `Plan.Raw`, every record is kept in memory and the percentiles are exact
 - There is no statistical comparison (whether two results differ significantly). `check` works by setting criteria and judging pass or fail
 
 ## License

@@ -127,7 +127,7 @@ Feeder はシナリオの外で作り、クロージャで共有する（`User` 
 - 送受信バイト数
 - **予定開始時刻と実際の開始時刻を分けて持つ**（Coordinated Omission の補正のため）
 
-メモリが問題になる場合は、ヒストグラム（HdrHistogram 系）に畳み込む層を挟む。
+実行時間が長くてもメモリが増えないよう、`Run` は記録を持たずに、届くたびにヒストグラムへ畳み込む（`report.Aggregator`。`record.NewStreamingCollector` 経由で受け取る）。代わりにパーセンタイルは近似（相対誤差 1% 以内）になる。件数・最小・最大・平均は正確なまま。`Plan.Raw` を指定したときは全記録が必要なので、`Run` は記録を持ち、`BuildReport` で正確に集計する。
 
 ### フェーズ
 
@@ -159,7 +159,7 @@ Feeder はシナリオの外で作り、クロージャで共有する（`User` 
 | | `health.go` | 負荷生成側の健全性（ゴルーチン数・CPU）を 1 秒ごとにサンプリング |
 | `record` | `record.go` | `Record` / `StepRecord` / `IterationRecord` / `Collector` / `ErrKind` / `ConnKind` / `HealthPoint` |
 | | `raw.go` | `Raw` / `WriteRaw` / `ReadRaw`（生データの JSON Lines） |
-| `report` | `report.go` `series.go` | `Report` / `Latency` と集計、時系列（1 秒ごと） |
+| `report` | `report.go` `series.go` `aggregate.go` | `Report` / `Latency` と集計、時系列（1 秒ごと）、記録を持たない逐次集計（`Aggregator`） |
 | | `print.go` `json.go` `html.go` `html_chart.go` `write.go` | テキスト・JSON・HTML の出力と、JSON の読み込み |
 | | `merge.go` | `MergeReports` |
 | | `health.go` | 負荷生成側の健全性の要約・結合 |
@@ -171,7 +171,7 @@ Feeder はシナリオの外で作り、クロージャで共有する（`User` 
 実装中に決めたこと:
 
 - Cookie jar はイテレーションごとに新しくする（k6 の既定と同じ。毎回ログインし直す）。接続プールは全ユーザーで共有する。
-- パーセンタイルは、現状は全記録をソートして求める（nearest-rank）。集計中のコピーは避けてある（記録をコピーせず位置で持つ、一時スライスをその場でソートする、`Run` は `Collector.Take` で記録を受け取る）。100 万リクエストで集計中の確保が 1.4GB → 0.15GB。ただし記録そのもの（100 万件で約 240MB）は実行が終わるまで持つので、それが問題になったら、記録を逐次ヒストグラムに畳む形に変える。
+- `BuildReport`（`Plan.Raw` つきの `Run`、`FromRaw`、ライブラリ利用者が使う）は、パーセンタイルを全記録のソートで求める（nearest-rank）。集計中のコピーは避けてある（記録をコピーせず位置で持つ、一時スライスをその場でソートする、`Run` は `Collector.Take` で記録を受け取る）。100 万リクエストで集計中の確保が 1.4GB → 0.15GB。記録そのもの（100 万件で約 240MB）は、`Plan.Raw` を指定しない限り `Run` は持たない。`Aggregator` がヒストグラムに畳み込む。500 万リクエストで、収集側が保持するヒープは約 1165MB から約 9MB になった（1 台での測定）。時系列の同時実行数は、保存したイベントを走査するのではなく、イテレーションの開始・終了のたびに数える（1 秒ごとに現在値と最大値を 1 つずつ持つ）。
 - リクエストのレイテンシには、通信エラー（タイムアウトなど）になったものも含める。TTFB は応答を受け取れたものだけ。
 - `BytesIn` / `BytesOut` はボディのバイト数（ヘッダーは含まない）。
 

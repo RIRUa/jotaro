@@ -29,11 +29,19 @@ func New(ds []time.Duration) H {
 	if len(ds) == 0 {
 		return nil
 	}
-	h := make(H)
+	var h H
 	for _, d := range ds {
-		h[index(d)]++
+		h.Add(d)
 	}
 	return h
+}
+
+// Add counts one observation, creating the histogram on first use.
+func (h *H) Add(d time.Duration) {
+	if *h == nil {
+		*h = make(H)
+	}
+	(*h)[index(d)]++
 }
 
 // index puts everything at or below 1ns into bucket 0.

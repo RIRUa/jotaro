@@ -99,7 +99,9 @@ func (p Plan) maxConcurrency() int {
 //  1. validate the Plan, and clone the default Transport so connections are not shared with other code
 //  2. start the health sampler, then run the closed (Users) or open (Arrival) loop until Duration ends
 //  3. wait up to Grace for running iterations, then cancel them
-//  4. aggregate the collected records into a report, and write the raw data if Plan.Raw is set
+//  4. build the report and write the raw data if Plan.Raw is set. Without Plan.Raw, records are folded into
+//     histograms as they arrive (percentiles within 1% relative error, memory independent of the run length).
+//     With Plan.Raw, every record is kept and the percentiles are exact
 //
 // When ctx is done, everything stops at once, including running iterations,
 // and the results so far are returned. Report.Elapsed is the real time until all users have stopped.
@@ -125,8 +127,20 @@ func Run(ctx context.Context, p Plan) (*report.Report, error) {
 	defer cancel()
 	defer time.AfterFunc(p.Duration+grace, cancel).Stop()
 
-	r := &runner{p: p, tr: tr, timeout: timeout, col: record.NewCollector(), stopCtx: stopCtx, runCtx: runCtx}
 	start := time.Now()
+	// Raw data needs every record, so keep them in that case and aggregate exactly at the end.
+	// Otherwise fold each record into histograms as it arrives, so memory does not grow with the run.
+	var (
+		col *record.Collector
+		agg *report.Aggregator
+	)
+	if p.Raw != nil {
+		col = record.NewCollector()
+	} else {
+		agg = report.NewAggregator(start)
+		col = record.NewStreamingCollector(agg)
+	}
+	r := &runner{p: p, tr: tr, timeout: timeout, col: col, stopCtx: stopCtx, runCtx: runCtx}
 	health := startHealthSampler(report.SeriesInterval)
 	if p.Arrival != nil {
 		r.runOpen()
@@ -135,6 +149,14 @@ func Run(ctx context.Context, p Plan) (*report.Report, error) {
 	}
 	elapsed := time.Since(start)
 	healthPoints := health.stop()
+
+	if agg != nil {
+		rep := agg.Report(elapsed)
+		rep.Open = p.Arrival != nil
+		rep.Dropped = r.col.Dropped()
+		rep.Health = healthPoints
+		return rep, nil
+	}
 
 	reqs, steps, iters := r.col.Take()
 	raw := &record.Raw{

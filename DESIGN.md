@@ -127,7 +127,7 @@ The shape of a record carries everything from the start, so that values can be a
 - Bytes sent and received
 - **The scheduled start time and the actual start time are kept separately** (for Coordinated Omission correction)
 
-If memory becomes a problem, a layer that folds records into a histogram (HdrHistogram style) will be inserted.
+To keep memory independent of the length of a run, `Run` folds each record into histograms as it arrives (`report.Aggregator`, fed through `record.NewStreamingCollector`) instead of keeping it. The cost is that percentiles become approximate (within 1% relative error); count, min, max and mean stay exact. When `Plan.Raw` is set, every record is needed anyway, so `Run` keeps them and aggregates exactly with `BuildReport`.
 
 ### Phases
 
@@ -159,7 +159,7 @@ There are four packages. The entry point for users is `jotaro` (the side that ap
 | | `health.go` | Samples the health of the load generator (goroutines, CPU) every second |
 | `record` | `record.go` | `Record` / `StepRecord` / `IterationRecord` / `Collector` / `ErrKind` / `ConnKind` / `HealthPoint` |
 | | `raw.go` | `Raw` / `WriteRaw` / `ReadRaw` (raw data as JSON Lines) |
-| `report` | `report.go` `series.go` | `Report` / `Latency` and aggregation, time series (per second) |
+| `report` | `report.go` `series.go` `aggregate.go` | `Report` / `Latency` and aggregation, time series (per second), incremental aggregation without keeping records (`Aggregator`) |
 | | `print.go` `json.go` `html.go` `html_chart.go` `write.go` | Text, JSON and HTML output, and reading JSON |
 | | `merge.go` | `MergeReports` |
 | | `health.go` | Summarizing and merging load-generator health |
@@ -171,7 +171,7 @@ There are four packages. The entry point for users is `jotaro` (the side that ap
 Decisions made during implementation:
 
 - The cookie jar is renewed for each iteration (same as k6's default; log in again every time). The connection pool is shared by all users.
-- Percentiles are currently computed by sorting all records (nearest-rank). Copies during aggregation are avoided (records are held by position instead of copied, temporary slices are sorted in place, and `Run` receives records via `Collector.Take`). For 1 million requests, allocation during aggregation went from 1.4GB to 0.15GB. However, the records themselves (about 240MB per million) are kept until the run ends; if that becomes a problem, we will switch to folding records into a histogram incrementally.
+- `BuildReport` (used with `Plan.Raw`, `FromRaw` and by library users) computes percentiles by sorting all records (nearest-rank). Copies during aggregation are avoided (records are held by position instead of copied, temporary slices are sorted in place, and `Run` receives records via `Collector.Take`). For 1 million requests, allocation during aggregation went from 1.4GB to 0.15GB. The records themselves (about 240MB per million) are not kept by `Run` unless `Plan.Raw` is set: the `Aggregator` folds them into histograms instead. For 5 million requests the heap held by the collector went from about 1165MB to about 9MB in a measurement on one machine. The concurrency of the time series is tracked as iterations start and end (one counter and one maximum per second), not swept from stored events.
 - Request latency includes requests that ended in a network error (timeout, etc.). TTFB covers only those that received a response.
 - `BytesIn` / `BytesOut` are body bytes (headers are not included).
 
