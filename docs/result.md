@@ -73,7 +73,8 @@ HTTP 4xx/5xx are recorded as a status (`Status`), not as an `ErrKind`.
 ### Notes
 
 - `RPS()` is `Requests.Count / Elapsed`.
-- Aggregation sorts all records. If memory becomes a problem on long, high-load runs, this is planned to be replaced with a histogram.
+- `Run` without `Plan.Raw` aggregates incrementally (`report.Aggregator`): each record is folded into counters and log histograms as it arrives and is not kept, so memory does not grow with the number of requests. Count / Min / Max / Mean are exact, and `P50`–`P99` are approximations within 1% relative error (clamped to `[Min, Max]`).
+- `Run` with `Plan.Raw`, `FromRaw` and `BuildReport` keep or receive every record and sort them, so `P50`–`P99` are exact nearest-rank values. Use these when exact percentiles matter more than memory.
 
 ### JSON output (implemented)
 
@@ -133,7 +134,7 @@ In the library: `report.MergeReports(reps ...*report.Report) (*report.Report, er
 | Scenarios and steps | Matched by name. Order is that of first appearance |
 | `Open` differs | Error (results from different models cannot be mixed) |
 
-- **Histogram**: each `latency` carries logarithmic buckets (DDSketch style, 1% relative error) (`buckets` in the JSON: bucket number → count). Buckets can be merged by addition, so the result is the same for any number of machines in any order. For a single report, `P50`–`P99` remain exact nearest-rank values as before; they become approximate only after merging.
+- **Histogram**: each `latency` carries logarithmic buckets (DDSketch style, 1% relative error) (`buckets` in the JSON: bucket number → count). Buckets can be merged by addition, so the result is the same for any number of machines in any order. For a report built from all records (`BuildReport`, `FromRaw`, `Run` with `Plan.Raw`), `P50`–`P99` are exact nearest-rank values; for one built incrementally (`Run` without `Plan.Raw`) and for merged reports they are approximate.
 - **Size**: the number of buckets depends on the spread of the distribution (not proportional to the count). For 100,000 samples of a heavy-tailed distribution, several hundred buckets per `latency`.
 - **Connection breakdown (`requests` and each step's `requests`, version 3)**: `dns` / `connect` (TCP) / `tls` are latency distributions (with `buckets`) over only the requests in which that phase actually occurred. Requests that reused a connection, and TLS for http, are not included. `conn_new` / `conn_reused` are the numbers of requests that opened a new connection / reused one; the reuse rate is `conn_reused / (conn_new + conn_reused)`. Requests that failed before obtaining a connection are counted in neither. These are absent from version 1 and 2 JSON (read as 0 / empty).
 - **Time series (`series`, version 3)**: an array per second since `started_at`. Elements are `second` / `requests` / `errors` (network errors; HTTP 4xx/5xx not included) / `http_5xx` (number of HTTP 5xx; does not overlap with `errors`; 0 if absent) / `latency` (with `buckets`) / `conn_new` / `conn_reused` (among requests started in that second, those that opened a new connection / reused one) / `dns` / `connect` / `tls` (distributions over only the requests in which that phase occurred; with `buckets`; the same scope as the same-named fields of `requests`) / `concurrency` (the maximum number of running iterations in that second). Empty without `started_at`. When merging, seconds are shifted by the difference in `started_at` and added, and `concurrency` is summed (an upper estimate). Absent from version 1 and 2 JSON. Items from `conn_new` onward were added to version 3 later; JSON without them is read as 0 / empty (compatibility is not broken, so the version was not raised).
@@ -169,7 +170,7 @@ In the library: `record.WriteRaw(w, *record.Raw)` / `record.ReadRaw(r)` / `repor
 - `request` has the same content as `Record`: `scenario` / `step` / `user_id` / `iteration` / `method` / `url` / `code` / `err` / `scheduled` / `start` / `latency_ns` / `conn` / `dns_ns` / `connect_ns` / `tls_ns` / `ttfb_ns` / `bytes_out` / `bytes_in`. `step` is the same as `StepRecord`, `iteration` as `IterationRecord`, and `health` as `HealthPoint`.
 - `ReadRaw` skips lines with an unknown `type` (so old readers do not break if a newer version adds lines). It can read without a `meta` line (the run time is derived from the records).
 - If raw data is passed to the aggregated-JSON reader (`ReadJSON`), the leading `meta` line can be read as `version: 1` JSON. `ReadJSON` returns an error if other data follows the JSON, so forgetting `-raw` produces the error "use `-raw` for raw data".
-- Raw data is written all at once after `Run` finishes (records are kept in memory anyway). It is not written incrementally during the run (which would use no memory).
+- Raw data is written all at once after `Run` finishes (records are kept in memory anyway, and only when `Plan.Raw` is set). It is not written incrementally during the run (which would use no memory).
 - Even if writing fails, `Run` returns the aggregated `Report` (together with an `error`).
 
 ## 2. Unimplemented (proposals)
