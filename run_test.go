@@ -18,10 +18,12 @@ import (
 func TestRunValidate(t *testing.T) {
 	sc := NewScenario("s", func(ctx context.Context, u *User) error { return nil })
 	cases := map[string]Plan{
-		"no scenario": {Users: 1, Duration: time.Second},
-		"no Fn":       {Scenario: &Scenario{Name: "s"}, Users: 1, Duration: time.Second},
-		"Users is 0":  {Scenario: sc, Duration: time.Second},
-		"no Duration": {Scenario: sc, Users: 1},
+		"no scenario":        {Users: 1, Duration: time.Second},
+		"no Fn":              {Scenario: &Scenario{Name: "s"}, Users: 1, Duration: time.Second},
+		"Users is 0":         {Scenario: sc, Duration: time.Second},
+		"no Duration":        {Scenario: sc, Users: 1},
+		"Users too large":    {Scenario: sc, Users: maxConcurrencyLimit + 1, Duration: time.Second},
+		"MaxUsers too large": {Scenario: sc, Arrival: Rate(1, time.Second), MaxUsers: maxConcurrencyLimit + 1, Duration: time.Second},
 	}
 	for name, p := range cases {
 		if _, err := Run(context.Background(), p); err == nil {

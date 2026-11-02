@@ -23,6 +23,11 @@ const (
 
 	// defaultMaxUsers caps concurrency in the open model (Plan.MaxUsers).
 	defaultMaxUsers = 1000
+
+	// maxConcurrencyLimit is the hard cap on Plan.Users and Plan.MaxUsers. A single load
+	// generator cannot sensibly drive more goroutines and sockets than this; Run rejects
+	// larger values so a typo such as 1000000 does not exhaust the machine.
+	maxConcurrencyLimit = 100_000
 )
 
 // Plan describes how load is applied.
@@ -37,11 +42,11 @@ type Plan struct {
 	// BaseURL is prepended to the relative paths of requests (for example "http://localhost:8080").
 	BaseURL string
 
-	// Users is the number of virtual users running at the same time.
+	// Users is the number of virtual users running at the same time (at most 100000).
 	Users int
 	// Arrival is how scenarios arrive (e.g. Rate(10, time.Second)). It cannot be set together with Users.
 	Arrival Arrival
-	// MaxUsers is the cap on concurrency with Arrival. 0 means 1000.
+	// MaxUsers is the cap on concurrency with Arrival (at most 100000). 0 means 1000.
 	// Arrivals that come in while the cap is reached are not run and are counted as dropped.
 	MaxUsers int
 	// After Duration has passed, no new iterations are started.
@@ -70,6 +75,10 @@ func (p Plan) validate() error {
 		return errors.New("jotaro: Plan.Users must be at least 1 (or set Plan.Arrival)")
 	case p.MaxUsers < 0:
 		return errors.New("jotaro: Plan.MaxUsers must be at least 0")
+	case p.Users > maxConcurrencyLimit:
+		return fmt.Errorf("jotaro: Plan.Users must be at most %d", maxConcurrencyLimit)
+	case p.MaxUsers > maxConcurrencyLimit:
+		return fmt.Errorf("jotaro: Plan.MaxUsers must be at most %d", maxConcurrencyLimit)
 	case p.Duration <= 0:
 		return errors.New("jotaro: Plan.Duration must be positive")
 	}
