@@ -76,6 +76,8 @@ type Plan struct {
 	Warn func(msg string)
 
 	// If Raw is not nil, the raw data is written as JSON Lines when Run finishes (record.WriteRaw).
+	// Setting Raw keeps every record in memory until the run ends (about 240 MB per million requests),
+	// so use it for short runs only.
 	// Even if writing fails, the aggregated Report is returned (together with an error).
 	Raw io.Writer
 }

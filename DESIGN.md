@@ -83,7 +83,7 @@ jotaro.Run(ctx, jotaro.Plan{
 
 How the `Rate` model works:
 
-- Arrival times are computed cumulatively from the start time (`i × interval`). Even if the dispatcher falls behind, the interval does not drift; the delayed arrivals are started together.
+- Arrival times are computed cumulatively from the start time (`i × interval`). Even if the dispatcher falls behind, the interval does not drift; arrivals that are late by up to `MaxLag` (default 1 second) are started together, and later ones are **dropped** so a stalled load generator does not start a burst that stalls it further.
 - An arrival while concurrency is at `MaxUsers` (default 1000) is not run and is counted as a **drop** (`Report.Dropped`).
 - The scheduled arrival time is put into `Scheduled` of the first request of an iteration. `Record.Corrected()` (from the scheduled time to the response completion) is the value after Coordinated Omission correction and is aggregated into `RequestStats.Corrected`. For the second and later requests, `Scheduled = Start` (the delay of the previous request is real delay, so it is not corrected).
 - Each arrival is treated as a separate user (`User.ID` is the arrival's sequence number and `Iteration` is 0). It ends the same way as `Users` (`Duration` / `Grace`).

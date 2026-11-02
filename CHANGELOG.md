@@ -8,8 +8,14 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 - `Run` without `Plan.Raw` now aggregates incrementally: records are folded into histograms as they arrive instead of being kept, so memory no longer grows with the number of requests (5 million requests: about 1165 MB → 9 MB of collector heap in one measurement). As a result, `P50`–`P99` in that report are approximations within 1% relative error; count, min, max and mean stay exact. With `Plan.Raw` set, every record is kept and the percentiles are exact as before. `BuildReport` and `FromRaw` are unchanged.
 
+- `Run` now rejects `Plan.Users` and `Plan.MaxUsers` above 100000.
+- `Run` now drops open-model arrivals that start more than `Plan.MaxLag` (default 1 second) after their scheduled time, instead of starting them in a burst. They are counted in `Report.Dropped`.
+- Response bodies larger than `Plan.MaxBodyBytes` (default 10 MiB) now fail the request with `ErrBodyTooLarge` instead of being read into memory.
+
 ### Added
 
+- `Plan.MaxLag`, `Plan.MaxBodyBytes`, `ErrBodyTooLarge`, and `Plan.Warn` (a hook for pre-run warnings; standard error by default). `Run` warns when the maximum concurrency may exceed the open file limit (`ulimit -n`).
+- "Load safety" section in the README (English and Japanese).
 - `report.Aggregator`, an incremental alternative to `BuildReport`; `record.Observer` and `record.NewStreamingCollector`, a `Collector` that hands records to an observer instead of keeping them.
 
 ## [0.1.1] - 2026-11-02

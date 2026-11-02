@@ -100,7 +100,7 @@ Specify exactly one of `Users` and `Arrival`.
 | `Arrival: jotaro.Ramp(0, 100, time.Second, 10*time.Second)` | Increase from 0 to 100 per second over 10 seconds |
 | `Arrival: jotaro.Stages(...)` | Switch `Arrival` stage by stage (ramp up → hold → ramp down, etc.) |
 
-You can also set `MaxUsers` (the cap on concurrency in the open model; arrivals beyond it are counted as dropped), `Timeout` (the limit for a single request), `Grace` (how long to wait for running iterations after `Duration`), and `Raw` (where to write raw data).
+You can also set `MaxUsers` (the cap on concurrency in the open model; arrivals beyond it are counted as dropped), `Timeout` (the limit for a single request), `Grace` (how long to wait for running iterations after `Duration`), `Raw` (where to write raw data), `MaxLag` (how late an arrival may start before it is dropped; default 1 second), `MaxBodyBytes` (the largest response body read into memory; default 10 MiB) and `Warn` (where pre-run warnings go; default standard error). `Users` and `MaxUsers` are limited to 100000.
 
 ### 3. Output the results
 
@@ -191,6 +191,17 @@ claude mcp add jotaro -- jotaro mcp     # Claude Code; other clients take the sa
 - Only HTTP can be measured
 - Without `Plan.Raw`, percentiles such as p50 are approximations within 1% relative error (records are folded into histograms as they arrive, so memory does not grow with the run). Count, min, max and mean stay exact. With `Plan.Raw`, every record is kept in memory and the percentiles are exact
 - There is no statistical comparison (whether two results differ significantly). `check` works by setting criteria and judging pass or fail
+
+## Load safety
+
+jotaro can saturate both the machine it runs on and the system under test. Before a large run:
+
+- **Only test systems you are authorized to load.** A high rate against a production or third-party URL is effectively a denial-of-service attack. jotaro does not ask for confirmation.
+- **Add `Think` to closed-model scenarios.** Without it, each user sends the next request as soon as the previous response arrives, which can use all CPU when the target is fast or local.
+- **Raise the open file limit** (`ulimit -n`) to at least the maximum concurrency plus some margin. `Run` warns when the limit looks too low. Many short connections to one host can also exhaust ephemeral ports (`TIME_WAIT`).
+- **Do not run the load generator on the same machine as the target** if you can avoid it: they compete for CPU and the measured latency looks worse than it is. Watch the health section of the report; a warning is shown when CPU reaches 90% or more.
+- **`Plan.Raw` keeps every record in memory** (about 240 MB per million requests). Use it for short runs only.
+- Responses larger than `Plan.MaxBodyBytes` fail the request instead of being read into memory.
 
 ## License
 
