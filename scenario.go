@@ -25,6 +25,7 @@ func NewScenario(name string, fn func(ctx context.Context, u *User) error) *Scen
 // If Fn panics, the iteration is treated as failed and the whole run keeps going.
 func (sc *Scenario) run(u *User) (err error) {
 	start := time.Now()
+	u.col.StartIteration(start)
 	defer func() {
 		if p := recover(); p != nil {
 			err = fmt.Errorf("jotaro: scenario panicked: %v", p)

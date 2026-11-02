@@ -44,3 +44,43 @@ func TestIterationActive(t *testing.T) {
 		t.Fatalf("Active() = %v, want 2s", got)
 	}
 }
+
+// obsCount is an Observer that only counts.
+type obsCount struct {
+	mu                          sync.Mutex
+	reqs, steps, iters, started int
+}
+
+func (o *obsCount) ObserveRequest(Record)            { o.mu.Lock(); o.reqs++; o.mu.Unlock() }
+func (o *obsCount) ObserveStep(StepRecord)           { o.mu.Lock(); o.steps++; o.mu.Unlock() }
+func (o *obsCount) ObserveIteration(IterationRecord) { o.mu.Lock(); o.iters++; o.mu.Unlock() }
+func (o *obsCount) ObserveIterationStart(time.Time)  { o.mu.Lock(); o.started++; o.mu.Unlock() }
+
+// A streaming Collector hands every record to the Observer and keeps none of them.
+func TestStreamingCollectorKeepsNothing(t *testing.T) {
+	o := &obsCount{}
+	c := NewStreamingCollector(o)
+	for i := 0; i < 10; i++ {
+		c.StartIteration(time.Now())
+		c.AddRequest(Record{})
+		c.AddStep(StepRecord{})
+		c.AddIteration(IterationRecord{})
+	}
+	c.AddDropped()
+
+	if o.reqs != 10 || o.steps != 10 || o.iters != 10 || o.started != 10 {
+		t.Errorf("observer saw %d/%d/%d/%d, want 10 of each", o.reqs, o.steps, o.iters, o.started)
+	}
+	reqs, steps, iters := c.Take()
+	if len(reqs)+len(steps)+len(iters) != 0 {
+		t.Errorf("a streaming Collector kept %d/%d/%d records", len(reqs), len(steps), len(iters))
+	}
+	if c.Dropped() != 1 {
+		t.Errorf("Dropped = %d, want 1", c.Dropped())
+	}
+}
+
+// A Collector that keeps records ignores StartIteration (it needs no Observer).
+func TestStartIterationWithoutObserver(t *testing.T) {
+	NewCollector().StartIteration(time.Now())
+}

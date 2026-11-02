@@ -99,22 +99,51 @@ func (r IterationRecord) Active() time.Duration {
 	return r.Duration - r.Think
 }
 
+// Observer receives records as they are produced, without the Collector keeping them.
+// Its methods are called from many goroutines at once, so an implementation must be safe for concurrent use.
+type Observer interface {
+	// ObserveRequest is called when a request has finished.
+	ObserveRequest(Record)
+	// ObserveStep is called when a step has finished.
+	ObserveStep(StepRecord)
+	// ObserveIteration is called when a scenario run has finished.
+	ObserveIteration(IterationRecord)
+	// ObserveIterationStart is called when a scenario run starts, with its start time.
+	ObserveIterationStart(time.Time)
+}
+
 // Collector receives records concurrently.
+//
+// A Collector made with NewCollector keeps every record. One made with NewStreamingCollector
+// hands them to an Observer and keeps nothing, so its memory does not grow with the number of requests.
 type Collector struct {
 	mu         sync.Mutex
 	requests   []Record
 	steps      []StepRecord
 	iterations []IterationRecord
 	dropped    int
+
+	// obs, when not nil, receives the records instead of the slices above.
+	obs Observer
 }
 
-// NewCollector returns an empty Collector ready for concurrent use.
+// NewCollector returns an empty Collector ready for concurrent use. It keeps every record.
 func NewCollector() *Collector {
 	return &Collector{}
 }
 
+// NewStreamingCollector returns a Collector that passes each record to obs and does not keep it.
+// Snapshot and Take return nothing for it. Only the count of dropped arrivals is kept.
+func NewStreamingCollector(obs Observer) *Collector {
+	return &Collector{obs: obs}
+}
+
 // AddRequest stores the record of one HTTP request. It is safe to call from many goroutines.
 func (c *Collector) AddRequest(r Record) {
+	if c.obs != nil {
+		c.obs.ObserveRequest(r)
+		return
+	}
 	c.mu.Lock()
 	c.requests = append(c.requests, r)
 	c.mu.Unlock()
@@ -122,6 +151,10 @@ func (c *Collector) AddRequest(r Record) {
 
 // AddStep stores the record of one finished step. It is safe to call from many goroutines.
 func (c *Collector) AddStep(r StepRecord) {
+	if c.obs != nil {
+		c.obs.ObserveStep(r)
+		return
+	}
 	c.mu.Lock()
 	c.steps = append(c.steps, r)
 	c.mu.Unlock()
@@ -129,9 +162,21 @@ func (c *Collector) AddStep(r StepRecord) {
 
 // AddIteration stores the record of one finished scenario run. It is safe to call from many goroutines.
 func (c *Collector) AddIteration(r IterationRecord) {
+	if c.obs != nil {
+		c.obs.ObserveIteration(r)
+		return
+	}
 	c.mu.Lock()
 	c.iterations = append(c.iterations, r)
 	c.mu.Unlock()
+}
+
+// StartIteration tells the Observer that a scenario run has started. It does nothing for a Collector that keeps records,
+// because there the start time is already in the IterationRecord.
+func (c *Collector) StartIteration(t time.Time) {
+	if c.obs != nil {
+		c.obs.ObserveIterationStart(t)
+	}
 }
 
 // AddDropped counts one arrival that was not run because of the concurrency cap.
