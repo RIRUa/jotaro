@@ -24,6 +24,9 @@ const (
 	// defaultMaxUsers caps concurrency in the open model (Plan.MaxUsers).
 	defaultMaxUsers = 1000
 
+	// defaultMaxLag is how late an arrival may start before it is dropped (Plan.MaxLag).
+	defaultMaxLag = time.Second
+
 	// maxConcurrencyLimit is the hard cap on Plan.Users and Plan.MaxUsers. A single load
 	// generator cannot sensibly drive more goroutines and sockets than this; Run rejects
 	// larger values so a typo such as 1000000 does not exhaust the machine.
@@ -51,6 +54,12 @@ type Plan struct {
 	MaxUsers int
 	// After Duration has passed, no new iterations are started.
 	Duration time.Duration
+
+	// MaxLag is how far behind its scheduled time an arrival may start with Arrival. An arrival that is
+	// later than this (the load generator stalled) is dropped and counted in Report.Dropped, instead of
+	// being started together with the backlog in a burst that would stall it further. 0 means 1 second;
+	// a negative value starts every late arrival.
+	MaxLag time.Duration
 
 	// Timeout is the limit for a single request. 0 means 30 seconds.
 	Timeout time.Duration
@@ -229,8 +238,9 @@ func (r *runner) runClosed() {
 // runOpen starts iterations at the arrival times of Arrival.
 //
 // Arrival times are measured from the start time, so the spacing does not
-// drift even if the dispatcher falls behind. Late arrivals are started together, and the scheduled time is kept in Scheduled.
-// Arrivals that come in while concurrency is at the cap are dropped.
+// drift even if the dispatcher falls behind. Arrivals that are late by up to Plan.MaxLag are started together,
+// and the scheduled time is kept in Scheduled. Arrivals later than that, and arrivals that come in
+// while concurrency is at the cap, are dropped.
 func (r *runner) runOpen() {
 	slots := make(chan struct{}, r.p.maxConcurrency())
 
@@ -257,6 +267,10 @@ func (r *runner) runOpen() {
 			}
 		}
 
+		if r.tooLate(at) {
+			r.col.AddDropped()
+			continue
+		}
 		select {
 		case slots <- struct{}{}:
 		default:
@@ -276,6 +290,15 @@ func (r *runner) runOpen() {
 			_ = r.p.Scenario.run(u) // the error is kept in the IterationRecord
 		}()
 	}
+}
+
+// tooLate reports whether an arrival scheduled for at is past Plan.MaxLag now.
+func (r *runner) tooLate(at time.Time) bool {
+	maxLag := r.p.MaxLag
+	if maxLag == 0 {
+		maxLag = defaultMaxLag
+	}
+	return maxLag > 0 && time.Since(at) > maxLag
 }
 
 // newUser creates the user for one iteration. The cookie jar is new every time.

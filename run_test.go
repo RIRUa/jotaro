@@ -278,3 +278,25 @@ func TestRunOpenStreamed(t *testing.T) {
 		t.Errorf("concurrency = %d, want 1 (MaxUsers)", got)
 	}
 }
+
+func TestTooLate(t *testing.T) {
+	now := time.Now()
+	cases := map[string]struct {
+		maxLag time.Duration
+		at     time.Time
+		want   bool
+	}{
+		"on time":                {0, now, false},
+		"late within default":    {0, now.Add(-500 * time.Millisecond), false},
+		"late beyond default":    {0, now.Add(-2 * time.Second), true},
+		"late beyond custom":     {100 * time.Millisecond, now.Add(-time.Second), true},
+		"late within custom":     {5 * time.Second, now.Add(-time.Second), false},
+		"negative disables drop": {-1, now.Add(-time.Hour), false},
+	}
+	for name, c := range cases {
+		r := &runner{p: Plan{MaxLag: c.maxLag}}
+		if got := r.tooLate(c.at); got != c.want {
+			t.Errorf("%s: tooLate = %v, want %v", name, got, c.want)
+		}
+	}
+}
