@@ -17,7 +17,7 @@
 
 設計の考え方は [`DESIGN_jp.md`](DESIGN_jp.md)、結果の形式としきい値の仕様は [`docs/result_jp.md`](docs/result_jp.md) にあります。
 
-> **状態: v0.x。** マイナーバージョンのあいだで API が変わることがあります。変更点は [`CHANGELOG.md`](CHANGELOG.md)（英語）にまとめます。
+> **状態: v0.x。** むやみに API を変えず、[Go 1 の互換性の約束](https://go.dev/doc/go1compat)のように、既存のコードが動き続けることを大事にします。例外は既存のバグの修正で、これまでの動作に頼っていたコードに影響が出ることがあります。そうした変更は [`CHANGELOG.md`](CHANGELOG.md)（英語）にまとめます。
 
 ## 試してみる
 
