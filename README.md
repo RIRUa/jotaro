@@ -17,7 +17,7 @@ A Go library for load-testing HTTP servers with scenarios (a flow such as login 
 
 For the design rationale see [`DESIGN.md`](DESIGN.md); for the result format and the threshold spec see [`docs/result.md`](docs/result.md).
 
-> **Status: v0.x.** The API may still change between minor versions. Changes are listed in [`CHANGELOG.md`](CHANGELOG.md).
+> **Status: v0.x.** We do not change the API without a reason, and we aim to keep existing code working, in the spirit of the [Go 1 compatibility promise](https://go.dev/doc/go1compat). The exception is fixing an existing bug, which can change behavior that code relied on. Such changes are listed in [`CHANGELOG.md`](CHANGELOG.md).
 
 ## Try it
 
@@ -189,7 +189,7 @@ claude mcp add jotaro -- jotaro mcp     # Claude Code; other clients take the sa
 ## Caveats
 
 - Only HTTP can be measured
-- Percentiles such as p50 are currently computed by sorting all records, which uses memory on long, high-load runs
+- Without `Plan.Raw`, percentiles such as p50 are approximations within 1% relative error (records are folded into histograms as they arrive, so memory does not grow with the run). Count, min, max and mean stay exact. With `Plan.Raw`, every record is kept in memory and the percentiles are exact
 - There is no statistical comparison (whether two results differ significantly). `check` works by setting criteria and judging pass or fail
 
 ## License

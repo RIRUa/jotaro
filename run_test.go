@@ -213,3 +213,66 @@ func TestRunRawWriteErrorStillReturnsReport(t *testing.T) {
 		t.Errorf("the aggregate should be returned even if writing fails: %+v", rep)
 	}
 }
+
+// Without Plan.Raw, Run folds records into histograms; with it, Run aggregates exactly. Both give the same counts.
+func TestRunAggregatesWithAndWithoutRaw(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(2 * time.Millisecond)
+		w.Write([]byte(`{}`))
+	}))
+	defer srv.Close()
+
+	sc := NewScenario("s", func(ctx context.Context, u *User) error {
+		return u.Step("get", func(s *Step) error { return s.Get("/").Do().ExpectStatus(200) })
+	})
+	plan := Plan{Scenario: sc, BaseURL: srv.URL, Users: 3, Duration: 300 * time.Millisecond}
+
+	streamed, err := Run(context.Background(), plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan.Raw = &bytes.Buffer{}
+	exact, err := Run(context.Background(), plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for name, rep := range map[string]*report.Report{"streamed": streamed, "exact": exact} {
+		if rep.Requests.Count == 0 || len(rep.Scenarios) != 1 || len(rep.Scenarios[0].Steps) != 1 {
+			t.Fatalf("%s: unexpected report %+v", name, rep)
+		}
+		st := rep.Scenarios[0].Steps[0]
+		if st.Count != rep.Requests.Count || st.Failed != 0 || rep.Scenarios[0].Iterations.Count != st.Count {
+			t.Errorf("%s: step %+v, iterations %+v, requests %d", name, st, rep.Scenarios[0].Iterations, rep.Requests.Count)
+		}
+		if len(rep.Series) == 0 || len(rep.Health) == 0 || rep.StartedAt.IsZero() || rep.Elapsed <= 0 {
+			t.Errorf("%s: series/health/start/elapsed missing: %+v", name, rep)
+		}
+		if rep.Series[0].Concurrency != 3 {
+			t.Errorf("%s: concurrency in the first second = %d, want 3", name, rep.Series[0].Concurrency)
+		}
+		if l := rep.Requests.Latency; l.P50 < 2*time.Millisecond || l.P50 > l.Max || l.Min > l.P50 {
+			t.Errorf("%s: latency %+v", name, l)
+		}
+	}
+}
+
+// The open model goes through the same path; dropped arrivals and the Open flag are kept.
+func TestRunOpenStreamed(t *testing.T) {
+	sc := NewScenario("s", func(ctx context.Context, u *User) error {
+		u.Think(50 * time.Millisecond)
+		return nil
+	})
+	rep, err := Run(context.Background(), Plan{
+		Scenario: sc, Arrival: Rate(100, time.Second), MaxUsers: 1, Duration: 300 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !rep.Open || rep.Dropped == 0 || rep.Scenarios[0].Iterations.Count == 0 {
+		t.Errorf("Open = %v, Dropped = %d, iterations = %d", rep.Open, rep.Dropped, rep.Scenarios[0].Iterations.Count)
+	}
+	if got := rep.Series[0].Concurrency; got != 1 {
+		t.Errorf("concurrency = %d, want 1 (MaxUsers)", got)
+	}
+}
