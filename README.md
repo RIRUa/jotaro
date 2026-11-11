@@ -17,7 +17,7 @@ A Go library for load-testing HTTP servers with scenarios (a flow such as login 
 
 For the design rationale see [`DESIGN.md`](DESIGN.md); for the result format and the threshold spec see [`docs/result.md`](docs/result.md).
 
-> **Status: v0.x.** The API may still change between minor versions. Changes are listed in [`CHANGELOG.md`](CHANGELOG.md).
+> **Status: v0.x.** We do not change the API without a reason, and we aim to keep existing code working, in the spirit of the [Go 1 compatibility promise](https://go.dev/doc/go1compat). The exception is fixing an existing bug, which can change behavior that code relied on. Such changes are listed in [`CHANGELOG.md`](CHANGELOG.md).
 
 ## Try it
 
