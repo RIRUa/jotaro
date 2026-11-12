@@ -223,3 +223,25 @@ func TestConnStats(t *testing.T) {
 		t.Error("0 when there are no records")
 	}
 }
+
+// The time series is built from an origin that keeps the monotonic clock (Duration is measured on it), while
+// the reported StartedAt is wall-clock only. Mixing wall-clock offsets with monotonic durations made
+// consecutive iterations of one user overlap by microseconds, which counted one extra running iteration.
+func TestBuildReportOriginKeepsMonotonicClock(t *testing.T) {
+	start := time.Now() // carries a monotonic reading
+	if !strings.Contains(start.String(), " m=") {
+		t.Skip("this platform's time.Now has no monotonic reading")
+	}
+	iters := []record.IterationRecord{{Scenario: "s", Start: start, Duration: time.Millisecond}}
+
+	if got := observedStart(nil, nil, iters); !strings.Contains(got.String(), " m=") {
+		t.Errorf("observedStart dropped the monotonic reading: %v", got)
+	}
+	rep := BuildReport(nil, nil, iters, 0)
+	if strings.Contains(rep.StartedAt.String(), " m=") || rep.StartedAt.Location() != time.UTC {
+		t.Errorf("StartedAt should be wall-clock UTC only: %v", rep.StartedAt)
+	}
+	if !rep.StartedAt.Equal(start) {
+		t.Errorf("StartedAt = %v, want %v", rep.StartedAt, start)
+	}
+}
