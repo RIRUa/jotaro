@@ -96,7 +96,7 @@ Specify exactly one of `Users`, `UserStages` and `Arrival`.
 | Setting | Meaning |
 |---|---|
 | `Users: 20` | 20 users repeat the scenario for `Duration` |
-| `UserStages: []jotaro.UserStage{{Target: 100, For: 30*time.Second}, {Target: 100, For: time.Minute}, {Target: 0, For: 10*time.Second}}` | Change the number of users stage by stage: ramp up to 100 over 30 seconds, hold for 1 minute, ramp down to 0 over 10 seconds (the first stage starts from 0 users) |
+| `UserStages: []jotaro.UserStage{{Target: 100, For: 30*time.Second}, {Target: 100, For: time.Minute}, {Target: 0, For: 10*time.Second}}` | Change the number of users stage by stage: ramp up to 100 over 30 seconds, hold for 1 minute, ramp down to 0 over 10 seconds (the first stage starts from `StartUsers`, 0 by default) |
 | `Arrival: jotaro.Rate(50, time.Second)` | Start 50 scenarios per second |
 | `Arrival: jotaro.Ramp(0, 100, time.Second, 10*time.Second)` | Increase from 0 to 100 per second over 10 seconds |
 | `Arrival: jotaro.Stages(...)` | Switch `Arrival` stage by stage (ramp up → hold → ramp down, etc.) |

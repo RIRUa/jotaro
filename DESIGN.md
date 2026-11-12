@@ -79,12 +79,12 @@ jotaro.Run(ctx, jotaro.Plan{
 ```
 
 - `Users` (closed): N goroutines run sequentially. **Implemented**.
-- `UserStages` (closed, changing number of users): `UserStage{Target, For}` stages move the number of active users linearly from the previous Target (0 at the start) to Target. **Implemented**.
+- `UserStages` (closed, changing number of users): `UserStage{Target, For}` stages move the number of active users linearly from the previous Target (`StartUsers`, 0 by default, at the start) to Target. **Implemented**.
 - `Rate` (open): a fixed arrival rate. Reproduces vegeta's strength at the scenario level. **Implemented**.
 
 How the `UserStages` model works:
 
-- All users (the largest Target) are allocated up front. User `id` is active while the active count is above `id`, so the users with the highest IDs stop first and the lowest start first.
+- All users (the largest of `StartUsers` and the Targets) are allocated up front, and `StartUsers` of them run from the very beginning. User `id` is active while the active count is above `id`, so the users with the highest IDs stop first and the lowest start first.
 - A controller moves the count at precomputed times: a stage from `a` to `b` users places one single-user step every `For / |b - a|`, so the count reaches Target exactly when the stage ends. After the last stage the count stays at its Target until `Duration`.
 - Stopping is cooperative: a user above the count finishes the iteration it is running and then waits (a buffered one-slot channel per user wakes it, so there is no thundering herd). Nothing is interrupted, so `Series.Concurrency` can be above the target for a while when iterations are long.
 - `User.ID` and the iteration number are stable for the whole run; a restarted user continues with the next iteration number. The cookie jar is still new for each iteration.

@@ -49,6 +49,9 @@ type Plan struct {
 	// running (it is not interrupted) and then waits. So the active-user count of the report (Series.Concurrency)
 	// can be above the target for a while. After the last stage the number of users stays at its Target until Duration.
 	UserStages []UserStage
+	// StartUsers is how many users are already running when the first stage of UserStages begins, so that
+	// the load does not have to ramp up from 0. 0 means none. It can only be set together with UserStages.
+	StartUsers int
 	// Arrival is how scenarios arrive (e.g. Rate(10, time.Second)). It cannot be set together with Users or UserStages.
 	Arrival Arrival
 	// MaxUsers is the cap on concurrency with Arrival. 0 means 1000.
@@ -76,6 +79,8 @@ func (p Plan) validate() error {
 		return errors.New("jotaro: Plan.Scenario is not set")
 	case p.modelCount() > 1:
 		return errors.New("jotaro: Plan.Users, Plan.UserStages and Plan.Arrival cannot be set together")
+	case p.StartUsers != 0 && p.UserStages == nil:
+		return errors.New("jotaro: Plan.StartUsers can only be set together with Plan.UserStages")
 	case p.modelCount() == 0:
 		return errors.New("jotaro: Plan.Users must be at least 1 (or set Plan.UserStages or Plan.Arrival)")
 	case p.MaxUsers < 0:
@@ -85,7 +90,7 @@ func (p Plan) validate() error {
 	}
 	switch {
 	case p.UserStages != nil:
-		return validateUserStages(p.UserStages)
+		return validateUserStages(p.StartUsers, p.UserStages)
 	case p.Arrival != nil:
 		return p.Arrival.validate()
 	}
@@ -112,7 +117,7 @@ func (p Plan) modelCount() int {
 // It sizes the connection pool in Run and the slot channel in runOpen.
 func (p Plan) maxConcurrency() int {
 	if p.UserStages != nil {
-		return maxStageTarget(p.UserStages)
+		return maxStageTarget(p.StartUsers, p.UserStages)
 	}
 	if p.Arrival == nil {
 		return p.Users
@@ -248,8 +253,9 @@ func (r *runner) runClosed() {
 // count at the times given by userChanges and wakes the users that just became active. A user that is
 // above the count finishes its current iteration and waits again; it is never interrupted.
 func (r *runner) runStaged() {
-	n := maxStageTarget(r.p.UserStages)
+	n := maxStageTarget(r.p.StartUsers, r.p.UserStages)
 	var active atomic.Int64
+	active.Store(int64(r.p.StartUsers))
 	// wake[id] has room for one pending signal, so a wake-up sent just before the user starts waiting is not lost.
 	wake := make([]chan struct{}, n)
 	for i := range wake {
@@ -283,8 +289,8 @@ func (r *runner) runStaged() {
 	timer := time.NewTimer(0)
 	defer timer.Stop()
 	<-timer.C
-	prev := 0
-	for _, ch := range userChanges(r.p.UserStages) {
+	prev := r.p.StartUsers
+	for _, ch := range userChanges(r.p.StartUsers, r.p.UserStages) {
 		if wait := time.Until(t0.Add(ch.at)); wait > 0 {
 			timer.Reset(wait)
 			select {

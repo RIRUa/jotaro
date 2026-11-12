@@ -103,7 +103,7 @@ Specify **exactly one** of `Users`, `UserStages` and `Arrival`. `Duration` is re
 | Setting | Meaning |
 |---|---|
 | `Users: 20` | closed model: 20 users repeat the scenario for `Duration` |
-| `UserStages: []jotaro.UserStage{{Target: 100, For: 30*time.Second}, {Target: 100, For: time.Minute}, {Target: 0, For: 10*time.Second}}` | closed model with a changing number of users: ramp up, hold, ramp down (starts from 0 users). A user stopped by a lower target finishes its current iteration first |
+| `UserStages: []jotaro.UserStage{{Target: 100, For: 30*time.Second}, {Target: 100, For: time.Minute}, {Target: 0, For: 10*time.Second}}` | closed model with a changing number of users: ramp up, hold, ramp down (starts from `StartUsers`, 0 by default). A user stopped by a lower target finishes its current iteration first |
 | `Arrival: jotaro.Rate(50, time.Second)` | open model: start 50 scenarios per second |
 | `Arrival: jotaro.Ramp(0, 100, time.Second, 10*time.Second)` | rate goes from 0 to 100 per second over 10 seconds |
 | `Arrival: jotaro.Stages(jotaro.Stage{Arrival: ..., For: ...}, ...)` | several stages in order (ramp up → hold → ramp down) |
