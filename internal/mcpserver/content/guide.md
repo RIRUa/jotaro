@@ -98,11 +98,12 @@ creds, ok := accounts.Next() // ok is false when empty or when Once has run out
 
 ## Choosing the load: Plan
 
-Specify **exactly one** of `Users` and `Arrival`. `Duration` is required.
+Specify **exactly one** of `Users`, `UserStages` and `Arrival`. `Duration` is required.
 
 | Setting | Meaning |
 |---|---|
 | `Users: 20` | closed model: 20 users repeat the scenario for `Duration` |
+| `UserStages: []jotaro.UserStage{{Target: 100, For: 30*time.Second}, {Target: 100, For: time.Minute}, {Target: 0, For: 10*time.Second}}` | closed model with a changing number of users: ramp up, hold, ramp down (starts from `StartUsers`, 0 by default). A user stopped by a lower target finishes its current iteration first |
 | `Arrival: jotaro.Rate(50, time.Second)` | open model: start 50 scenarios per second |
 | `Arrival: jotaro.Ramp(0, 100, time.Second, 10*time.Second)` | rate goes from 0 to 100 per second over 10 seconds |
 | `Arrival: jotaro.Stages(jotaro.Stage{Arrival: ..., For: ...}, ...)` | several stages in order (ramp up → hold → ramp down) |
@@ -133,6 +134,6 @@ See the `jotaro://thresholds` resource for the threshold syntax. A saved JSON re
 1. Every `u.Step` has a distinct, stable name (it is the key in the report and in thresholds).
 2. Every request ends with `Decode`, `ExpectStatus`, or an explicit check.
 3. Data extracted from one step (tokens, IDs) is declared outside the step closure and checked before the next step uses it.
-4. `Plan` sets exactly one of `Users` / `Arrival`, and a positive `Duration`.
+4. `Plan` sets exactly one of `Users` / `UserStages` / `Arrival`, and a positive `Duration`.
 5. Only HTTP can be measured.
 6. Do not point the scenario at a server you do not own or are not allowed to load-test.

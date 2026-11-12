@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/cookiejar"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/RIRUa/jotaro/record"
@@ -27,9 +28,10 @@ const (
 
 // Plan describes how load is applied.
 //
-// Specify exactly one of Users (closed model) and Arrival (open model).
+// Specify exactly one of Users, UserStages (closed model) and Arrival (open model).
 //
 //   - Users: a fixed number of users repeat the scenario until Duration has passed.
+//   - UserStages: like Users, but the number of users changes over time (ramp up, hold, ramp down).
 //   - Arrival: scenarios start at a fixed rate, regardless of how long a scenario takes.
 type Plan struct {
 	// Scenario is the flow every virtual user runs.
@@ -39,7 +41,18 @@ type Plan struct {
 
 	// Users is the number of virtual users running at the same time.
 	Users int
-	// Arrival is how scenarios arrive (e.g. Rate(10, time.Second)). It cannot be set together with Users.
+	// UserStages changes the number of users over time in the closed model. It cannot be set together with Users or Arrival.
+	//
+	// Every user keeps its ID (User.ID counts from 0) and its iteration count for the whole run, so a user
+	// that is stopped by a smaller target and started again by a larger one carries on where it left off.
+	// When the target goes down, the users with the highest IDs stop: each one finishes the iteration it is
+	// running (it is not interrupted) and then waits. So the active-user count of the report (Series.Concurrency)
+	// can be above the target for a while. After the last stage the number of users stays at its Target until Duration.
+	UserStages []UserStage
+	// StartUsers is how many users are already running when the first stage of UserStages begins, so that
+	// the load does not have to ramp up from 0. 0 means none. It can only be set together with UserStages.
+	StartUsers int
+	// Arrival is how scenarios arrive (e.g. Rate(10, time.Second)). It cannot be set together with Users or UserStages.
 	Arrival Arrival
 	// MaxUsers is the cap on concurrency with Arrival. 0 means 1000.
 	// Arrivals that come in while the cap is reached are not run and are counted as dropped.
@@ -58,31 +71,54 @@ type Plan struct {
 	Raw io.Writer
 }
 
-// validate checks that the Plan is runnable: a scenario is set, exactly one of Users and Arrival
+// validate checks that the Plan is runnable: a scenario is set, exactly one of Users, UserStages and Arrival
 // is given, and Duration is positive. Run calls it first, so a bad Plan fails before any load is sent.
 func (p Plan) validate() error {
 	switch {
 	case p.Scenario == nil || p.Scenario.Fn == nil:
 		return errors.New("jotaro: Plan.Scenario is not set")
-	case p.Users > 0 && p.Arrival != nil:
-		return errors.New("jotaro: Plan.Users and Plan.Arrival cannot be set together")
-	case p.Users <= 0 && p.Arrival == nil:
-		return errors.New("jotaro: Plan.Users must be at least 1 (or set Plan.Arrival)")
+	case p.modelCount() > 1:
+		return errors.New("jotaro: Plan.Users, Plan.UserStages and Plan.Arrival cannot be set together")
+	case p.StartUsers != 0 && p.UserStages == nil:
+		return errors.New("jotaro: Plan.StartUsers can only be set together with Plan.UserStages")
+	case p.modelCount() == 0:
+		return errors.New("jotaro: Plan.Users must be at least 1 (or set Plan.UserStages or Plan.Arrival)")
 	case p.MaxUsers < 0:
 		return errors.New("jotaro: Plan.MaxUsers must be at least 0")
 	case p.Duration <= 0:
 		return errors.New("jotaro: Plan.Duration must be positive")
 	}
-	if p.Arrival != nil {
+	switch {
+	case p.UserStages != nil:
+		return validateUserStages(p.StartUsers, p.UserStages)
+	case p.Arrival != nil:
 		return p.Arrival.validate()
 	}
 	return nil
+}
+
+// modelCount is how many of Users, UserStages and Arrival are set. It should be exactly 1.
+func (p Plan) modelCount() int {
+	n := 0
+	if p.Users > 0 {
+		n++
+	}
+	if p.UserStages != nil {
+		n++
+	}
+	if p.Arrival != nil {
+		n++
+	}
+	return n
 }
 
 // maxConcurrency is the upper limit of iterations that can run at the same time.
 //
 // It sizes the connection pool in Run and the slot channel in runOpen.
 func (p Plan) maxConcurrency() int {
+	if p.UserStages != nil {
+		return maxStageTarget(p.StartUsers, p.UserStages)
+	}
 	if p.Arrival == nil {
 		return p.Users
 	}
@@ -97,7 +133,7 @@ func (p Plan) maxConcurrency() int {
 // Flow of a run:
 //
 //  1. validate the Plan, and clone the default Transport so connections are not shared with other code
-//  2. start the health sampler, then run the closed (Users) or open (Arrival) loop until Duration ends
+//  2. start the health sampler, then run the closed (Users or UserStages) or open (Arrival) loop until Duration ends
 //  3. wait up to Grace for running iterations, then cancel them
 //  4. build the report and write the raw data if Plan.Raw is set. Without Plan.Raw, records are folded into
 //     histograms as they arrive (percentiles within 1% relative error, memory independent of the run length).
@@ -142,9 +178,12 @@ func Run(ctx context.Context, p Plan) (*report.Report, error) {
 	}
 	r := &runner{p: p, tr: tr, timeout: timeout, col: col, stopCtx: stopCtx, runCtx: runCtx}
 	health := startHealthSampler(report.SeriesInterval)
-	if p.Arrival != nil {
+	switch {
+	case p.Arrival != nil:
 		r.runOpen()
-	} else {
+	case p.UserStages != nil:
+		r.runStaged()
+	default:
 		r.runClosed()
 	}
 	elapsed := time.Since(start)
@@ -204,6 +243,71 @@ func (r *runner) runClosed() {
 				_ = r.p.Scenario.run(u) // the error is kept in the IterationRecord
 			}
 		}()
+	}
+	wg.Wait()
+}
+
+// runStaged is runClosed with a changing number of users (Plan.UserStages).
+//
+// All users are allocated up front and wait until the active count exceeds their ID. A controller moves the
+// count at the times given by userChanges and wakes the users that just became active. A user that is
+// above the count finishes its current iteration and waits again; it is never interrupted.
+func (r *runner) runStaged() {
+	n := maxStageTarget(r.p.StartUsers, r.p.UserStages)
+	var active atomic.Int64
+	active.Store(int64(r.p.StartUsers))
+	// wake[id] has room for one pending signal, so a wake-up sent just before the user starts waiting is not lost.
+	wake := make([]chan struct{}, n)
+	for i := range wake {
+		wake[i] = make(chan struct{}, 1)
+	}
+
+	var wg sync.WaitGroup
+	for id := range n {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for iter := 0; r.stopCtx.Err() == nil; {
+				if int(active.Load()) <= id {
+					select {
+					case <-wake[id]:
+					case <-r.stopCtx.Done():
+					}
+					continue // check the count and the context again
+				}
+				u, err := newUser(r.runCtx, r.p, id, iter, r.tr, r.timeout, r.col)
+				if err != nil {
+					return
+				}
+				_ = r.p.Scenario.run(u) // the error is kept in the IterationRecord
+				iter++
+			}
+		}()
+	}
+
+	t0 := time.Now()
+	timer := time.NewTimer(0)
+	defer timer.Stop()
+	<-timer.C
+	prev := r.p.StartUsers
+	for _, ch := range userChanges(r.p.StartUsers, r.p.UserStages) {
+		if wait := time.Until(t0.Add(ch.at)); wait > 0 {
+			timer.Reset(wait)
+			select {
+			case <-timer.C:
+			case <-r.stopCtx.Done():
+				wg.Wait()
+				return
+			}
+		}
+		active.Store(int64(ch.count))
+		for id := prev; id < ch.count; id++ { // only an increase wakes users
+			select {
+			case wake[id] <- struct{}{}:
+			default:
+			}
+		}
+		prev = ch.count
 	}
 	wg.Wait()
 }

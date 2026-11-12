@@ -79,7 +79,16 @@ jotaro.Run(ctx, jotaro.Plan{
 ```
 
 - `Users`（クローズド）: N 個の goroutine が逐次実行する。**実装済み**。
+- `UserStages`（クローズド、ユーザー数が変化）: `UserStage{Target, For}` の段階で、有効ユーザー数を直前の Target（開始時は `StartUsers`、既定は 0）から Target まで直線的に動かす。**実装済み**。
 - `Rate`（オープン）: 到着レート固定。vegeta の強みをシナリオ単位で再現する。**実装済み**。
+
+`UserStages` モデルの動き:
+
+- 全ユーザー（`StartUsers` と各 Target の最大値ぶん）を先に確保し、そのうち `StartUsers` 人は最初から動く。ユーザー `id` は有効人数が `id` を超えている間だけ動くので、ID の大きいユーザーから先に止まり、小さいユーザーから先に始まる。
+- コントローラが事前に計算した時刻で人数を動かす。`a` 人から `b` 人への段階は `For / |b - a|` ごとに 1 人ずつ動かすので、段階の終わりにちょうど Target に達する。最後の段階のあとは、`Duration` まで Target の人数を保つ。
+- 停止は協調的: 人数を超えたユーザーは、実行中のイテレーションを終えてから待機する（ユーザーごとの容量 1 のチャネルで起こすので、全員が一斉に起きることはない）。何も中断しないので、イテレーションが長いと `Series.Concurrency` が目標を上回る時間が出る。
+- `User.ID` とイテレーション番号は実行全体で安定している。再開したユーザーは次のイテレーション番号から続ける。Cookie jar はイテレーションごとに新しくする。
+- 負荷の形は `Series.Concurrency`（毎秒の実行中イテレーション数のピーク）から読む。専用の系列は持たない。
 
 `Rate` モデルの動き:
 
@@ -153,7 +162,8 @@ Feeder はシナリオの外で作り、クロージャで共有する（`User` 
 |---|---|---|
 | `jotaro` | `scenario.go` `user.go` `step.go` | `Scenario` / `User` / `Step`（`Think`、panic の回復を含む） |
 | | `request.go` `response.go` `exec.go` | リクエスト記述とビルダー、`httptrace` つきの実行、エラー分類 |
-| | `run.go` | `Plan` / `Run`（`Users` / `Arrival` の両モデル。`Plan.Raw` で生データを書く） |
+| | `run.go` | `Plan` / `Run`（`Users` / `UserStages` / `Arrival` の各モデル。`Plan.Raw` で生データを書く） |
+| | `user_stages.go` | `UserStage` と有効ユーザー数のスケジュール |
 | | `arrival.go` | `Arrival` / `Rate` / `Ramp` / `Stages` |
 | | `feeder.go` | `Feeder` / `LoadCSV` |
 | | `health.go` | 負荷生成側の健全性（ゴルーチン数・CPU）を 1 秒ごとにサンプリング |
