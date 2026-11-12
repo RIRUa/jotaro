@@ -34,6 +34,16 @@ if ! grep -q '^## \[Unreleased\]' CHANGELOG.md; then
 	exit 1
 fi
 
+# An empty [Unreleased] would produce a version heading with no body, which the release workflow rejects.
+if [ -z "$(awk '
+	index($0, "## [Unreleased]") == 1 { found = 1; next }
+	found && index($0, "## [") == 1 { exit }
+	found && NF && $0 !~ /^###/ { print; exit }
+' CHANGELOG.md)" ]; then
+	echo "CHANGELOG.md [Unreleased] has no entries; nothing to release" >&2
+	exit 1
+fi
+
 tmp=$(mktemp)
 trap 'rm -f "$tmp"' EXIT
 # Keep an empty [Unreleased] on top and put the version heading right under it.
