@@ -4,6 +4,8 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-11-12
+
 ### Changed
 
 - `Run` without `Plan.Raw` now aggregates incrementally: records are folded into histograms as they arrive instead of being kept, so memory no longer grows with the number of requests (5 million requests: about 1165 MB → 9 MB of collector heap in one measurement). As a result, `P50`–`P99` in that report are approximations within 1% relative error; count, min, max and mean stay exact. With `Plan.Raw` set, every record is kept and the percentiles are exact as before. `BuildReport` and `FromRaw` are unchanged.
