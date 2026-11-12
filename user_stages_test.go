@@ -13,17 +13,21 @@ func TestUserChanges(t *testing.T) {
 	s := time.Second
 	cases := []struct {
 		name   string
+		start  int
 		stages []UserStage
 		want   []userChange
 	}{
-		{"ramp up", []UserStage{{4, 8 * s}}, []userChange{{2 * s, 1}, {4 * s, 2}, {6 * s, 3}, {8 * s, 4}}},
-		{"hold has no changes", []UserStage{{2, 2 * s}, {2, 5 * s}}, []userChange{{1 * s, 1}, {2 * s, 2}}},
-		{"ramp down", []UserStage{{2, s}, {0, 4 * s}}, []userChange{{s / 2, 1}, {s, 2}, {3 * s, 1}, {5 * s, 0}}},
-		{"later stages start where the previous ended", []UserStage{{1, s}, {3, 2 * s}}, []userChange{{s, 1}, {2 * s, 2}, {3 * s, 3}}},
-		{"all zero", []UserStage{{0, s}}, nil},
+		{"ramp up", 0, []UserStage{{4, 8 * s}}, []userChange{{2 * s, 1}, {4 * s, 2}, {6 * s, 3}, {8 * s, 4}}},
+		{"hold has no changes", 0, []UserStage{{2, 2 * s}, {2, 5 * s}}, []userChange{{1 * s, 1}, {2 * s, 2}}},
+		{"ramp down", 0, []UserStage{{2, s}, {0, 4 * s}}, []userChange{{s / 2, 1}, {s, 2}, {3 * s, 1}, {5 * s, 0}}},
+		{"later stages start where the previous ended", 0, []UserStage{{1, s}, {3, 2 * s}}, []userChange{{s, 1}, {2 * s, 2}, {3 * s, 3}}},
+		{"all zero", 0, []UserStage{{0, s}}, nil},
+		{"start users ramp up from the start count", 2, []UserStage{{4, 2 * s}}, []userChange{{s, 3}, {2 * s, 4}}},
+		{"start users hold", 3, []UserStage{{3, s}}, nil},
+		{"start users ramp down", 2, []UserStage{{0, 2 * s}}, []userChange{{s, 1}, {2 * s, 0}}},
 	}
 	for _, tc := range cases {
-		if got := userChanges(tc.stages); !reflect.DeepEqual(got, tc.want) {
+		if got := userChanges(tc.start, tc.stages); !reflect.DeepEqual(got, tc.want) {
 			t.Errorf("%s: got %v, want %v", tc.name, got, tc.want)
 		}
 	}
@@ -40,12 +44,21 @@ func TestValidateUserStages(t *testing.T) {
 		"all zero":        {{Target: 0, For: s}, {Target: 0, For: s}},
 	}
 	for name, st := range bad {
-		if err := validateUserStages(st); err == nil {
+		if err := validateUserStages(0, st); err == nil {
 			t.Errorf("%s: should be an error", name)
 		}
 	}
-	if err := validateUserStages([]UserStage{{1, s}, {0, s}}); err != nil {
+	if err := validateUserStages(0, []UserStage{{1, s}, {0, s}}); err != nil {
 		t.Errorf("valid stages: %v", err)
+	}
+	// With StartUsers, users run from the beginning, so an all-zero Target is fine (a ramp down).
+	if err := validateUserStages(2, []UserStage{{0, s}}); err != nil {
+		t.Errorf("ramp down from StartUsers: %v", err)
+	}
+	for name, start := range map[string]int{"negative": -1, "too many": maxStageUsers + 1} {
+		if err := validateUserStages(start, []UserStage{{1, s}}); err == nil {
+			t.Errorf("StartUsers %s: should be an error", name)
+		}
 	}
 }
 
@@ -53,10 +66,11 @@ func TestPlanValidateUserStages(t *testing.T) {
 	sc := NewScenario("s", func(ctx context.Context, u *User) error { return nil })
 	stages := []UserStage{{Target: 1, For: time.Second}}
 	cases := map[string]Plan{
-		"with Users":   {Scenario: sc, Users: 1, UserStages: stages, Duration: time.Second},
-		"with Arrival": {Scenario: sc, Arrival: Rate(1, time.Second), UserStages: stages, Duration: time.Second},
-		"empty stages": {Scenario: sc, UserStages: []UserStage{}, Duration: time.Second},
-		"bad stage":    {Scenario: sc, UserStages: []UserStage{{Target: 1}}, Duration: time.Second},
+		"with Users":                    {Scenario: sc, Users: 1, UserStages: stages, Duration: time.Second},
+		"with Arrival":                  {Scenario: sc, Arrival: Rate(1, time.Second), UserStages: stages, Duration: time.Second},
+		"empty stages":                  {Scenario: sc, UserStages: []UserStage{}, Duration: time.Second},
+		"bad stage":                     {Scenario: sc, UserStages: []UserStage{{Target: 1}}, Duration: time.Second},
+		"StartUsers without UserStages": {Scenario: sc, Users: 1, StartUsers: 1, Duration: time.Second},
 	}
 	for name, p := range cases {
 		if _, err := Run(context.Background(), p); err == nil {
@@ -231,5 +245,39 @@ func TestRunUserStagesContextCanceled(t *testing.T) {
 	}
 	if d := time.Since(start); d > 2*time.Second {
 		t.Errorf("Run took %v after the context ended", d)
+	}
+}
+
+// TestRunStartUsers checks that the first stage starts with StartUsers users already running,
+// not ramping up from 0: all of them are running at the very beginning.
+func TestRunStartUsers(t *testing.T) {
+	var running, atStart atomic.Int64
+	began := time.Now()
+	sc := NewScenario("s", func(ctx context.Context, u *User) error {
+		n := running.Add(1)
+		defer running.Add(-1)
+		if time.Since(began) < 50*time.Millisecond {
+			for {
+				p := atStart.Load()
+				if n <= p || atStart.CompareAndSwap(p, n) {
+					break
+				}
+			}
+		}
+		time.Sleep(100 * time.Millisecond)
+		return nil
+	})
+	_, err := Run(context.Background(), Plan{
+		Scenario:   sc,
+		StartUsers: 3,
+		// A hold at 3 users: without StartUsers the first stage would ramp up from 0 over the whole second.
+		UserStages: []UserStage{{Target: 3, For: time.Second}},
+		Duration:   300 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := atStart.Load(); got != 3 {
+		t.Errorf("users running within the first 50ms = %d, want 3", got)
 	}
 }

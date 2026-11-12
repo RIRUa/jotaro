@@ -96,7 +96,7 @@ rep, err := jotaro.Run(ctx, jotaro.Plan{
 | 指定 | 内容 |
 |---|---|
 | `Users: 20` | 20 ユーザーが `Duration` の間シナリオを繰り返す |
-| `UserStages: []jotaro.UserStage{{Target: 100, For: 30*time.Second}, {Target: 100, For: time.Minute}, {Target: 0, For: 10*time.Second}}` | ユーザー数を段階ごとに変える。30 秒で 100 人まで増やし、1 分保ち、10 秒で 0 人まで減らす（最初の段階は 0 人から始まる） |
+| `UserStages: []jotaro.UserStage{{Target: 100, For: 30*time.Second}, {Target: 100, For: time.Minute}, {Target: 0, For: 10*time.Second}}` | ユーザー数を段階ごとに変える。30 秒で 100 人まで増やし、1 分保ち、10 秒で 0 人まで減らす（最初の段階は `StartUsers` 人から始まる。既定は 0） |
 | `Arrival: jotaro.Rate(50, time.Second)` | 毎秒 50 回シナリオを開始する |
 | `Arrival: jotaro.Ramp(0, 100, time.Second, 10*time.Second)` | 10 秒かけて毎秒 0 回から 100 回へ増やす |
 | `Arrival: jotaro.Stages(...)` | 段階ごとに `Arrival` を切り替える（上げる → 保つ → 下げる、など） |

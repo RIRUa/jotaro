@@ -11,7 +11,7 @@ import (
 const maxStageUsers = 1_000_000
 
 // UserStage is one stage of Plan.UserStages. During the stage, the number of active users moves
-// linearly from the Target of the previous stage (0 for the first stage) to Target over For.
+// linearly from the Target of the previous stage (Plan.StartUsers, 0 by default, for the first stage) to Target over For.
 // Set Target to the previous Target to hold the number of users.
 //
 // For example, ramp up to 100 users over 30 seconds, hold for 60 seconds, then ramp down to 0 over 10 seconds:
@@ -28,13 +28,19 @@ type UserStage struct {
 	For time.Duration
 }
 
-// validateUserStages requires at least one stage, a non-negative Target below maxStageUsers and a
-// positive For on every stage, and at least one stage with a positive Target (otherwise no user would ever run).
-func validateUserStages(stages []UserStage) error {
-	if len(stages) == 0 {
+// validateUserStages requires a StartUsers within 0 and maxStageUsers, at least one stage, a non-negative Target
+// not above maxStageUsers and a positive For on every stage, and at least one user ever running
+// (a positive StartUsers or a stage with a positive Target).
+func validateUserStages(start int, stages []UserStage) error {
+	switch {
+	case start < 0:
+		return errors.New("jotaro: Plan.StartUsers must be at least 0")
+	case start > maxStageUsers:
+		return fmt.Errorf("jotaro: Plan.StartUsers must be at most %d", maxStageUsers)
+	case len(stages) == 0:
 		return errors.New("jotaro: Plan.UserStages needs at least one stage")
 	}
-	positive := false
+	positive := start > 0
 	for i, st := range stages {
 		switch {
 		case st.Target < 0:
@@ -52,9 +58,9 @@ func validateUserStages(stages []UserStage) error {
 	return nil
 }
 
-// maxStageTarget is the largest Target of the stages: how many users must be allocated.
-func maxStageTarget(stages []UserStage) int {
-	m := 0
+// maxStageTarget is the largest of start and the Targets of the stages: how many users must be allocated.
+func maxStageTarget(start int, stages []UserStage) int {
+	m := start
 	for _, st := range stages {
 		m = max(m, st.Target)
 	}
@@ -68,16 +74,17 @@ type userChange struct {
 }
 
 // userChanges lays the stages out as the changes of the active user count, in time order.
+// The count is start before the first stage.
 //
 // Within a stage that moves from a to b over d, every step of one user is placed at an equal
 // distance, so the count reaches b exactly when the stage ends. For example, 0 to 4 over 8 seconds
 // activates one user at 2, 4, 6 and 8 seconds. A holding stage (a == b) has no changes.
 // After the last stage the count stays at its Target.
-func userChanges(stages []UserStage) []userChange {
+func userChanges(start int, stages []UserStage) []userChange {
 	var (
-		out   []userChange
-		start time.Duration
-		cur   int
+		out []userChange
+		off time.Duration // start of the current stage
+		cur = start
 	)
 	for _, st := range stages {
 		a, b, d := cur, st.Target, st.For
@@ -88,11 +95,11 @@ func userChanges(stages []UserStage) []userChange {
 			}
 			n := (b - a) * step // number of single-user steps in this stage
 			for i := 1; i <= n; i++ {
-				at := start + time.Duration(float64(d)*float64(i)/float64(n))
+				at := off + time.Duration(float64(d)*float64(i)/float64(n))
 				out = append(out, userChange{at: at, count: a + i*step})
 			}
 		}
-		start += d
+		off += d
 		cur = b
 	}
 	return out
