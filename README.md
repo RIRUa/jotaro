@@ -91,14 +91,17 @@ rep, err := jotaro.Run(ctx, jotaro.Plan{
 })
 ```
 
-Specify exactly one of `Users` and `Arrival`.
+Specify exactly one of `Users`, `UserStages` and `Arrival`.
 
 | Setting | Meaning |
 |---|---|
 | `Users: 20` | 20 users repeat the scenario for `Duration` |
+| `UserStages: []jotaro.UserStage{{Target: 100, For: 30*time.Second}, {Target: 100, For: time.Minute}, {Target: 0, For: 10*time.Second}}` | Change the number of users stage by stage: ramp up to 100 over 30 seconds, hold for 1 minute, ramp down to 0 over 10 seconds (the first stage starts from 0 users) |
 | `Arrival: jotaro.Rate(50, time.Second)` | Start 50 scenarios per second |
 | `Arrival: jotaro.Ramp(0, 100, time.Second, 10*time.Second)` | Increase from 0 to 100 per second over 10 seconds |
 | `Arrival: jotaro.Stages(...)` | Switch `Arrival` stage by stage (ramp up → hold → ramp down, etc.) |
+
+With `UserStages`, a user that is stopped by a lower target finishes the iteration it is running and then waits; it is not interrupted. Users keep their `User.ID` and iteration count when they are started again. The number of concurrent iterations over time is `Series.Concurrency` in the report, so you can check the load shape there.
 
 You can also set `MaxUsers` (the cap on concurrency in the open model; arrivals beyond it are counted as dropped), `Timeout` (the limit for a single request), `Grace` (how long to wait for running iterations after `Duration`), and `Raw` (where to write raw data).
 
