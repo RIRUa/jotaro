@@ -46,7 +46,7 @@ func (l *linter) add(sev, rule string, pos token.Pos, msg string) {
 	l.diags = append(l.diags, Diagnostic{Severity: sev, Source: "lint", Rule: rule, Line: p.Line, Column: p.Column, Message: msg})
 }
 
-// checkPlans verifies every jotaro.Plan literal: exactly one of Users and Arrival, and a Duration.
+// checkPlans verifies every jotaro.Plan literal: exactly one of Users, UserStages and Arrival, and a Duration.
 func (l *linter) checkPlans(f *ast.File) {
 	ast.Inspect(f, func(n ast.Node) bool {
 		lit, ok := n.(*ast.CompositeLit)
@@ -61,11 +61,17 @@ func (l *linter) checkPlans(f *ast.File) {
 				}
 			}
 		}
+		models := 0
+		for _, k := range []string{"Users", "UserStages", "Arrival"} {
+			if keys[k] {
+				models++
+			}
+		}
 		switch {
-		case keys["Users"] && keys["Arrival"]:
-			l.add("error", "plan-load-model", lit.Pos(), "Plan sets both Users and Arrival; specify exactly one (Users = closed model, Arrival = open model)")
-		case !keys["Users"] && !keys["Arrival"]:
-			l.add("error", "plan-load-model", lit.Pos(), "Plan sets neither Users nor Arrival; specify exactly one")
+		case models > 1:
+			l.add("error", "plan-load-model", lit.Pos(), "Plan sets more than one of Users, UserStages and Arrival; specify exactly one (Users / UserStages = closed model, Arrival = open model)")
+		case models == 0:
+			l.add("error", "plan-load-model", lit.Pos(), "Plan sets none of Users, UserStages and Arrival; specify exactly one")
 		}
 		if !keys["Duration"] {
 			l.add("error", "plan-duration", lit.Pos(), "Plan.Duration is not set; Run rejects a non-positive Duration")

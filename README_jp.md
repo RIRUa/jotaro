@@ -91,14 +91,17 @@ rep, err := jotaro.Run(ctx, jotaro.Plan{
 })
 ```
 
-`Users` と `Arrival` はどちらか一方だけを指定します。
+`Users`・`UserStages`・`Arrival` のうちちょうど 1 つを指定します。
 
 | 指定 | 内容 |
 |---|---|
 | `Users: 20` | 20 ユーザーが `Duration` の間シナリオを繰り返す |
+| `UserStages: []jotaro.UserStage{{Target: 100, For: 30*time.Second}, {Target: 100, For: time.Minute}, {Target: 0, For: 10*time.Second}}` | ユーザー数を段階ごとに変える。30 秒で 100 人まで増やし、1 分保ち、10 秒で 0 人まで減らす（最初の段階は 0 人から始まる） |
 | `Arrival: jotaro.Rate(50, time.Second)` | 毎秒 50 回シナリオを開始する |
 | `Arrival: jotaro.Ramp(0, 100, time.Second, 10*time.Second)` | 10 秒かけて毎秒 0 回から 100 回へ増やす |
 | `Arrival: jotaro.Stages(...)` | 段階ごとに `Arrival` を切り替える（上げる → 保つ → 下げる、など） |
+
+`UserStages` で目標が下がると、止まるユーザーは実行中のイテレーションを終えてから待機します（中断はしません）。ユーザーは再開しても `User.ID` とイテレーション番号を引き継ぎます。同時に動いているイテレーション数の推移はレポートの `Series.Concurrency` で確認でき、負荷の形を検証できます。
 
 そのほか、`MaxUsers`（オープンのときの同時実行数の上限。超えた分はドロップとして数える）、`Timeout`（1 リクエストの上限）、`Grace`（`Duration` 後に実行中のイテレーションを待つ時間）、`Raw`（生データの書き出し先）を指定できます。
 
