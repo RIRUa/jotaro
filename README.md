@@ -105,7 +105,7 @@ With `UserStages`, a user that is stopped by a lower target finishes the iterati
 
 To repeat a sequence of stages (for example three waves), use `jotaro.RepeatStages(3, stage1, stage2, ...)`; it returns the stages repeated 3 times and can be joined with other stages by `append`. Each round starts from the Target the previous round ended at.
 
-You can also set `MaxUsers` (the cap on concurrency in the open model; arrivals beyond it are counted as dropped), `Timeout` (the limit for a single request), `Grace` (how long to wait for running iterations after `Duration`), and `Raw` (where to write raw data).
+You can also set `MaxUsers` (the cap on concurrency in the open model; arrivals beyond it are counted as dropped), `Timeout` (the limit for a single request), `Grace` (how long to wait for running iterations after `Duration`), `Raw` (where to write raw data), and `Progress` (an `io.Writer`, such as `os.Stderr`, that gets one line per second while the run is in progress, e.g. `12s/60s rps=480 p95=38ms err=0.2%`).
 
 ### 3. Output the results
 
