@@ -6,6 +6,7 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ### Fixed
 
+- `Series.Concurrency` of a report built from raw data (`FromRaw`, `Plan.Raw`) could still count one more running iteration than there were users, mostly on Windows: the start times read back from JSON have a wall clock reading only, which disagrees a little with the monotonic `Duration`, so back-to-back iterations of one user appeared to overlap. An iteration is now cut at the start of the same user's next iteration, since a user never runs two at once. Iterations of different users are unchanged.
 - `Series.Concurrency` could count one more running iteration than there were users when a report was built from records (`Plan.Raw`, `BuildReport`, `FromRaw`): the start offsets were measured on the wall clock and mixed with durations measured on the monotonic clock, so back-to-back iterations of one user could overlap by a few microseconds. Reports built without `Plan.Raw` were not affected.
 
 ## [0.1.2] - 2026-11-12
