@@ -281,3 +281,46 @@ func TestRunStartUsers(t *testing.T) {
 		t.Errorf("users running within the first 50ms = %d, want 3", got)
 	}
 }
+
+func TestRepeatStages(t *testing.T) {
+	s := time.Second
+	up, down := UserStage{Target: 4, For: s}, UserStage{Target: 0, For: s}
+	cases := []struct {
+		name   string
+		n      int
+		stages []UserStage
+		want   []UserStage
+	}{
+		{"once", 1, []UserStage{up, down}, []UserStage{up, down}},
+		{"three times", 3, []UserStage{up, down}, []UserStage{up, down, up, down, up, down}},
+		{"single stage", 2, []UserStage{up}, []UserStage{up, up}},
+		{"zero", 0, []UserStage{up, down}, nil},
+		{"negative", -1, []UserStage{up, down}, nil},
+		{"no stages", 3, nil, nil},
+	}
+	for _, tc := range cases {
+		if got := RepeatStages(tc.n, tc.stages...); !reflect.DeepEqual(got, tc.want) {
+			t.Errorf("%s: got %v, want %v", tc.name, got, tc.want)
+		}
+	}
+
+	// The result is a new slice: changing it must not change the stages given.
+	in := []UserStage{up, down}
+	out := RepeatStages(2, in...)
+	out[0].Target = 99
+	if in[0].Target != 4 {
+		t.Errorf("RepeatStages shares memory with its input: %v", in)
+	}
+
+	// Each round starts from the Target the previous one ended at: 0 -> 2 -> 0 -> 2 -> 0 gives four ramps.
+	got := userChanges(0, RepeatStages(2, UserStage{2, 2 * s}, UserStage{0, 2 * s}))
+	want := []userChange{{s, 1}, {2 * s, 2}, {3 * s, 1}, {4 * s, 0}, {5 * s, 1}, {6 * s, 2}, {7 * s, 1}, {8 * s, 0}}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("repeated shape: got %v, want %v", got, want)
+	}
+
+	// An empty result is rejected by the plan validation like any empty UserStages.
+	if err := validateUserStages(0, RepeatStages(0, up)); err == nil {
+		t.Error("an empty repetition should be rejected by validateUserStages")
+	}
+}
