@@ -6,6 +6,7 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ### Added
 
+- `Plan.Progress`: an `io.Writer` that receives one line per second while a run is in progress, such as `12s/60s rps=480 p95=38ms err=0.2%` (elapsed/duration, throughput of the last second, and p95 and error rate over the run so far). It works with and without `Plan.Raw`, adds no recording cost, and writes nothing after `Run` returns.
 - `RepeatStages(n, stages...)`: repeats a sequence of `UserStage` n times, so a load shape that goes up and down several times (waves, spikes) does not have to be written out by hand. Join it with other stages using `append`.
 - `Plan.StartUsers`: how many users are already running when the first stage of `Plan.UserStages` begins (default 0), so a run can start at full load instead of ramping up from 0. It can only be set together with `UserStages`.
 - `Plan.UserStages` and `UserStage`: change the number of concurrent users over time in the closed model (for example ramp up to 100 users, hold, ramp down), like k6's ramping-vus. It is mutually exclusive with `Plan.Users` and `Plan.Arrival`. Users keep their `User.ID` and iteration count across stops and restarts; a user stopped by a lower target finishes its running iteration first. `Series.Concurrency` shows the resulting load shape. `jotaro mcp`'s lint and authoring guide know the new field.

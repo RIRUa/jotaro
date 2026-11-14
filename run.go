@@ -69,6 +69,13 @@ type Plan struct {
 	// If Raw is not nil, the raw data is written as JSON Lines when Run finishes (record.WriteRaw).
 	// Even if writing fails, the aggregated Report is returned (together with an error).
 	Raw io.Writer
+
+	// If Progress is not nil, one line is written to it every second while the run is in progress,
+	// for example "12s/60s rps=480 p95=38ms err=0.2%" (elapsed/Duration, throughput of the last second,
+	// and p95 and error rate over the run so far). Pass os.Stderr to watch a long run.
+	// The p95 is an approximation within 1% relative error. Nothing is written after Run returns,
+	// and write errors are ignored. It works together with Raw.
+	Progress io.Writer
 }
 
 // validate checks that the Plan is runnable: a scenario is set, exactly one of Users, UserStages and Arrival
@@ -167,14 +174,27 @@ func Run(ctx context.Context, p Plan) (*report.Report, error) {
 	// Raw data needs every record, so keep them in that case and aggregate exactly at the end.
 	// Otherwise fold each record into histograms as it arrives, so memory does not grow with the run.
 	var (
-		col *record.Collector
-		agg *report.Aggregator
+		keep *record.Collector // keeps every record (Plan.Raw)
+		agg  *report.Aggregator
+		col  *record.Collector // what the users report to
 	)
 	if p.Raw != nil {
-		col = record.NewCollector()
+		keep = record.NewCollector()
+		col = keep
 	} else {
 		agg = report.NewAggregator(start)
 		col = record.NewStreamingCollector(agg)
+	}
+	// Progress needs to see the records too, so route them through a streaming collector that feeds both.
+	var stopProgress func()
+	if p.Progress != nil {
+		prog := &progress{}
+		if keep != nil {
+			col = record.NewStreamingCollector(fanout{keeper{keep}, prog})
+		} else {
+			col = record.NewStreamingCollector(fanout{agg, prog})
+		}
+		stopProgress = reportProgress(p.Progress, prog, start, p.Duration)
 	}
 	r := &runner{p: p, tr: tr, timeout: timeout, col: col, stopCtx: stopCtx, runCtx: runCtx}
 	health := startHealthSampler(report.SeriesInterval)
@@ -187,6 +207,9 @@ func Run(ctx context.Context, p Plan) (*report.Report, error) {
 		r.runClosed()
 	}
 	elapsed := time.Since(start)
+	if stopProgress != nil {
+		stopProgress()
+	}
 	healthPoints := health.stop()
 
 	if agg != nil {
@@ -197,7 +220,7 @@ func Run(ctx context.Context, p Plan) (*report.Report, error) {
 		return rep, nil
 	}
 
-	reqs, steps, iters := r.col.Take()
+	reqs, steps, iters := keep.Take()
 	raw := &record.Raw{
 		Open:       p.Arrival != nil,
 		Dropped:    r.col.Dropped(),

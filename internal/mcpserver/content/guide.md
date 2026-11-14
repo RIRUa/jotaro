@@ -111,7 +111,7 @@ Specify **exactly one** of `Users`, `UserStages` and `Arrival`. `Duration` is re
 
 In the open model arrivals keep their pace even when the server slows down, and latency is measured from the scheduled start time (Coordinated Omission correction). Use it to find out how the server behaves under a given request rate; use the closed model for a fixed number of concurrent users.
 
-Other `Plan` fields: `MaxUsers` (concurrency cap in the open model, default 1000; arrivals beyond it are counted as dropped), `Timeout` (per request, default 30s), `Grace` (wait for running iterations after `Duration`, default 30s), `Raw` (an `io.Writer` for raw JSON Lines data).
+Other `Plan` fields: `MaxUsers` (concurrency cap in the open model, default 1000; arrivals beyond it are counted as dropped), `Timeout` (per request, default 30s), `Grace` (wait for running iterations after `Duration`, default 30s), `Raw` (an `io.Writer` for raw JSON Lines data), `Progress` (an `io.Writer` such as `os.Stderr` that gets one progress line per second during the run).
 
 `Stages` ends when the stages end; set `Duration` to the sum of every stage's `For`.
 
