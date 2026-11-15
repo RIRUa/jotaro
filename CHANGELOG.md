@@ -4,6 +4,10 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ## [Unreleased]
 
+### Added
+
+- `jotaro compare base.json new.json` and `report.Compare`: per-step and overall diffs (rps, p50/p95/p99, error rate) between two results, with `-max-p95-regression <percent>` to exit with code 1 on a regression.
+
 ## [0.1.2] - 2026-11-12
 
 ### Changed

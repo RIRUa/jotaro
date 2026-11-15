@@ -4,6 +4,7 @@
 //
 //   - report: build a report in text, JSON or HTML from a saved result
 //   - merge: combine results from several runs (for example several load generators) into one
+//   - compare: diff two results, optionally failing when p95 regressed by more than a given percentage
 //   - check: compare a result with thresholds and exit with code 1 if any fail, which suits CI
 //   - mcp: run an MCP server over stdio that helps an AI assistant write scenarios
 //   - version: print the version
@@ -13,6 +14,7 @@
 //	jotaro report [-raw] [-format html|text|json] [-o output] <result.json | ->
 //	jotaro merge  [-raw] [-format html|text|json] [-o output] <result.json>...
 //	jotaro check  [-raw] -t <threshold> [-t <threshold>]... <result.json | ->
+//	jotaro compare [-raw] [-max-p95-regression <percent>] <base.json> <new.json>
 //	jotaro mcp
 //	jotaro version
 //
@@ -40,6 +42,7 @@ commands:
   report   build a report from a saved JSON result
   merge    combine several JSON results into one
   check    check whether a result meets the thresholds (e.g. p95<200ms); exit code 1 if not
+  compare  diff two results; with -max-p95-regression, exit code 1 on a regression
   mcp      run an MCP server over stdio that helps write scenarios
   version  print the version
 `
@@ -62,6 +65,8 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return runMerge(args[1:], stdin, stdout, stderr)
 	case "check":
 		return runCheck(args[1:], stdin, stdout, stderr)
+	case "compare":
+		return runCompare(args[1:], stdin, stdout, stderr)
 	case "mcp":
 		return runMCP(args[1:], stderr)
 	case "version", "-version", "--version":
@@ -205,6 +210,54 @@ func runMerge(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return 1
 	}
 	return emit(merged, f, *out, stdout, stderr)
+}
+
+// runCompare implements "jotaro compare". It prints per-step and overall diffs.
+// With -max-p95-regression, it returns 1 when a p95 got worse by more than that percentage.
+// Bad usage is 2, and unreadable input is 1.
+func runCompare(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("compare", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	fs.Usage = func() {
+		fmt.Fprintln(stderr, "usage: jotaro compare [-raw] [-max-p95-regression <percent>] <base.json> <new.json>")
+		fs.PrintDefaults()
+	}
+	gate := fs.Float64("max-p95-regression", -1, "exit with code 1 if any p95 got worse by more than this percentage (disabled if negative)")
+	raw := fs.Bool("raw", false, rawUsage)
+	if err := fs.Parse(args); err != nil {
+		if err == flag.ErrHelp {
+			return 0
+		}
+		return 2
+	}
+	if fs.NArg() != 2 {
+		fs.Usage()
+		return 2
+	}
+
+	var reps [2]*report.Report
+	for i, path := range fs.Args() {
+		rep, err := readReport(path, *raw, stdin)
+		if err != nil {
+			fmt.Fprintf(stderr, "jotaro: %s: %s\n", path, errMessage(err))
+			return 1
+		}
+		reps[i] = rep
+	}
+
+	cmp := report.Compare(reps[0], reps[1])
+	cmp.Print(stdout)
+	if *gate < 0 {
+		return 0
+	}
+	bad := cmp.Violations(*gate)
+	for _, d := range bad {
+		fmt.Fprintf(stdout, "FAIL %s %s regressed by %.1f%% (limit %.1f%%)\n", d.Scope, d.Metric, d.Regression(), *gate)
+	}
+	if len(bad) > 0 {
+		return 1
+	}
+	return 0
 }
 
 // thresholdFlags lets -t be given repeatedly.

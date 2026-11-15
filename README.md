@@ -140,6 +140,9 @@ jotaro merge -o merged.json a.json b.json
 
 # Check the thresholds. Exit code 1 if any of them is not met
 jotaro check -t 'p95<200ms' -t 'error_rate<1%' -t 'p99{step=login}<100ms' result.json
+
+# Compare with a previous run; fail if any p95 got more than 10% worse
+jotaro compare -max-p95-regression 10 base.json new.json
 ```
 
 - Pass `-` as the input to read from standard input (`report` / `check`)

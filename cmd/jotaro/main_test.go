@@ -264,3 +264,52 @@ func TestReadErrorsHaveSinglePrefix(t *testing.T) {
 		t.Errorf("prefix doubled: %s", stderr.String())
 	}
 }
+
+// writeLatency writes a result whose only request took lat to path.
+func writeLatency(t *testing.T, path string, lat time.Duration) {
+	t.Helper()
+	rep := report.BuildReport(
+		[]record.Record{{Scenario: "checkout", Step: "login", Code: 200, Latency: lat}},
+		nil, nil, time.Second,
+	)
+	var buf bytes.Buffer
+	if err := rep.WriteJSON(&buf); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, buf.Bytes(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCompare(t *testing.T) {
+	dir := t.TempDir()
+	base, cur := filepath.Join(dir, "base.json"), filepath.Join(dir, "new.json")
+	writeLatency(t, base, 100*time.Millisecond)
+	writeLatency(t, cur, 150*time.Millisecond)
+
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"compare", base, cur}, nil, &stdout, &stderr); code != 0 {
+		t.Fatalf("code = %d, stderr = %s", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "+50.0%") {
+		t.Fatalf("diff missing: %s", stdout.String())
+	}
+
+	stdout.Reset()
+	if code := run([]string{"compare", "-max-p95-regression", "10", base, cur}, nil, &stdout, &stderr); code != 1 {
+		t.Fatalf("gate code = %d, want 1", code)
+	}
+	if code := run([]string{"compare", "-max-p95-regression", "60", base, cur}, nil, &stdout, &stderr); code != 0 {
+		t.Fatalf("loose gate code = %d, want 0", code)
+	}
+}
+
+func TestCompareErrors(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"compare", "only-one.json"}, nil, &stdout, &stderr); code != 2 {
+		t.Errorf("usage code = %d, want 2", code)
+	}
+	if code := run([]string{"compare", "missing-a.json", "missing-b.json"}, nil, &stdout, &stderr); code != 1 {
+		t.Errorf("missing file code = %d, want 1", code)
+	}
+}
