@@ -76,6 +76,16 @@ type Plan struct {
 	// The p95 is an approximation within 1% relative error. Nothing is written after Run returns,
 	// and write errors are ignored. It works together with Raw.
 	Progress io.Writer
+
+	// AbortOn stops the run early when any of its conditions holds, for example
+	// {When: "error_rate>50%", For: 5 * time.Second}. A broken server is then not hit for the whole Duration.
+	// See AbortRule for the syntax and how the conditions are evaluated.
+	//
+	// On abort no new iterations are started and the running ones get Grace, counted from the moment of the abort,
+	// to finish (the rest is cancelled and recorded as record.ErrCanceled), exactly as at the end of Duration.
+	// Run then returns the report of the run up to that point (and writes Plan.Raw) together with an error
+	// that wraps ErrAborted. If Progress is set, a line saying why is written to it.
+	AbortOn []AbortRule
 }
 
 // validate checks that the Plan is runnable: a scenario is set, exactly one of Users, UserStages and Arrival
@@ -94,6 +104,9 @@ func (p Plan) validate() error {
 		return errors.New("jotaro: Plan.MaxUsers must be at least 0")
 	case p.Duration <= 0:
 		return errors.New("jotaro: Plan.Duration must be positive")
+	}
+	if _, err := parseAbortRules(p.AbortOn); err != nil {
+		return err
 	}
 	switch {
 	case p.UserStages != nil:
@@ -168,7 +181,9 @@ func Run(ctx context.Context, p Plan) (*report.Report, error) {
 	// told apart from a request's own timeout (record.ErrTimeout).
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	defer time.AfterFunc(p.Duration+grace, cancel).Stop()
+	graceTimer := time.AfterFunc(p.Duration+grace, cancel)
+	defer graceTimer.Stop()
+	abortRules, _ := parseAbortRules(p.AbortOn) // already checked by validate
 
 	start := time.Now()
 	// Raw data needs every record, so keep them in that case and aggregate exactly at the end.
@@ -185,16 +200,44 @@ func Run(ctx context.Context, p Plan) (*report.Report, error) {
 		agg = report.NewAggregator(start)
 		col = record.NewStreamingCollector(agg)
 	}
-	// Progress needs to see the records too, so route them through a streaming collector that feeds both.
-	var stopProgress func()
-	if p.Progress != nil {
-		prog := &progress{}
+	// Progress and AbortOn need to see the records too, so route them through a streaming collector that feeds
+	// every observer. AbortOn reads an Aggregator: the one of the run, or (with Plan.Raw) a second one just for it.
+	var (
+		prog *progress
+		live *report.Aggregator
+	)
+	if p.Progress != nil || len(abortRules) > 0 {
+		var obs fanout
 		if keep != nil {
-			col = record.NewStreamingCollector(fanout{keeper{keep}, prog})
+			obs = append(obs, keeper{keep})
 		} else {
-			col = record.NewStreamingCollector(fanout{agg, prog})
+			obs = append(obs, agg)
 		}
+		if p.Progress != nil {
+			prog = &progress{}
+			obs = append(obs, prog)
+		}
+		if len(abortRules) > 0 {
+			live = agg
+			if live == nil {
+				live = report.NewAggregator(start)
+				obs = append(obs, live)
+			}
+		}
+		col = record.NewStreamingCollector(obs)
+	}
+	var stopProgress, stopAbort func()
+	if prog != nil {
 		stopProgress = reportProgress(p.Progress, prog, start, p.Duration)
+	}
+	// abortReason is written by the watcher goroutine and read after stopAbort has waited for it.
+	var abortReason string
+	if live != nil {
+		stopAbort = watchAbort(abortRules, live, col, start, func(reason string) {
+			abortReason = reason
+			stop() // no new iterations; the running ones get Grace from now on
+			graceTimer.Reset(grace)
+		})
 	}
 	r := &runner{p: p, tr: tr, timeout: timeout, col: col, stopCtx: stopCtx, runCtx: runCtx}
 	health := startHealthSampler(report.SeriesInterval)
@@ -207,8 +250,18 @@ func Run(ctx context.Context, p Plan) (*report.Report, error) {
 		r.runClosed()
 	}
 	elapsed := time.Since(start)
+	if stopAbort != nil {
+		stopAbort()
+	}
 	if stopProgress != nil {
 		stopProgress()
+	}
+	var abortErr error
+	if abortReason != "" {
+		abortErr = fmt.Errorf("%w: %s", ErrAborted, abortReason)
+		if p.Progress != nil {
+			fmt.Fprintln(p.Progress, "aborted: "+abortReason)
+		}
 	}
 	healthPoints := health.stop()
 
@@ -217,7 +270,7 @@ func Run(ctx context.Context, p Plan) (*report.Report, error) {
 		rep.Open = p.Arrival != nil
 		rep.Dropped = r.col.Dropped()
 		rep.Health = healthPoints
-		return rep, nil
+		return rep, abortErr
 	}
 
 	reqs, steps, iters := keep.Take()
@@ -234,10 +287,10 @@ func Run(ctx context.Context, p Plan) (*report.Report, error) {
 	rep := report.FromRaw(raw)
 	if p.Raw != nil {
 		if err := record.WriteRaw(p.Raw, raw); err != nil {
-			return rep, fmt.Errorf("jotaro: failed to write raw data: %w", err)
+			return rep, errors.Join(abortErr, fmt.Errorf("jotaro: failed to write raw data: %w", err))
 		}
 	}
-	return rep, nil
+	return rep, abortErr
 }
 
 // runner is the state during one Run.

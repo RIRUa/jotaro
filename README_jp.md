@@ -107,6 +107,8 @@ rep, err := jotaro.Run(ctx, jotaro.Plan{
 
 そのほか、`MaxUsers`（オープンのときの同時実行数の上限。超えた分はドロップとして数える）、`Timeout`（1 リクエストの上限）、`Grace`（`Duration` 後に実行中のイテレーションを待つ時間）、`Raw`（生データの書き出し先）、`Progress`（`os.Stderr` などの `io.Writer`。実行中、1 秒ごとに `12s/60s rps=480 p95=38ms err=0.2%` のような 1 行を書き出す）を指定できます。
 
+サーバーが明らかに壊れたら早めに止めたいときは `AbortOn` を指定します。例: `AbortOn: []jotaro.AbortRule{{When: "http_5xx_rate>50%", For: 5 * time.Second}}`。`When` は閾値と同じ書き方ですが、「止める状態」を表します。1 秒ごとに、ここまでの実行全体に対して判定し、`For` はその状態が途切れず続くべき時間です。実行中のイテレーションは `Grace` まで待たれ、その後 `Run` は途中までのレポートと、`errors.Is(err, jotaro.ErrAborted)` を満たすエラーを一緒に返します。
+
 ### 3. 結果を出す
 
 ```go
