@@ -226,3 +226,40 @@ func TestReadJSONSeriesWithoutConns(t *testing.T) {
 		t.Errorf("p = %+v", p)
 	}
 }
+
+// A user never runs two iterations at once. Wall clock start times (a report built from JSON) and the monotonic
+// Duration disagree a little, so the next iteration of a user can appear to start before the previous one ended;
+// that must not count as one more running iteration.
+func TestBuildSeriesConsecutiveIterationsDoNotOverlap(t *testing.T) {
+	t0 := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	ms := time.Millisecond
+	iters := []record.IterationRecord{
+		// User 0: the second iteration starts 1ms before the first one ends.
+		{Scenario: "s", UserID: 0, Iteration: 0, Start: t0, Duration: 100 * ms},
+		{Scenario: "s", UserID: 0, Iteration: 1, Start: t0.Add(99 * ms), Duration: 100 * ms},
+		// User 1 runs at the same time, back to back.
+		{Scenario: "s", UserID: 1, Iteration: 0, Start: t0, Duration: 100 * ms},
+		{Scenario: "s", UserID: 1, Iteration: 1, Start: t0.Add(100 * ms), Duration: 100 * ms},
+	}
+	rep := BuildReport(nil, nil, iters, 0)
+	if got := rep.Series[0].Concurrency; got != 2 {
+		t.Errorf("Concurrency = %d, want 2 (two users)", got)
+	}
+}
+
+// Overlaps that are not between consecutive iterations of one user are real and still counted: another user, another
+// scenario, or an iteration that is not the next one (the arrivals of the open model each have their own user ID).
+func TestBuildSeriesOverlapOfDifferentUsersIsKept(t *testing.T) {
+	t0 := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	ms := time.Millisecond
+	iters := []record.IterationRecord{
+		{Scenario: "a", UserID: 0, Iteration: 0, Start: t0, Duration: 100 * ms},
+		{Scenario: "a", UserID: 1, Iteration: 0, Start: t0.Add(50 * ms), Duration: 100 * ms},
+		{Scenario: "b", UserID: 0, Iteration: 1, Start: t0.Add(60 * ms), Duration: 100 * ms}, // same ID, other scenario
+		{Scenario: "a", UserID: 0, Iteration: 2, Start: t0.Add(70 * ms), Duration: 100 * ms}, // not the next iteration of 0
+	}
+	rep := BuildReport(nil, nil, iters, 0)
+	if got := rep.Series[0].Concurrency; got != 4 {
+		t.Errorf("Concurrency = %d, want 4", got)
+	}
+}

@@ -7,6 +7,17 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 ### Added
 
 - `jotaro compare base.json new.json` and `report.Compare`: per-step and overall diffs (rps, p50/p95/p99, error rate) between two results, with `-max-p95-regression <percent>` to exit with code 1 on a regression.
+- `Plan.AbortOn` and `AbortRule`: stop a run early when a condition holds, for example `{When: "http_5xx_rate>50%", For: 5 * time.Second}`, so a broken server is not hit for the whole `Duration`. `When` uses the threshold syntax (`report.ParseThreshold`) but names the state to stop at. It is evaluated every second against the whole run so far (not a sliding window), and `For` is how long it must hold without a break. On abort no new iterations start and running ones get `Grace` counted from the abort. `Run` returns the partial report (and writes `Plan.Raw`) together with an error wrapping the new `ErrAborted`, and writes an `aborted: ...` line to `Plan.Progress` if it is set.
+- `Plan.Progress`: an `io.Writer` that receives one line per second while a run is in progress, such as `12s/60s rps=480 p95=38ms err=0.2%` (elapsed/duration, throughput of the last second, and p95 and error rate over the run so far). It works with and without `Plan.Raw`, adds no recording cost, and writes nothing after `Run` returns.
+- `RepeatStages(n, stages...)`: repeats a sequence of `UserStage` n times, so a load shape that goes up and down several times (waves, spikes) does not have to be written out by hand. Join it with other stages using `append`.
+- `Plan.StartUsers`: how many users are already running when the first stage of `Plan.UserStages` begins (default 0), so a run can start at full load instead of ramping up from 0. It can only be set together with `UserStages`.
+- `Plan.UserStages` and `UserStage`: change the number of concurrent users over time in the closed model (for example ramp up to 100 users, hold, ramp down), like k6's ramping-vus. It is mutually exclusive with `Plan.Users` and `Plan.Arrival`. Users keep their `User.ID` and iteration count across stops and restarts; a user stopped by a lower target finishes its running iteration first. `Series.Concurrency` shows the resulting load shape. `jotaro mcp`'s lint and authoring guide know the new field.
+
+### Fixed
+
+- `Aggregator.Report` returned the aggregator's live `Status` and `Errors` maps, so a report taken while records were still arriving could race with them. It now returns copies, so it is a true snapshot. `Run` itself was not affected: it only built its report after every user had stopped.
+- `Series.Concurrency` of a report built from raw data (`FromRaw`, `Plan.Raw`) could still count one more running iteration than there were users, mostly on Windows: the start times read back from JSON have a wall clock reading only, which disagrees a little with the monotonic `Duration`, so back-to-back iterations of one user appeared to overlap. An iteration is now cut at the start of the same user's next iteration, since a user never runs two at once. Iterations of different users are unchanged.
+- `Series.Concurrency` could count one more running iteration than there were users when a report was built from records (`Plan.Raw`, `BuildReport`, `FromRaw`): the start offsets were measured on the wall clock and mixed with durations measured on the monotonic clock, so back-to-back iterations of one user could overlap by a few microseconds. Reports built without `Plan.Raw` were not affected.
 
 ## [0.1.2] - 2026-11-12
 

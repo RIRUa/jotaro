@@ -103,9 +103,9 @@ func buildSeries(origin time.Time, reqs []record.Record, iters []record.Iteratio
 		delta int
 	}
 	events := make([]event, 0, 2*len(iters))
-	for _, it := range iters {
-		start := max(it.Start.Sub(origin), 0)
-		events = append(events, event{start, +1}, event{start + max(it.Duration, 0), -1})
+	ends := iterationEnds(origin, iters)
+	for i, it := range iters {
+		events = append(events, event{max(it.Start.Sub(origin), 0), +1}, event{ends[i], -1})
 	}
 	// At the same instant, ends are handled first (so back-to-back iterations are not counted as overlapping).
 	slices.SortFunc(events, func(a, b event) int {
@@ -153,4 +153,33 @@ func mergeSeries(a, b []SeriesPoint, offset int) []SeriesPoint {
 	}
 	slices.SortFunc(out, func(x, y SeriesPoint) int { return x.Second - y.Second })
 	return out
+}
+
+// iterationEnds returns the end of each iteration as an offset from origin, in the order of iters.
+//
+// A user runs its iterations one after another, so an iteration never overlaps the next one of the same user.
+// Records read back from JSON (FromRaw) have a wall clock reading only, while Duration was measured on the monotonic clock;
+// the two clocks disagree by a little (up to about a millisecond on Windows), which would make back-to-back iterations of
+// one user overlap and count one more running iteration. The end of an iteration is therefore cut at the start of the
+// user's next iteration (Iteration + 1 of the same scenario and user) when it would pass it.
+// Iterations of different users, and reports with no such overlap, are unchanged.
+func iterationEnds(origin time.Time, iters []record.IterationRecord) []time.Duration {
+	type key struct {
+		scenario  string
+		user, num int
+	}
+	start := make([]time.Duration, len(iters))
+	ends := make([]time.Duration, len(iters))
+	byKey := make(map[key]int, len(iters)) // the position of each iteration, to find the next one
+	for i, it := range iters {
+		start[i] = max(it.Start.Sub(origin), 0)
+		ends[i] = start[i] + max(it.Duration, 0)
+		byKey[key{it.Scenario, it.UserID, it.Iteration}] = i
+	}
+	for i, it := range iters {
+		if next, ok := byKey[key{it.Scenario, it.UserID, it.Iteration + 1}]; ok && start[next] >= start[i] {
+			ends[i] = min(ends[i], start[next])
+		}
+	}
+	return ends
 }

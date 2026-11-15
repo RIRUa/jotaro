@@ -79,7 +79,17 @@ jotaro.Run(ctx, jotaro.Plan{
 ```
 
 - `Users` (closed): N goroutines run sequentially. **Implemented**.
+- `UserStages` (closed, changing number of users): `UserStage{Target, For}` stages move the number of active users linearly from the previous Target (`StartUsers`, 0 by default, at the start) to Target. **Implemented**.
 - `Rate` (open): a fixed arrival rate. Reproduces vegeta's strength at the scenario level. **Implemented**.
+
+How the `UserStages` model works:
+
+- All users (the largest of `StartUsers` and the Targets) are allocated up front, and `StartUsers` of them run from the very beginning. User `id` is active while the active count is above `id`, so the users with the highest IDs stop first and the lowest start first.
+- A controller moves the count at precomputed times: a stage from `a` to `b` users places one single-user step every `For / |b - a|`, so the count reaches Target exactly when the stage ends. After the last stage the count stays at its Target until `Duration`.
+- Stopping is cooperative: a user above the count finishes the iteration it is running and then waits (a buffered one-slot channel per user wakes it, so there is no thundering herd). Nothing is interrupted, so `Series.Concurrency` can be above the target for a while when iterations are long.
+- `User.ID` and the iteration number are stable for the whole run; a restarted user continues with the next iteration number. The cookie jar is still new for each iteration.
+- The load shape is read from `Series.Concurrency` (the peak number of running iterations per second); no separate series is kept.
+- `RepeatStages(n, stages...)` is only a helper that returns the stages repeated n times as a plain `[]UserStage`. The controller and validation know nothing about repetition, so a repeated shape behaves exactly like the same stages written out by hand.
 
 How the `Rate` model works:
 
@@ -93,6 +103,7 @@ How the `Users` model ends:
 - After `Duration` has passed, no new iterations are started.
 - Running iterations are waited for up to `Grace` (default 30 seconds). Those that exceed it are aborted and recorded as `canceled`. A request's own timeout (`Timeout`, default 30 seconds) is `timeout`, which is distinguished from this.
 - When the parent `ctx` ends, everything, including running iterations, stops immediately.
+- `Plan.AbortOn` ends a run early. Every second the aggregator's snapshot is checked against each rule (a threshold read as "stop when this holds"); a rule that has held for its `For` without a break fires. It then behaves like the end of `Duration` (no new iterations), except that `Grace` is counted from the abort. `Run` returns the partial report with an error wrapping `ErrAborted`, so CI fails by default. The condition covers the whole run so far, not a sliding window, so a late outage moves it slowly; a rule such as `http_5xx_rate>50%` suits a server that is broken from the start.
 - As a result `Report.Elapsed` is slightly longer than `Duration`, and RPS comes out slightly low.
 
 ### Per-user data (Feeder)
@@ -153,7 +164,8 @@ There are four packages. The entry point for users is `jotaro` (the side that ap
 |---|---|---|
 | `jotaro` | `scenario.go` `user.go` `step.go` | `Scenario` / `User` / `Step` (including `Think` and panic recovery) |
 | | `request.go` `response.go` `exec.go` | Request description and builder, execution with `httptrace`, error classification |
-| | `run.go` | `Plan` / `Run` (both the `Users` and `Arrival` models; `Plan.Raw` writes raw data) |
+| | `run.go` | `Plan` / `Run` (the `Users`, `UserStages` and `Arrival` models; `Plan.Raw` writes raw data) |
+| | `user_stages.go` | `UserStage` and the schedule of the active user count |
 | | `arrival.go` | `Arrival` / `Rate` / `Ramp` / `Stages` |
 | | `feeder.go` | `Feeder` / `LoadCSV` |
 | | `health.go` | Samples the health of the load generator (goroutines, CPU) every second |

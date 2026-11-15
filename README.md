@@ -91,16 +91,23 @@ rep, err := jotaro.Run(ctx, jotaro.Plan{
 })
 ```
 
-Specify exactly one of `Users` and `Arrival`.
+Specify exactly one of `Users`, `UserStages` and `Arrival`.
 
 | Setting | Meaning |
 |---|---|
 | `Users: 20` | 20 users repeat the scenario for `Duration` |
+| `UserStages: []jotaro.UserStage{{Target: 100, For: 30*time.Second}, {Target: 100, For: time.Minute}, {Target: 0, For: 10*time.Second}}` | Change the number of users stage by stage: ramp up to 100 over 30 seconds, hold for 1 minute, ramp down to 0 over 10 seconds (the first stage starts from `StartUsers`, 0 by default) |
 | `Arrival: jotaro.Rate(50, time.Second)` | Start 50 scenarios per second |
 | `Arrival: jotaro.Ramp(0, 100, time.Second, 10*time.Second)` | Increase from 0 to 100 per second over 10 seconds |
 | `Arrival: jotaro.Stages(...)` | Switch `Arrival` stage by stage (ramp up → hold → ramp down, etc.) |
 
-You can also set `MaxUsers` (the cap on concurrency in the open model; arrivals beyond it are counted as dropped), `Timeout` (the limit for a single request), `Grace` (how long to wait for running iterations after `Duration`), and `Raw` (where to write raw data).
+With `UserStages`, a user that is stopped by a lower target finishes the iteration it is running and then waits; it is not interrupted. Users keep their `User.ID` and iteration count when they are started again. The number of concurrent iterations over time is `Series.Concurrency` in the report, so you can check the load shape there.
+
+To repeat a sequence of stages (for example three waves), use `jotaro.RepeatStages(3, stage1, stage2, ...)`; it returns the stages repeated 3 times and can be joined with other stages by `append`. Each round starts from the Target the previous round ended at.
+
+You can also set `MaxUsers` (the cap on concurrency in the open model; arrivals beyond it are counted as dropped), `Timeout` (the limit for a single request), `Grace` (how long to wait for running iterations after `Duration`), `Raw` (where to write raw data), and `Progress` (an `io.Writer`, such as `os.Stderr`, that gets one line per second while the run is in progress, e.g. `12s/60s rps=480 p95=38ms err=0.2%`).
+
+To stop a run as soon as the server is clearly broken, set `AbortOn`, for example `AbortOn: []jotaro.AbortRule{{When: "http_5xx_rate>50%", For: 5 * time.Second}}`. `When` uses the threshold syntax but describes the state to stop at; it is checked every second against the whole run so far, and `For` is how long it must hold. Running iterations get `Grace` to finish, then `Run` returns the partial report together with an error that satisfies `errors.Is(err, jotaro.ErrAborted)`.
 
 ### 3. Output the results
 
