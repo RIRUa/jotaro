@@ -299,3 +299,49 @@ func BenchmarkAggregatorObserveRequestParallel(b *testing.B) {
 		}
 	})
 }
+
+// A Report taken while records keep arriving must be safe to read: its maps must not be the live ones.
+// Run with -race to see the failure this guards against.
+func TestAggregatorReportIsSnapshot(t *testing.T) {
+	origin := time.Now()
+	a := NewAggregator(origin)
+	done := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; ; i++ {
+			select {
+			case <-done:
+				return
+			default:
+			}
+			r := record.Record{Scenario: "s", Step: "get", Start: time.Now(), Latency: time.Millisecond, Code: 500 + i%2, Err: record.ErrTimeout}
+			a.ObserveRequest(r)
+		}
+	}()
+
+	var last *Report
+	for range 200 {
+		last = a.Report(time.Since(origin))
+		_ = last.Check(Threshold{Metric: "http_5xx_rate", Op: ">", Value: 0.5}) // reads Status of the snapshot
+		for _, c := range last.Requests.Errors {                                // and Errors
+			_ = c
+		}
+		for _, sc := range last.Scenarios {
+			for _, st := range sc.Steps {
+				for range st.Requests.Status {
+				}
+			}
+		}
+	}
+	close(done)
+	wg.Wait()
+
+	// The earlier snapshot is not changed by records that arrived after it.
+	n := last.Requests.Count
+	a.ObserveRequest(record.Record{Scenario: "s", Step: "get", Start: time.Now(), Latency: time.Millisecond, Code: 500})
+	if last.Requests.Count != n {
+		t.Errorf("snapshot changed: Count %d -> %d", n, last.Requests.Count)
+	}
+}

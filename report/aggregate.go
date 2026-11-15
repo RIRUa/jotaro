@@ -3,6 +3,7 @@ package report
 import (
 	"cmp"
 	"fmt"
+	"maps"
 	"slices"
 	"sync"
 	"time"
@@ -139,8 +140,8 @@ func (q *reqAcc) stats() RequestStats {
 		NewConns:    q.newConns,
 		ReusedConns: q.reusedConns,
 		Corrected:   q.corrected.latency(),
-		Status:      q.status,
-		Errors:      q.errors,
+		Status:      maps.Clone(q.status),
+		Errors:      maps.Clone(q.errors),
 		BytesIn:     q.bytesIn,
 		BytesOut:    q.bytesOut,
 	}
@@ -343,6 +344,9 @@ func (a *Aggregator) ObserveIterationStart(t time.Time) {
 
 // Report returns the result so far. elapsed is the length of the run.
 // Open, Dropped and Health are not known here; the caller sets them.
+//
+// The Report is a snapshot: it shares nothing with the Aggregator, so it can be read (for example
+// with Check) while records keep arriving.
 func (a *Aggregator) Report(elapsed time.Duration) *Report {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -364,7 +368,7 @@ func (a *Aggregator) Report(elapsed time.Duration) *Report {
 				Failed: sc.failed,
 				Active: sc.active.latency(),
 				Total:  sc.total.latency(),
-				Errors: sc.errors,
+				Errors: maps.Clone(sc.errors),
 			},
 		}
 		steps := make([]*stepAcc, 0, len(sc.steps))
@@ -382,7 +386,7 @@ func (a *Aggregator) Report(elapsed time.Duration) *Report {
 				Count:    st.count,
 				Failed:   st.failed,
 				Duration: st.dur.latency(),
-				Errors:   st.errors,
+				Errors:   maps.Clone(st.errors),
 				Requests: st.reqs.stats(),
 			})
 		}

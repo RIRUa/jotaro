@@ -107,6 +107,8 @@ To repeat a sequence of stages (for example three waves), use `jotaro.RepeatStag
 
 You can also set `MaxUsers` (the cap on concurrency in the open model; arrivals beyond it are counted as dropped), `Timeout` (the limit for a single request), `Grace` (how long to wait for running iterations after `Duration`), `Raw` (where to write raw data), and `Progress` (an `io.Writer`, such as `os.Stderr`, that gets one line per second while the run is in progress, e.g. `12s/60s rps=480 p95=38ms err=0.2%`).
 
+To stop a run as soon as the server is clearly broken, set `AbortOn`, for example `AbortOn: []jotaro.AbortRule{{When: "http_5xx_rate>50%", For: 5 * time.Second}}`. `When` uses the threshold syntax but describes the state to stop at; it is checked every second against the whole run so far, and `For` is how long it must hold. Running iterations get `Grace` to finish, then `Run` returns the partial report together with an error that satisfies `errors.Is(err, jotaro.ErrAborted)`.
+
 ### 3. Output the results
 
 ```go

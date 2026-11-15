@@ -103,6 +103,7 @@ How the `Users` model ends:
 - After `Duration` has passed, no new iterations are started.
 - Running iterations are waited for up to `Grace` (default 30 seconds). Those that exceed it are aborted and recorded as `canceled`. A request's own timeout (`Timeout`, default 30 seconds) is `timeout`, which is distinguished from this.
 - When the parent `ctx` ends, everything, including running iterations, stops immediately.
+- `Plan.AbortOn` ends a run early. Every second the aggregator's snapshot is checked against each rule (a threshold read as "stop when this holds"); a rule that has held for its `For` without a break fires. It then behaves like the end of `Duration` (no new iterations), except that `Grace` is counted from the abort. `Run` returns the partial report with an error wrapping `ErrAborted`, so CI fails by default. The condition covers the whole run so far, not a sliding window, so a late outage moves it slowly; a rule such as `http_5xx_rate>50%` suits a server that is broken from the start.
 - As a result `Report.Elapsed` is slightly longer than `Duration`, and RPS comes out slightly low.
 
 ### Per-user data (Feeder)
