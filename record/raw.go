@@ -134,54 +134,85 @@ func derefTime(t *time.Time) time.Time {
 // ns converts d to integer nanoseconds.
 func ns(d time.Duration) int64 { return d.Nanoseconds() }
 
+// rawEncoder writes the lines of a raw data stream. It is shared by WriteRaw and RawWriter,
+// so both produce the same bytes for the same record.
+type rawEncoder struct {
+	bw  *bufio.Writer
+	enc *json.Encoder
+}
+
+func newRawEncoder(w io.Writer) *rawEncoder {
+	bw := bufio.NewWriter(w)
+	enc := json.NewEncoder(bw)
+	enc.SetEscapeHTML(false)
+	return &rawEncoder{bw: bw, enc: enc}
+}
+
+func (e *rawEncoder) meta(open bool, dropped int, startedAt time.Time, elapsed time.Duration) error {
+	return e.enc.Encode(rawMeta{
+		Type: "meta", Version: RawVersion, Open: open, Dropped: dropped,
+		StartedAt: utcPtr(startedAt), ElapsedNS: ns(elapsed),
+	})
+}
+
+func (e *rawEncoder) request(r Record) error {
+	return e.enc.Encode(rawRequest{
+		Type: "request", Scenario: r.Scenario, Step: r.Step, UserID: r.UserID, Iteration: r.Iteration,
+		Method: r.Method, URL: r.URL, Code: r.Code, Err: string(r.Err),
+		Scheduled: utcPtr(r.Scheduled), Start: utc(r.Start), LatencyNS: ns(r.Latency), Conn: string(r.Conn),
+		DNSNS: ns(r.DNS), ConnectNS: ns(r.Connect), TLSNS: ns(r.TLS), TTFBNS: ns(r.TTFB),
+		BytesOut: r.BytesOut, BytesIn: r.BytesIn,
+	})
+}
+
+func (e *rawEncoder) step(s StepRecord) error {
+	return e.enc.Encode(rawStep{
+		Type: "step", Scenario: s.Scenario, Step: s.Step, UserID: s.UserID, Iteration: s.Iteration,
+		Start: utc(s.Start), DurationNS: ns(s.Duration), Err: string(s.Err),
+	})
+}
+
+func (e *rawEncoder) iteration(it IterationRecord) error {
+	return e.enc.Encode(rawIteration{
+		Type: "iteration", Scenario: it.Scenario, UserID: it.UserID, Iteration: it.Iteration,
+		Start: utc(it.Start), DurationNS: ns(it.Duration), ThinkNS: ns(it.Think), Err: string(it.Err),
+	})
+}
+
+func (e *rawEncoder) health(h HealthPoint) error {
+	return e.enc.Encode(rawHealth{Type: "health", Second: h.Second, Goroutines: h.Goroutines, CPU: h.CPU})
+}
+
 // WriteRaw writes the raw data to w as JSON Lines (one record per line).
 //
 // The first line holds information about the whole run (type "meta"), followed by request / step / iteration / health lines.
 // It returns an error if writing fails; what was written until then stays in w.
 func WriteRaw(w io.Writer, raw *Raw) error {
-	bw := bufio.NewWriter(w)
-	enc := json.NewEncoder(bw)
-	enc.SetEscapeHTML(false)
-
-	if err := enc.Encode(rawMeta{
-		Type: "meta", Version: RawVersion, Open: raw.Open, Dropped: raw.Dropped,
-		StartedAt: utcPtr(raw.StartedAt), ElapsedNS: ns(raw.Elapsed),
-	}); err != nil {
+	e := newRawEncoder(w)
+	if err := e.meta(raw.Open, raw.Dropped, raw.StartedAt, raw.Elapsed); err != nil {
 		return err
 	}
 	for _, r := range raw.Requests {
-		if err := enc.Encode(rawRequest{
-			Type: "request", Scenario: r.Scenario, Step: r.Step, UserID: r.UserID, Iteration: r.Iteration,
-			Method: r.Method, URL: r.URL, Code: r.Code, Err: string(r.Err),
-			Scheduled: utcPtr(r.Scheduled), Start: utc(r.Start), LatencyNS: ns(r.Latency), Conn: string(r.Conn),
-			DNSNS: ns(r.DNS), ConnectNS: ns(r.Connect), TLSNS: ns(r.TLS), TTFBNS: ns(r.TTFB),
-			BytesOut: r.BytesOut, BytesIn: r.BytesIn,
-		}); err != nil {
+		if err := e.request(r); err != nil {
 			return err
 		}
 	}
 	for _, s := range raw.Steps {
-		if err := enc.Encode(rawStep{
-			Type: "step", Scenario: s.Scenario, Step: s.Step, UserID: s.UserID, Iteration: s.Iteration,
-			Start: utc(s.Start), DurationNS: ns(s.Duration), Err: string(s.Err),
-		}); err != nil {
+		if err := e.step(s); err != nil {
 			return err
 		}
 	}
 	for _, it := range raw.Iterations {
-		if err := enc.Encode(rawIteration{
-			Type: "iteration", Scenario: it.Scenario, UserID: it.UserID, Iteration: it.Iteration,
-			Start: utc(it.Start), DurationNS: ns(it.Duration), ThinkNS: ns(it.Think), Err: string(it.Err),
-		}); err != nil {
+		if err := e.iteration(it); err != nil {
 			return err
 		}
 	}
 	for _, h := range raw.Health {
-		if err := enc.Encode(rawHealth{Type: "health", Second: h.Second, Goroutines: h.Goroutines, CPU: h.CPU}); err != nil {
+		if err := e.health(h); err != nil {
 			return err
 		}
 	}
-	return bw.Flush()
+	return e.bw.Flush()
 }
 
 // ReadRaw reads JSON Lines written by WriteRaw.
@@ -223,6 +254,7 @@ func (raw *Raw) addLine(line json.RawMessage) error {
 		if m.Version < 1 || m.Version > RawVersion {
 			return fmt.Errorf("unsupported raw version %d (want 1..%d)", m.Version, RawVersion)
 		}
+		// A stream written by RawWriter has two meta lines (see RawWriter); the last one wins.
 		raw.Open, raw.Dropped = m.Open, m.Dropped
 		raw.StartedAt, raw.Elapsed = derefTime(m.StartedAt), time.Duration(m.ElapsedNS)
 	case "request":

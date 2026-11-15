@@ -4,6 +4,10 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ## [Unreleased]
 
+### Changed
+
+- `Plan.Raw` now streams: each record is written to it as it arrives (`record.RawWriter`) instead of being kept in memory and written at the end, so memory stays constant with `Plan.Raw` too. The `Report` that `Run` returns is aggregated incrementally in that case as well, so its percentiles are within 1% relative error (they were exact before); re-aggregate the raw data with `jotaro report -raw` or `report.FromRaw` for exact ones. Lines are now in arrival order and the stream ends with a second `meta` line holding the final `dropped` and `elapsed_ns`; `ReadRaw` (including older versions) reads it unchanged, and `RawVersion` stays `1`.
+
 ### Added
 
 - Richer response checks: `Response.ExpectStatusIn`, `ExpectHeader`, `ExpectBodyContains` and `ExpectJSON(path, want)`, all reported as `expect_mismatch` like `ExpectStatus`, and `Response.JSON(path)` to pull one value out of a JSON body with a dot path such as `data.items.0.id`, without a struct. `ExpectError` gains a `Detail` field for non-status mismatches (`Want` is 0 for them). No new dependencies.
