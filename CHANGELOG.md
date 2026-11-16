@@ -6,6 +6,7 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ### Added
 
+- `jotaro mcp`: the `jotaro://result` resource explains how to save a result and how to read it (structure, what each number and error kind means, what to check first).
 - `jotaro mcp`: the `summarize_result` tool returns the key numbers of a saved result file (throughput, error rate, latency per step, dropped arrivals, the worst second) and warnings such as a saturated load generator, without the histograms and the per-second series.
 - `jotaro mcp`: the `check_result` tool judges a saved result file (JSON, or raw data with `raw: true`) against thresholds, like `jotaro check`, and returns pass or fail per threshold with the measured value.
 

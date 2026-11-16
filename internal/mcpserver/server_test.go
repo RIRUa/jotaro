@@ -49,6 +49,7 @@ func TestResources(t *testing.T) {
 	for _, tt := range []struct{ uri, contains string }{
 		{"jotaro://guide", "exactly one"},
 		{"jotaro://thresholds", "error_rate"},
+		{"jotaro://result", "expect_mismatch"},
 	} {
 		res, err := cs.ReadResource(context.Background(), &mcp.ReadResourceParams{URI: tt.uri})
 		if err != nil {

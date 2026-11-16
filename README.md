@@ -173,6 +173,7 @@ claude mcp add jotaro -- jotaro mcp     # Claude Code; other clients take the sa
 |---|---|---|
 | Resource | `jotaro://guide` | How to write a scenario: skeleton, API overview, load models, checklist |
 | Resource | `jotaro://thresholds` | Threshold syntax and metrics |
+| Resource | `jotaro://result` | How to save a result and read it: structure, what each number and error kind means, what to check first |
 | Prompt | `write_scenario` | Write a scenario for a described flow, then check it |
 | Tool | `check_scenario` | Check a scenario file: Go syntax, jotaro lint (`Users` xor `Arrival`, unchecked responses, duplicate step names, ...) and a type check by compiling. Pass `dir` (a module that requires jotaro) to check against its jotaro version; without it a temporary module with the latest jotaro is used, which needs network access |
 | Tool | `validate_threshold` | Parse a threshold such as `p99{step=login}<100ms` |

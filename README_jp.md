@@ -173,6 +173,7 @@ claude mcp add jotaro -- jotaro mcp     # Claude Code の場合。他のクラ�
 |---|---|---|
 | Resource | `jotaro://guide` | シナリオの書き方（雛形・API の概要・負荷モデル・チェックリスト） |
 | Resource | `jotaro://thresholds` | しきい値の文法と指標 |
+| Resource | `jotaro://result` | 結果の保存方法と読み方（構造、各数値とエラー種別の意味、最初に確認すること） |
 | Prompt | `write_scenario` | 指定したフローのシナリオを書き、チェックまで行う |
 | Tool | `check_scenario` | シナリオを検査する。Go の構文、jotaro 固有の lint（`Users` と `Arrival` はどちらか一方、レスポンス未検証、Step 名の重複など）、コンパイルによる型チェック。`dir`（jotaro を require している module）を渡すとその jotaro のバージョンで検査し、省略すると最新の jotaro を使う一時 module を作る（ネットワークが必要） |
 | Tool | `validate_threshold` | `p99{step=login}<100ms` のようなしきい値をパースする |
