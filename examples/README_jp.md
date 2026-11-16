@@ -7,6 +7,7 @@
 | サンプル | 内容 |
 |---|---|
 | [`checkout`](checkout) | 基本: 短いフロー（ログイン → 商品一覧 → 注文）、クローズド／オープンの負荷モデル、ステージ、HTML と生データの出力 |
+| [`mix`](mix) | 重み付きのシナリオ構成（browse 70%・buy 30%）、人数の波、壊れた実行の中断、進捗とメトリクスの公開、シナリオごとのしきい値。小さな負荷試験の構成の見本 |
 | [`marketplace`](marketplace) | 深く現実的なシナリオ: 1 つのシナリオで複数種類の訪問者を演じ、状態を持つセッション、再試行、ポーリング、実行を失敗させるしきい値を扱う |
 
 ## checkout
@@ -60,3 +61,33 @@ go run ./examples/marketplace -users 10 -pace 0.2     # クローズドモデル
 | `-format F` / `-o FILE` / `-raw FILE` | `checkout` と同じ |
 
 訪問者の行動とモックサーバーが見た内容の集計は標準エラーに出るので、`-format json` をパイプでつなげます。
+
+## mix
+
+プラン全体の機能をまとめた小さな負荷試験です。モックショップに対し、イテレーションの 70% が `browse`、30% が `buy` を実行します。次のものを扱います。
+
+- `Plan.Scenarios` と `Weighted`: 独立した流れを重みでランダムに選ぶ
+- `Plan.UserStages`・`RepeatStages`・`StartUsers`: 5 人から 20 人まで上げて戻す波を 2 回
+- `Plan.AbortOn` と `ErrAborted`: 壊れたサーバーを叩き続けず、中断までのレポートも出力する
+- `Plan.Progress`（1 秒ごとに 1 行、標準エラーへ）と `Plan.MetricsAddr`（Prometheus の `/metrics`。`-metrics` を付けたときだけ有効）
+- `ExpectStatusIn`・`ExpectJSON`・`Response.JSON(path)`: 構造体を宣言せずに JSON を検証・取り出し
+- シナリオごとのしきい値（`{scenario=...}`）と、イテレーション全体の時間（`iteration_p95`）
+
+ファイル構成がそのまま見本です: `main.go`（フラグ・プラン・実行・保存・判定）、`scenarios.go`、`thresholds.go`、`mock.go`。
+
+```sh
+go run ./examples/mix                           # 12 秒、人数の波が 2 回
+go run ./examples/mix -break-after 2s           # 2 秒後にモックが壊れ、AbortOn が実行を止める（終了ステータス 1）
+go run ./examples/mix -metrics :9090            # 実行中は http://localhost:9090/metrics も公開
+go run ./examples/mix -format json -o result.json
+```
+
+| フラグ | 意味 |
+|---|---|
+| `-duration D` | 実行時間（既定 `12s`）。2 回の波はこの時間に割り付けられる |
+| `-break-after D` | この時間が過ぎたらモックサーバーが `503` を返すようにする。`0`（既定）なら壊さない |
+| `-metrics ADDR` | 実行中、このアドレス（例 `:9090`）で `/metrics` を公開する。空なら公開しない |
+| `-check` | 結果をしきい値で判定し、満たさなければ終了ステータス `1` で終わる（既定 `true`） |
+| `-format F` / `-o FILE` / `-raw FILE` | `checkout` と同じ |
+
+進捗の行は標準エラーに出るので、`-format json` をパイプでつなげます。`error_rate` に入るのは通信レベルのエラーで終わったリクエストだけです。`Expect*` の失敗はステップを失敗させ、シナリオがそのエラーを返すことで `iteration_fail_rate` に表れます。

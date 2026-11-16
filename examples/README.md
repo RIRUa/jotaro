@@ -7,6 +7,7 @@ Runnable samples of jotaro. Each one starts its own mock server, so nothing else
 | Example | What it shows |
 |---|---|
 | [`checkout`](checkout) | The basics: a short flow (login → product list → order), closed and open load models, stages, HTML and raw output |
+| [`mix`](mix) | A weighted mix of scenarios (70% browse, 30% buy), waves of users, aborting a broken run, live progress and metrics, and thresholds per scenario. A layout to copy for a small load test |
 | [`marketplace`](marketplace) | A deep, realistic scenario: several kinds of visitors in one scenario, stateful sessions, retries, polling and thresholds that fail the run |
 
 ## checkout
@@ -60,3 +61,33 @@ go run ./examples/marketplace -users 10 -pace 0.2     # closed model, think time
 | `-format F` / `-o FILE` / `-raw FILE` | Same as in `checkout` |
 
 The tally of what visitors did and what the mock server saw is written to standard error, so that `-format json` can be piped.
+
+## mix
+
+A small load test that puts the plan-level features together. Seventy percent of the iterations run the `browse` scenario and thirty percent run `buy`, against a mock shop. It shows:
+
+- `Plan.Scenarios` with `Weighted`: independent flows picked at random by weight
+- `Plan.UserStages`, `RepeatStages` and `StartUsers`: two waves of users that go from 5 up to 20 and back
+- `Plan.AbortOn` and `ErrAborted`: stop hitting a broken server, and still print the report of the run up to the abort
+- `Plan.Progress` (one line per second on standard error) and `Plan.MetricsAddr` (a Prometheus `/metrics` endpoint, on only with `-metrics`)
+- `ExpectStatusIn`, `ExpectJSON` and `Response.JSON(path)` to check and read JSON without declaring a struct
+- thresholds per scenario (`{scenario=...}`) and for the time of a whole iteration (`iteration_p95`)
+
+The files are the layout to copy: `main.go` (flags, plan, run, save, check), `scenarios.go`, `thresholds.go` and `mock.go`.
+
+```sh
+go run ./examples/mix                           # 12 s, two waves of users
+go run ./examples/mix -break-after 2s           # the mock fails after 2 s, so AbortOn stops the run (exit status 1)
+go run ./examples/mix -metrics :9090            # also serve http://localhost:9090/metrics while it runs
+go run ./examples/mix -format json -o result.json
+```
+
+| Flag | Meaning |
+|---|---|
+| `-duration D` | Run time (default `12s`). The two waves are laid out over it |
+| `-break-after D` | Make the mock server answer `503` after this long. `0` (the default) never |
+| `-metrics ADDR` | Serve `/metrics` on this address while the run is in progress, such as `:9090`. Off if empty |
+| `-check` | Judge the result against the thresholds and exit with status `1` if one is not met (default `true`) |
+| `-format F` / `-o FILE` / `-raw FILE` | Same as in `checkout` |
+
+The progress lines go to standard error, so that `-format json` can be piped. Note that `error_rate` counts only requests that ended in a transport-level error. A failed `Expect*` check fails the step instead, and the scenarios return that error so that `iteration_fail_rate` sees it.
