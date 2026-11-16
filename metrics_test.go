@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -73,5 +74,61 @@ func TestRunMetricsBadAddr(t *testing.T) {
 	_, err := Run(context.Background(), Plan{Scenario: sc, Users: 1, Duration: time.Second, MetricsAddr: "256.0.0.1:bad"})
 	if err == nil || !strings.Contains(err.Error(), "MetricsAddr") {
 		t.Errorf("err = %v, want an error about MetricsAddr", err)
+	}
+}
+
+// TestRunMetricsDropped scrapes /metrics in the middle of an open-model run whose concurrency cap is full.
+// The scenarios are held on a channel, so drops are guaranteed and no timing is relied on:
+// the test polls until the counter moves, and fails on a deadline if it never does.
+func TestRunMetricsDropped(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := ln.Addr().String()
+	ln.Close()
+
+	release := make(chan struct{})
+	sc := NewScenario("held", func(ctx context.Context, u *User) error {
+		select {
+		case <-release:
+		case <-ctx.Done():
+		}
+		return nil
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		_, err := Run(ctx, Plan{
+			Scenario: sc, BaseURL: "http://127.0.0.1:1", Arrival: Rate(200, time.Second), MaxUsers: 2,
+			Duration: time.Minute, MetricsAddr: addr,
+		})
+		done <- err
+	}()
+
+	var dropped float64
+	deadline := time.Now().Add(10 * time.Second)
+	for dropped == 0 && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+		resp, err := http.Get("http://" + addr + "/metrics")
+		if err != nil {
+			continue
+		}
+		b, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		for _, line := range strings.Split(string(b), "\n") {
+			if v, ok := strings.CutPrefix(line, "jotaro_dropped_total "); ok {
+				dropped, _ = strconv.ParseFloat(v, 64)
+			}
+		}
+	}
+	close(release)
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if dropped == 0 {
+		t.Fatal("jotaro_dropped_total stayed 0 in a live scrape while arrivals were being dropped")
 	}
 }

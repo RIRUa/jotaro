@@ -291,7 +291,12 @@ func Run(ctx context.Context, p Plan) (*report.Report, error) {
 	var stopProgress, stopAbort, stopMetrics func()
 	if p.MetricsAddr != "" {
 		var err error
-		stopMetrics, err = startMetricsServer(p.MetricsAddr, func() *report.Report { return agg.Report(time.Since(start)) })
+		// Dropped lives in the collector, not the Aggregator, so it is filled in here.
+		stopMetrics, err = startMetricsServer(p.MetricsAddr, func() *report.Report {
+			rep := agg.Report(time.Since(start))
+			rep.Dropped = col.Dropped()
+			return rep
+		})
 		if err != nil {
 			return nil, err
 		}
