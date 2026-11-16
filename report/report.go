@@ -1,7 +1,10 @@
 // Package report aggregates and outputs the results (Report) of a load test.
 //
-// It aggregates records (record.Record and so on) (BuildReport / FromRaw), writes them as text, JSON or HTML (Write),
-// combines several results (MergeReports), and checks them against thresholds (Threshold / Report.Check).
+// It aggregates records (record.Record and so on) in one go (BuildReport / FromRaw) or incrementally while a run is
+// in progress (Aggregator), writes them as text, JSON or HTML (Write), combines several results (MergeReports),
+// compares two results (Compare), and checks them against thresholds (Threshold / Report.Check).
+// A result can also be exported as a vegeta-compatible record stream (WriteVegeta) or as a per-second CSV
+// (Report.WriteSeriesCSV).
 package report
 
 import (
@@ -83,7 +86,7 @@ type RequestStats struct {
 	NewConns    int
 	ReusedConns int
 	// Corrected is the time since the scheduled start (after Coordinated Omission correction).
-	// In the Users model it is the same as Latency.
+	// In the closed model it is the same as Latency.
 	Corrected Latency
 
 	Status map[string]int         // count per status class such as "2xx"

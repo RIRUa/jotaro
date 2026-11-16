@@ -1,6 +1,7 @@
 package report
 
 import (
+	"fmt"
 	"math/rand/v2"
 	"reflect"
 	"slices"
@@ -24,6 +25,8 @@ func genRun(seed uint64) (origin time.Time, reqs []record.Record, steps []record
 	origin = time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	scenarios := []string{"checkout", "browse", "admin"}
 	stepNames := []string{"login", "list", "order"}
+	// Requests only ever fail at the transport level; an Expect mismatch is recorded on steps and iterations.
+	reqErrKinds := []record.ErrKind{record.ErrNone, record.ErrNone, record.ErrNone, record.ErrTimeout, record.ErrConnRefused}
 	errKinds := []record.ErrKind{record.ErrNone, record.ErrNone, record.ErrNone, record.ErrTimeout, record.ErrExpect}
 	codes := []int{200, 200, 201, 404, 500, 503, 0}
 
@@ -38,7 +41,7 @@ func genRun(seed uint64) (origin time.Time, reqs []record.Record, steps []record
 				lat := time.Duration(1+rng.IntN(300_000)) * time.Microsecond
 				r := record.Record{
 					Scenario: sc, Step: name, UserID: u, Method: "GET", URL: "/" + name,
-					Code: codes[rng.IntN(len(codes))], Err: errKinds[rng.IntN(len(errKinds))],
+					Code: codes[rng.IntN(len(codes))], Err: reqErrKinds[rng.IntN(len(reqErrKinds))],
 					Start: cur, Scheduled: cur.Add(-time.Duration(rng.IntN(5)) * time.Millisecond), Latency: lat,
 					BytesIn: int64(rng.IntN(5000)), BytesOut: int64(rng.IntN(500)),
 				}
@@ -343,5 +346,79 @@ func TestAggregatorReportIsSnapshot(t *testing.T) {
 	a.ObserveRequest(record.Record{Scenario: "s", Step: "get", Start: time.Now(), Latency: time.Millisecond, Code: 500})
 	if last.Requests.Count != n {
 		t.Errorf("snapshot changed: Count %d -> %d", n, last.Requests.Count)
+	}
+}
+
+// Snapshot must return exactly what Report returns, except that it has no time series.
+func TestAggregatorSnapshotMatchesReport(t *testing.T) {
+	for seed := uint64(1); seed <= 3; seed++ {
+		origin, _, _, _, events := genRun(seed)
+		a := NewAggregator(origin)
+		for _, e := range events {
+			e.call(a)
+		}
+		full := a.Report(7 * time.Second)
+		snap := a.Snapshot(7 * time.Second)
+		if len(full.Series) == 0 {
+			t.Fatalf("seed %d: Report has no series, the comparison would prove nothing", seed)
+		}
+		if snap.Series != nil {
+			t.Errorf("seed %d: Snapshot has %d series points, want none", seed, len(snap.Series))
+		}
+		full.Series = nil
+		if !reflect.DeepEqual(snap, full) {
+			t.Errorf("seed %d: Snapshot differs from Report apart from Series:\n got %+v\nwant %+v", seed, snap, full)
+		}
+	}
+}
+
+func TestAggregatorSnapshotEmpty(t *testing.T) {
+	rep := NewAggregator(time.Now()).Snapshot(0)
+	if rep.Requests.Count != 0 || len(rep.Scenarios) != 0 || rep.Series != nil {
+		t.Errorf("empty Snapshot = %+v", rep)
+	}
+}
+
+// longRunAggregator returns an Aggregator holding secs seconds of 3 steps at 100 requests per second.
+func longRunAggregator(secs int) *Aggregator {
+	origin := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	a := NewAggregator(origin)
+	steps := []string{"login", "list", "order", "pay", "logout"}
+	for i := 0; i < secs*100; i++ {
+		start := origin.Add(time.Duration(i) * 10 * time.Millisecond)
+		a.ObserveIterationStart(start)
+		a.ObserveRequest(record.Record{
+			Scenario: "checkout", Step: steps[i%len(steps)], Code: 200, Conn: record.ConnReused,
+			Start: start, Latency: time.Duration(i%5000+1) * time.Microsecond, TTFB: time.Duration(i%2000+1) * time.Microsecond,
+		})
+		a.ObserveStep(record.StepRecord{Scenario: "checkout", Step: steps[i%len(steps)], Start: start, Duration: time.Millisecond})
+		a.ObserveIteration(record.IterationRecord{Scenario: "checkout", Start: start, Duration: time.Millisecond})
+	}
+	return a
+}
+
+// BenchmarkAggregatorReport shows that Report grows with the length of the run (the series is rebuilt on every call).
+func BenchmarkAggregatorReport(b *testing.B) {
+	for _, secs := range []int{600, 3600} {
+		a := longRunAggregator(secs)
+		b.Run(fmt.Sprintf("%ds", secs), func(b *testing.B) {
+			b.ReportAllocs()
+			for b.Loop() {
+				_ = a.Report(time.Duration(secs) * time.Second)
+			}
+		})
+	}
+}
+
+// BenchmarkAggregatorSnapshot shows that Snapshot costs about the same however long the run is.
+func BenchmarkAggregatorSnapshot(b *testing.B) {
+	for _, secs := range []int{600, 3600} {
+		a := longRunAggregator(secs)
+		b.Run(fmt.Sprintf("%ds", secs), func(b *testing.B) {
+			b.ReportAllocs()
+			for b.Loop() {
+				_ = a.Snapshot(time.Duration(secs) * time.Second)
+			}
+		})
 	}
 }
