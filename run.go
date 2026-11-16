@@ -88,6 +88,13 @@ type Plan struct {
 	// and write errors are ignored. It works together with Raw.
 	Progress io.Writer
 
+	// If MetricsAddr is not empty, Run serves the state of the run so far at http://<MetricsAddr>/metrics in the
+	// Prometheus text format (for example ":9090"), so Grafana and similar tools can chart it while the run is in
+	// progress. It has the request, response class and error counts, the throughput and the latency quantiles of the
+	// whole run so far (within 1% relative error). The server stops when Run returns. If the address cannot be
+	// listened on, Run fails before sending any request.
+	MetricsAddr string
+
 	// AbortOn stops the run early when any of its conditions holds, for example
 	// {When: "error_rate>50%", For: 5 * time.Second}. A broken server is then not hit for the whole Duration.
 	// See AbortRule for the syntax and how the conditions are evaluated.
@@ -281,7 +288,15 @@ func Run(ctx context.Context, p Plan) (*report.Report, error) {
 	if len(abortRules) > 0 {
 		live = agg
 	}
-	var stopProgress, stopAbort func()
+	var stopProgress, stopAbort, stopMetrics func()
+	if p.MetricsAddr != "" {
+		var err error
+		stopMetrics, err = startMetricsServer(p.MetricsAddr, func() *report.Report { return agg.Report(time.Since(start)) })
+		if err != nil {
+			return nil, err
+		}
+		defer stopMetrics()
+	}
 	if prog != nil {
 		stopProgress = reportProgress(p.Progress, prog, start, p.Duration)
 	}
