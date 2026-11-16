@@ -353,3 +353,83 @@ func TestExportUsage(t *testing.T) {
 		t.Errorf("missing file: exit code %d, want 1", code)
 	}
 }
+
+// TestRawCommandsRejectNonRawInput checks that an aggregated JSON result or an empty input given where raw data is
+// wanted is an error with a hint, and not a silent empty result.
+func TestRawCommandsRejectNonRawInput(t *testing.T) {
+	dir := t.TempDir()
+	aggregated := filepath.Join(dir, "result.json")
+	writeSample(t, aggregated)
+	empty := filepath.Join(dir, "empty.jsonl")
+	if err := os.WriteFile(empty, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	for name, args := range map[string][]string{
+		"export csv, aggregated":    {"export", "-format", "csv", aggregated},
+		"export vegeta, aggregated": {"export", "-format", "vegeta", aggregated},
+		"export csv, empty":         {"export", "-format", "csv", empty},
+		"export vegeta, empty":      {"export", "-format", "vegeta", empty},
+		"check -raw, aggregated":    {"check", "-raw", "-t", "p95<1s", aggregated},
+		"check -raw, empty":         {"check", "-raw", "-t", "p95<1s", empty},
+		"report -raw, aggregated":   {"report", "-raw", aggregated},
+		"merge -raw, aggregated":    {"merge", "-raw", aggregated},
+	} {
+		var stdout, stderr bytes.Buffer
+		if code := run(args, nil, &stdout, &stderr); code != 1 {
+			t.Errorf("%s: code = %d, want 1", name, code)
+		}
+		if !strings.Contains(stderr.String(), "Plan.Raw") {
+			t.Errorf("%s: stderr should point to the output of Plan.Raw: %q", name, stderr.String())
+		}
+		if stdout.Len() != 0 {
+			t.Errorf("%s: stdout should be empty, got %q", name, stdout.String())
+		}
+	}
+
+	// The same input on stdin.
+	data, _ := os.ReadFile(aggregated)
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"export", "-format", "csv", "-"}, bytes.NewReader(data), &stdout, &stderr); code != 1 {
+		t.Errorf("export from stdin: code = %d, want 1", code)
+	}
+}
+
+// TestRawWithoutRequests checks that a valid raw stream of a run that made no requests (a meta line only) still works.
+func TestRawWithoutRequests(t *testing.T) {
+	in := filepath.Join(t.TempDir(), "raw.jsonl")
+	if err := os.WriteFile(in, []byte(`{"type":"meta","version":1,"open":false,"dropped":0,"elapsed_ns":1000000000}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"export", "-format", "csv", in}, nil, &stdout, &stderr); code != 0 {
+		t.Fatalf("export: code = %d, stderr = %s", code, stderr.String())
+	}
+	if code := run([]string{"report", "-raw", "-format", "text", in}, nil, &stdout, &stderr); code != 0 {
+		t.Fatalf("report -raw: code = %d, stderr = %s", code, stderr.String())
+	}
+}
+
+// TestMergeCompareStdin pins what the usage says: merge and compare accept "-" (standard input) for one input.
+func TestMergeCompareStdin(t *testing.T) {
+	in := filepath.Join(t.TempDir(), "result.json")
+	writeSample(t, in)
+	data, _ := os.ReadFile(in)
+
+	for _, args := range [][]string{
+		{"merge", "-format", "text", "-", in},
+		{"merge", "-format", "text", in, "-"},
+		{"compare", "-", in},
+		{"compare", in, "-"},
+	} {
+		var stdout, stderr bytes.Buffer
+		if code := run(args, bytes.NewReader(data), &stdout, &stderr); code != 0 {
+			t.Errorf("%v: code = %d, stderr = %s", args, code, stderr.String())
+		}
+	}
+	for _, want := range []string{"merge", "compare"} {
+		if !strings.Contains(usage, "only one input can be \"-\"") || !strings.Contains(usage, want) {
+			t.Errorf("usage should say that %s reads standard input", want)
+		}
+	}
+}

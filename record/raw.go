@@ -3,6 +3,7 @@ package record
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"time"
@@ -215,16 +216,29 @@ func WriteRaw(w io.Writer, raw *Raw) error {
 	return e.bw.Flush()
 }
 
+// ErrNotRaw is wrapped by the error ReadRaw returns when its input is not raw data at all:
+// the input is empty, or a line has no "type" field (an aggregated JSON result, for example).
+// Test for it with errors.Is.
+var ErrNotRaw = errors.New("not raw data")
+
 // ReadRaw reads JSON Lines written by WriteRaw.
 //
 // Lines of an unknown type are skipped (they are added by a newer version, and older readers must not break).
 // It can read data without a meta line (the run time is then derived from the records).
+//
+// Every line must carry a "type" field, so an input of another shape, such as an aggregated JSON result,
+// is an error that wraps ErrNotRaw instead of reading as an empty run. An empty input is an error too:
+// WriteRaw and RawWriter always write a meta line first, so a valid stream is never empty.
+// A run that made no requests is still valid, because its stream holds the meta line.
 func ReadRaw(r io.Reader) (*Raw, error) {
 	dec := json.NewDecoder(bufio.NewReader(r))
 	raw := &Raw{}
 	for n := 1; ; n++ {
 		var line json.RawMessage
 		if err := dec.Decode(&line); err == io.EOF {
+			if n == 1 {
+				return nil, fmt.Errorf("jotaro: read raw: input is empty: %w", ErrNotRaw)
+			}
 			return raw, nil
 		} else if err != nil {
 			return nil, fmt.Errorf("jotaro: read raw: record %d: %w", n, err)
@@ -244,6 +258,9 @@ func (raw *Raw) addLine(line json.RawMessage) error {
 	}
 	if err := json.Unmarshal(line, &head); err != nil {
 		return err
+	}
+	if head.Type == "" {
+		return fmt.Errorf(`no "type" field: %w`, ErrNotRaw)
 	}
 	switch head.Type {
 	case "meta":

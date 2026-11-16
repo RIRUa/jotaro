@@ -46,8 +46,16 @@ func (l *linter) add(sev, rule string, pos token.Pos, msg string) {
 	l.diags = append(l.diags, Diagnostic{Severity: sev, Source: "lint", Rule: rule, Line: p.Line, Column: p.Column, Message: msg})
 }
 
-// checkPlans verifies every jotaro.Plan literal: exactly one of Users, UserStages and Arrival, and a Duration.
+// checkPlans verifies every jotaro.Plan literal: exactly one of Users, UserStages and Arrival, a Duration and a scenario.
+//
+// A Plan is often built in two steps: `plan := jotaro.Plan{...}` and then `plan.Users = 20`, often inside branches that pick
+// the load model from a flag. So fields assigned later to the variable that holds the literal count as set, and once
+// the load model is assigned that way the rule stays quiet about it, since which assignments run together cannot be told
+// from the syntax. The one exception is a literal that already sets more than one model: that stays visible, as a warning
+// when later assignments might undo it. A literal passed directly, with no variable, is judged by its fields alone.
 func (l *linter) checkPlans(f *ast.File) {
+	assigned := assignedFields(f)
+	bound := boundPlans(f)
 	ast.Inspect(f, func(n ast.Node) bool {
 		lit, ok := n.(*ast.CompositeLit)
 		if !ok || !isPlanType(lit.Type) {
@@ -61,17 +69,22 @@ func (l *linter) checkPlans(f *ast.File) {
 				}
 			}
 		}
-		models := 0
-		for _, k := range []string{"Users", "UserStages", "Arrival"} {
-			if keys[k] {
-				models++
-			}
+		litModels := countModels(keys)
+		// Fields assigned after the literal, through the variable that holds it.
+		later := assigned[bound[lit]]
+		laterModels := countModels(later)
+		for k := range later {
+			keys[k] = true
 		}
 		switch {
-		case models > 1:
-			l.add("error", "plan-load-model", lit.Pos(), "Plan sets more than one of Users, UserStages and Arrival; specify exactly one (Users / UserStages = closed model, Arrival = open model)")
-		case models == 0:
-			l.add("error", "plan-load-model", lit.Pos(), "Plan sets none of Users, UserStages and Arrival; specify exactly one")
+		case litModels > 1:
+			sev := "error"
+			if laterModels > 0 {
+				sev = "warning" // a later assignment may have changed the model
+			}
+			l.add(sev, "plan-load-model", lit.Pos(), "Plan sets more than one of Users, UserStages and Arrival; specify exactly one (Users / UserStages = closed model, Arrival = open model)")
+		case litModels == 0 && laterModels == 0:
+			l.add("error", "plan-load-model", lit.Pos(), "Plan sets none of Users, UserStages and Arrival; specify exactly one (a field assigned later, such as plan.Users = 20, counts)")
 		}
 		if !keys["Duration"] {
 			l.add("error", "plan-duration", lit.Pos(), "Plan.Duration is not set; Run rejects a non-positive Duration")
@@ -81,6 +94,82 @@ func (l *linter) checkPlans(f *ast.File) {
 		}
 		return true
 	})
+}
+
+// countModels returns how many of Users, UserStages and Arrival are in keys.
+func countModels(keys map[string]bool) int {
+	n := 0
+	for _, k := range []string{"Users", "UserStages", "Arrival"} {
+		if keys[k] {
+			n++
+		}
+	}
+	return n
+}
+
+// assignedFields returns, per variable name, the fields assigned with `name.Field = ...` anywhere in the file.
+// It goes by name only, so two variables of the same name in different functions are merged; the cost is a missed
+// diagnostic at worst, never a false one.
+func assignedFields(f *ast.File) map[string]map[string]bool {
+	out := map[string]map[string]bool{}
+	ast.Inspect(f, func(n ast.Node) bool {
+		as, ok := n.(*ast.AssignStmt)
+		if !ok {
+			return true
+		}
+		for _, lhs := range as.Lhs {
+			sel, ok := lhs.(*ast.SelectorExpr)
+			if !ok {
+				continue
+			}
+			x, ok := sel.X.(*ast.Ident)
+			if !ok {
+				continue
+			}
+			if out[x.Name] == nil {
+				out[x.Name] = map[string]bool{}
+			}
+			out[x.Name][sel.Sel.Name] = true
+		}
+		return true
+	})
+	return out
+}
+
+// boundPlans maps a Plan literal to the name of the variable it is assigned to (`plan := Plan{}`, `var plan = &Plan{}`).
+// A literal that is not assigned to a plain variable has no entry.
+func boundPlans(f *ast.File) map[*ast.CompositeLit]string {
+	out := map[*ast.CompositeLit]string{}
+	bind := func(name ast.Expr, value ast.Expr) {
+		id, ok := name.(*ast.Ident)
+		if !ok {
+			return
+		}
+		if u, ok := value.(*ast.UnaryExpr); ok && u.Op == token.AND {
+			value = u.X
+		}
+		if lit, ok := value.(*ast.CompositeLit); ok && isPlanType(lit.Type) {
+			out[lit] = id.Name
+		}
+	}
+	ast.Inspect(f, func(n ast.Node) bool {
+		switch n := n.(type) {
+		case *ast.AssignStmt:
+			if len(n.Lhs) == len(n.Rhs) {
+				for i := range n.Lhs {
+					bind(n.Lhs[i], n.Rhs[i])
+				}
+			}
+		case *ast.ValueSpec:
+			if len(n.Names) == len(n.Values) {
+				for i := range n.Names {
+					bind(n.Names[i], n.Values[i])
+				}
+			}
+		}
+		return true
+	})
+	return out
 }
 
 // isPlanType reports whether t is jotaro.Plan (or Plan, for a dot import or the package itself).
@@ -157,7 +246,7 @@ func (l *linter) checkUncheckedDo(f *ast.File) {
 			return true
 		}
 		if sel, ok := call.Fun.(*ast.SelectorExpr); ok && sel.Sel.Name == "Do" && len(call.Args) == 0 {
-			l.add("warning", "unchecked-response", call.Pos(), "the response of Do() is dropped; finish the chain with ExpectStatus(code) or Decode(&v), or the status is never checked")
+			l.add("warning", "unchecked-response", call.Pos(), "the response of Do() is dropped; finish the chain with an Expect check (ExpectStatus, ExpectStatusIn, ExpectHeader, ExpectBodyContains or ExpectJSON) or with Decode(&v), or the response is never checked")
 		}
 		return true
 	})

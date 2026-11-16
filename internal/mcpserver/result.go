@@ -3,6 +3,7 @@ package mcpserver
 import (
 	"context"
 	"errors"
+	"io"
 	"os"
 	"strings"
 
@@ -13,6 +14,7 @@ import (
 
 // loadReport reads a saved result from path. With raw, the file is raw JSON Lines data
 // (the output of Plan.Raw) and is aggregated again, as "jotaro check -raw" does.
+// Its errors are written for the tool caller, so they speak of the raw input and not of CLI flags.
 func loadReport(path string, raw bool) (*report.Report, error) {
 	if path == "" {
 		return nil, errors.New("path is empty")
@@ -25,27 +27,39 @@ func loadReport(path string, raw bool) (*report.Report, error) {
 
 	if raw {
 		r, err := record.ReadRaw(f)
+		if errors.Is(err, record.ErrNotRaw) {
+			return nil, errors.New("raw: true was given, but the file is not raw data: pass the output of Plan.Raw (JSON Lines), or drop raw: true for an aggregated JSON result")
+		}
 		if err != nil {
 			return nil, err
 		}
 		return report.FromRaw(r), nil
 	}
-	return report.ReadJSON(f)
+	rep, err := report.ReadJSON(f)
+	if err != nil {
+		// The usual mistake is raw data given without raw: true; say so instead of showing the JSON error.
+		if _, serr := f.Seek(0, io.SeekStart); serr == nil {
+			if r, rerr := record.ReadRaw(f); rerr == nil && len(r.Requests)+len(r.Steps)+len(r.Iterations) > 0 {
+				return nil, errors.New("the file is raw data (JSON Lines): pass raw: true to read it")
+			}
+		}
+		return nil, err
+	}
+	return rep, nil
 }
 
 // CheckResultInput is the input of check_result.
 type CheckResultInput struct {
-	Path       string   `json:"path" jsonschema:"path of a result file saved by jotaro (JSON written with report.FormatJSON)"`
+	Path       string   `json:"path" jsonschema:"path of a result file saved by jotaro (JSON written with report.FormatJSON). Give an absolute path: a relative path is resolved against the working directory of the MCP server, not of your project"`
 	Thresholds []string `json:"thresholds" jsonschema:"threshold expressions such as p95<200ms or error_rate<1%; see the jotaro://thresholds resource"`
 	Raw        bool     `json:"raw,omitempty" jsonschema:"set to true when path is raw JSON Lines data (the output of Plan.Raw) instead of a JSON result"`
 }
 
 // CheckResultOutput is the output of check_result.
 type CheckResultOutput struct {
-	// Passed is true only when the file was read and every threshold was met.
-	Passed bool `json:"passed"`
-	// Error is set when nothing could be judged: the file could not be read, or a threshold could not be parsed.
-	Error   string            `json:"error,omitempty"`
+	// Passed is true only when every threshold was met. A file that cannot be read, or a threshold that cannot be parsed,
+	// is not reported here: the call fails with isError instead.
+	Passed  bool              `json:"passed"`
 	Results []ThresholdResult `json:"results"`
 	// Text is the same listing "jotaro check" prints, with the values in readable units.
 	Text string `json:"text,omitempty"`
@@ -67,24 +81,22 @@ type ThresholdResult struct {
 
 // checkResult judges a saved result against thresholds, like "jotaro check".
 func checkResult(_ context.Context, _ *mcp.CallToolRequest, in CheckResultInput) (*mcp.CallToolResult, CheckResultOutput, error) {
-	fail := func(msg string) (*mcp.CallToolResult, CheckResultOutput, error) {
-		return nil, CheckResultOutput{Error: msg, Results: []ThresholdResult{}}, nil
-	}
+	// Input that cannot be judged is a tool error (isError), not a result that happens to be empty.
 	if len(in.Thresholds) == 0 {
-		return fail("no thresholds given")
+		return nil, CheckResultOutput{}, errors.New("no thresholds given")
 	}
 	// Parse first, so that a typo is reported even when the file is also wrong.
 	ths := make([]report.Threshold, 0, len(in.Thresholds))
 	for _, s := range in.Thresholds {
 		th, err := report.ParseThreshold(s)
 		if err != nil {
-			return fail(trimPrefix(err))
+			return nil, CheckResultOutput{}, errors.New(trimPrefix(err))
 		}
 		ths = append(ths, th)
 	}
 	rep, err := loadReport(in.Path, in.Raw)
 	if err != nil {
-		return fail(trimPrefix(err))
+		return nil, CheckResultOutput{}, errors.New(trimPrefix(err))
 	}
 
 	checks := rep.Check(ths...)

@@ -26,6 +26,19 @@ func TestFormatVersion(t *testing.T) {
 	}
 }
 
+func TestResolveVersion(t *testing.T) {
+	for _, c := range []struct{ injected, moduleInfo, want string }{
+		{"0.1.1", "(devel)", "v0.1.1"},
+		{"", "v0.1.1", "v0.1.1"},
+		{"", "(devel)", "dev"},
+		{"", "", "dev"},
+	} {
+		if got := resolveVersion(c.injected, c.moduleInfo); got != c.want {
+			t.Errorf("resolveVersion(%q, %q) = %q, want %q", c.injected, c.moduleInfo, got, c.want)
+		}
+	}
+}
+
 func TestVersionCommand(t *testing.T) {
 	for _, arg := range []string{"version", "-version", "--version"} {
 		var stdout, stderr bytes.Buffer

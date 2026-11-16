@@ -2,6 +2,7 @@ package mcpserver
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"time"
@@ -17,16 +18,14 @@ const loadgenCPUWarn = 0.9
 
 // SummaryInput is the input of summarize_result.
 type SummaryInput struct {
-	Path string `json:"path" jsonschema:"path of a result file saved by jotaro (JSON written with report.FormatJSON)"`
+	Path string `json:"path" jsonschema:"path of a result file saved by jotaro (JSON written with report.FormatJSON). Give an absolute path: a relative path is resolved against the working directory of the MCP server, not of your project"`
 	Raw  bool   `json:"raw,omitempty" jsonschema:"set to true when path is raw JSON Lines data (the output of Plan.Raw) instead of a JSON result"`
 }
 
 // SummaryOutput is the output of summarize_result: the numbers needed to judge a run, without
 // the histograms and the per-second series that make the result file large.
 type SummaryOutput struct {
-	// Error is set when the file could not be read; every other field is then empty.
-	Error string `json:"error,omitempty"`
-	// Model is "open" (Arrival) or "closed" (Users).
+	// Model is "open" (Arrival) or "closed" (Users or UserStages).
 	Model          string  `json:"model,omitempty"`
 	ElapsedSeconds float64 `json:"elapsedSeconds"`
 	RPS            float64 `json:"rps"`
@@ -47,11 +46,12 @@ type SummaryOutput struct {
 // RequestSummary is the short form of report.RequestStats.
 type RequestSummary struct {
 	Count int `json:"count"`
-	// ErrorRate is the share of network errors and failed expectations (0 to 1), the same as the error_rate threshold metric.
+	// ErrorRate is the share of requests that ended in a transport-level error (0 to 1), the same as the error_rate threshold metric.
+	// A failed Expect* check is not a request error: it fails the step, and shows in the step Failed counts.
 	ErrorRate float64 `json:"errorRate"`
-	// Status counts responses per class such as "2xx". HTTP 4xx/5xx are not errors unless an expectation failed.
+	// Status counts responses per class such as "2xx". HTTP 4xx/5xx are not request errors.
 	Status map[string]int `json:"status"`
-	// Errors counts failures per kind (timeout, connection_refused, expect_mismatch, ...).
+	// Errors counts request failures per kind (timeout, connection_refused, dns, ...). Failed Expect* checks are not in it.
 	Errors  map[string]int `json:"errors"`
 	Latency LatencySummary `json:"latency"`
 	// Corrected is the latency from the scheduled start (Coordinated Omission correction). Open model only.
@@ -103,13 +103,8 @@ type LoadGeneratorSummary struct {
 func summarizeResult(_ context.Context, _ *mcp.CallToolRequest, in SummaryInput) (*mcp.CallToolResult, SummaryOutput, error) {
 	rep, err := loadReport(in.Path, in.Raw)
 	if err != nil {
-		// The collections are empty rather than nil, so the output still matches its schema.
-		return nil, SummaryOutput{
-			Error:     trimPrefix(err),
-			Requests:  RequestSummary{Status: map[string]int{}, Errors: map[string]int{}},
-			Scenarios: []ScenarioSummary{},
-			Warnings:  []string{},
-		}, nil
+		// A file that cannot be read is a tool error (isError), not a summary of zeros.
+		return nil, SummaryOutput{}, errors.New(trimPrefix(err))
 	}
 	return nil, summarize(rep), nil
 }
