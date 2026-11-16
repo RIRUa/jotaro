@@ -30,7 +30,8 @@ func guideSkeleton(t *testing.T) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, rest, ok := strings.Cut(string(b), "```go\n")
+	// A Windows checkout may have CRLF line ends in the embedded file.
+	_, rest, ok := strings.Cut(strings.ReplaceAll(string(b), "\r\n", "\n"), "```go\n")
 	if !ok {
 		t.Fatal("no Go block in the guide")
 	}

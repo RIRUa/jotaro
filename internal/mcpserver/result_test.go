@@ -145,7 +145,7 @@ func TestCheckResult(t *testing.T) {
 		want string // a part of the error text
 	}{
 		"bad threshold": {map[string]any{"path": jsonPath, "thresholds": []string{"p95~200ms"}}, "threshold"},
-		"missing file":  {map[string]any{"path": filepath.Join(dir, "none.json"), "thresholds": []string{"p95<1s"}}, "no such file"},
+		"missing file":  {map[string]any{"path": filepath.Join(dir, "none.json"), "thresholds": []string{"p95<1s"}}, "none.json"},
 		"no thresholds": {map[string]any{"path": jsonPath, "thresholds": []string{}}, "no thresholds"},
 		"empty path":    {map[string]any{"path": "", "thresholds": []string{"p95<1s"}}, "path is empty"},
 		// An aggregated JSON result with raw: true must not read as an empty run that fails with "no data".
@@ -233,7 +233,7 @@ func TestSummarizeResult(t *testing.T) {
 		args map[string]any
 		want string
 	}{
-		"missing file":           {map[string]any{"path": filepath.Join(dir, "none.json")}, "no such file"},
+		"missing file":           {map[string]any{"path": filepath.Join(dir, "none.json")}, "none.json"},
 		"aggregated JSON as raw": {map[string]any{"path": jsonPath, "raw": true}, "raw: true"},
 		"empty file as raw":      {map[string]any{"path": empty, "raw": true}, "raw: true"},
 		"raw data without raw":   {map[string]any{"path": rawPath}, "raw: true"},
