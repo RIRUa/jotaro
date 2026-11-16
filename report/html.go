@@ -104,7 +104,7 @@ func (r *Report) WriteHTML(w io.Writer) error {
 func (r *Report) toHTMLView() htmlView {
 	v := htmlView{
 		Version:  JSONVersion,
-		Model:    "closed (Users)",
+		Model:    "closed",
 		Elapsed:  fmtDur(r.Elapsed),
 		Requests: r.Requests.Count,
 		RPS:      fmt.Sprintf("%.2f", r.RPS()),
@@ -131,7 +131,7 @@ func (r *Report) toHTMLView() htmlView {
 	}
 	v.Charts = append(v.Charts, healthCharts(r.Health)...)
 	if r.Open {
-		v.Model = "open (Rate)"
+		v.Model = "open"
 		v.Corrected = latencyBars(r.Requests.Corrected)
 	}
 	for _, sc := range r.Scenarios {

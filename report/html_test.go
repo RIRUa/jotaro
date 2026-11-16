@@ -29,9 +29,14 @@ func TestWriteHTML(t *testing.T) {
 	}
 	out := buf.String()
 
-	for _, want := range []string{"<!doctype html>", "closed (Users)", "2xx", "5xx", "timeout", "expect_mismatch", "p95"} {
+	for _, want := range []string{"<!doctype html>", `<div class="meta">closed · elapsed `, "2xx", "5xx", "timeout", "expect_mismatch", "p95"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("%q missing from output", want)
+		}
+	}
+	for _, bad := range []string{"(Users)", "(Rate)"} {
+		if strings.Contains(out, bad) {
+			t.Errorf("%q must not appear: the model name does not say which load option was used", bad)
 		}
 	}
 	// Scenario names are escaped (not interpreted as HTML).
@@ -54,7 +59,7 @@ func TestWriteHTMLOpen(t *testing.T) {
 		t.Fatal(err)
 	}
 	out := buf.String()
-	for _, want := range []string{"open (Rate)", "corrected (from scheduled start)", "dropped"} {
+	for _, want := range []string{`<div class="meta">open · elapsed `, "corrected (from scheduled start)", "dropped"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("%q missing from output", want)
 		}
