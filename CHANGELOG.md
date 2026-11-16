@@ -4,6 +4,10 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ## [Unreleased]
 
+### Changed
+
+- `Plan.Raw` now streams: each record is written to it as it arrives (`record.RawWriter`) instead of being kept in memory and written at the end, so memory stays constant with `Plan.Raw` too. The `Report` that `Run` returns is aggregated incrementally in that case as well, so its percentiles are within 1% relative error (they were exact before); re-aggregate the raw data with `jotaro report -raw` or `report.FromRaw` for exact ones. Lines are now in arrival order and the stream ends with a second `meta` line holding the final `dropped` and `elapsed_ns`; `ReadRaw` (including older versions) reads it unchanged, and `RawVersion` stays `1`.
+
 ### Added
 
 - `Plan.Scenarios` and `Weighted`: run a weighted mix of scenarios in one plan (for example 70% browse, 30% checkout). Each iteration (closed model) or arrival (open model) picks one scenario at random in proportion to its weight. It is mutually exclusive with `Plan.Scenario`, and the scenarios must have distinct names. Reports and thresholds already separate results by scenario name. `jotaro mcp`'s lint accepts the new field.
