@@ -17,13 +17,20 @@ import (
 var content embed.FS
 
 // Run serves MCP over stdio until the client disconnects or ctx is done.
-func Run(ctx context.Context) error {
-	return newServer().Run(ctx, &mcp.StdioTransport{})
+//
+// version is the version of the running binary, such as "v0.1.3", or "dev" (or empty) for a build whose version is unknown.
+// It is reported to the client as the server version, and it selects the jotaro version that check_scenario type-checks
+// against when no dir is given, so the code is checked against the API the embedded guide describes.
+func Run(ctx context.Context, version string) error {
+	return newServer(version).Run(ctx, &mcp.StdioTransport{})
 }
 
 // newServer builds the server with all resources, tools and prompts registered.
-func newServer() *mcp.Server {
-	s := mcp.NewServer(&mcp.Implementation{Name: "jotaro", Version: "v0.1.0"}, &mcp.ServerOptions{
+func newServer(version string) *mcp.Server {
+	if version == "" {
+		version = "dev"
+	}
+	s := mcp.NewServer(&mcp.Implementation{Name: "jotaro", Version: version}, &mcp.ServerOptions{
 		Instructions: "Helps write jotaro (Go HTTP load-testing library) scenarios. " +
 			"Read the jotaro://guide resource first, write a complete `package main` file, " +
 			"then call check_scenario and fix the diagnostics until it passes. " +
@@ -31,7 +38,7 @@ func newServer() *mcp.Server {
 			"(jotaro://result explains the numbers) and check_result to judge it against thresholds. Do not read the result file directly; it is large.",
 	})
 	addResources(s)
-	addTools(s)
+	addTools(s, version)
 	addPrompts(s)
 	return s
 }

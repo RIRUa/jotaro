@@ -13,18 +13,21 @@
 // Usage:
 //
 //	jotaro report [-raw] [-format html|text|json] [-o output] <result.json | ->
-//	jotaro merge  [-raw] [-format html|text|json] [-o output] <result.json>...
+//	jotaro merge  [-raw] [-format html|text|json] [-o output] <result.json | ->...
 //	jotaro check  [-raw] -t <threshold> [-t <threshold>]... <result.json | ->
-//	jotaro compare [-raw] [-max-p95-regression <percent>] <base.json> <new.json>
+//	jotaro compare [-raw] [-max-p95-regression <percent>] <base.json | -> <new.json | ->
 //	jotaro export -format vegeta|csv [-o output] <raw.jsonl | ->
 //	jotaro mcp
 //	jotaro version
 //
 // With -raw, the input is read as raw JSON Lines data (the output of Plan.Raw) and re-aggregated.
+// "-" reads standard input, which can be consumed once, so at most one input of merge or compare can be "-".
+// Raw data given where aggregated JSON is expected, and the reverse, is an error.
 package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -48,6 +51,10 @@ commands:
   export   convert raw data to vegeta results or a per-second CSV
   mcp      run an MCP server over stdio that helps write scenarios and read results
   version  print the version
+
+report, merge, check and compare read a result file, or standard input when the file is "-"
+(only one input can be "-", since standard input is read once). With -raw they read raw data,
+the output of Plan.Raw. export reads raw data only.
 `
 
 // main only forwards to run, which holds the logic and can be tested.
@@ -129,7 +136,7 @@ func runExport(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		defer file.Close()
 		in = file
 	}
-	raw, err := record.ReadRaw(in)
+	raw, err := readRawData(in)
 	if err != nil {
 		fmt.Fprintln(stderr, "jotaro:", errMessage(err))
 		return 1
@@ -183,7 +190,7 @@ func runMCP(args []string, stderr io.Writer) int {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
-	if err := mcpserver.Run(ctx); err != nil && ctx.Err() == nil {
+	if err := mcpserver.Run(ctx, versionNumber()); err != nil && ctx.Err() == nil {
 		fmt.Fprintln(stderr, "jotaro:", err)
 		return 1
 	}
@@ -251,7 +258,7 @@ func runMerge(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("merge", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.Usage = func() {
-		fmt.Fprintln(stderr, "usage: jotaro merge [-raw] [-format html|text|json] [-o output] <result.json>...")
+		fmt.Fprintln(stderr, "usage: jotaro merge [-raw] [-format html|text|json] [-o output] <result.json | ->...")
 		fs.PrintDefaults()
 	}
 	format := fs.String("format", "json", "output format (text, json, html)")
@@ -298,7 +305,7 @@ func runCompare(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("compare", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.Usage = func() {
-		fmt.Fprintln(stderr, "usage: jotaro compare [-raw] [-max-p95-regression <percent>] <base.json> <new.json>")
+		fmt.Fprintln(stderr, "usage: jotaro compare [-raw] [-max-p95-regression <percent>] <base.json | -> <new.json | ->")
 		fs.PrintDefaults()
 	}
 	gate := fs.Float64("max-p95-regression", -1, "exit with code 1 if any p95 got worse by more than this percentage (disabled if negative)")
@@ -401,6 +408,16 @@ func errMessage(err error) string {
 // rawUsage is the shared help text of the -raw flag.
 const rawUsage = "read the input as raw JSON Lines data and re-aggregate it"
 
+// readRawData reads raw JSON Lines data. When the input is not raw data at all (an aggregated JSON result,
+// or an empty file), the error says which input is wanted instead, so a mix-up is not silently accepted.
+func readRawData(in io.Reader) (*record.Raw, error) {
+	raw, err := record.ReadRaw(in)
+	if errors.Is(err, record.ErrNotRaw) {
+		return nil, fmt.Errorf("%s\nthe input is not raw data: pass the output of Plan.Raw. An aggregated JSON result (-format json) is not raw data; report, check, merge and compare read it without -raw", errMessage(err))
+	}
+	return raw, err
+}
+
 // readReport reads a result from path (stdin if "-"). With raw, it aggregates raw data.
 func readReport(path string, raw bool, stdin io.Reader) (*report.Report, error) {
 	in := stdin
@@ -413,7 +430,7 @@ func readReport(path string, raw bool, stdin io.Reader) (*report.Report, error) 
 		in = file
 	}
 	if raw {
-		r, err := record.ReadRaw(in)
+		r, err := readRawData(in)
 		if err != nil {
 			return nil, err
 		}

@@ -16,14 +16,14 @@ if err := rep.Write(f, report.FormatJSON); err != nil { // FormatText | FormatJS
 ```
 
 - `FormatJSON` is the form the tools and the CLI read back. `FormatHTML` is one self-contained file with charts, for people.
-- `Plan.Raw` (an `io.Writer`) additionally writes every record as JSON Lines. Pass `raw: true` to the tools (`-raw` on the CLI) to read that file.
+- `Plan.Raw` (an `io.Writer`) additionally writes every record as JSON Lines. Pass `raw: true` to the tools (`-raw` on the CLI) to read that file. `raw: true` is only for that file: an aggregated JSON result is read without it, and each input is rejected with an error when given the wrong way round.
 - The JSON holds histograms and a per-second series, so it is large. **Call `summarize_result` instead of reading the file**, and `check_result` to judge it against thresholds.
 
 ## Structure
 
 ```
 Report
-├─ open         true for the open model (Arrival), false for the closed model (Users)
+├─ open         true for the open model (Arrival), false for the closed model (Users or UserStages)
 ├─ dropped      arrivals not run because MaxUsers was reached (open model)
 ├─ elapsed      run time (slightly longer than Plan.Duration)
 ├─ requests     all requests combined
@@ -45,8 +45,8 @@ In the JSON every duration is an integer in nanoseconds (the field name ends in 
 | `ttfb` | time to the first byte of the response. Only requests that received a response |
 | `dns` / `connect` / `tls` | only requests in which that phase happened, that is, requests that opened a new connection |
 | `status` | responses per class (`2xx`, `4xx`, `5xx`, ...) |
-| `errors` | failures per kind (below). **HTTP 4xx/5xx are not errors** unless `ExpectStatus` rejected them |
-| error rate | `errors` divided by the number of requests (the `error_rate` threshold metric) |
+| `errors` | request failures per kind (below), which are transport-level errors only. **HTTP 4xx/5xx are not errors**, and neither is a failed `Expect*` check: that fails the step, not the request |
+| error rate | `errors` divided by the number of requests (the `error_rate` threshold metric). It is the share of requests that ended in a transport-level error (timeout, connection refused, DNS failure and so on). A failed `Expect*` check is not counted as a request error: it fails the step with `expect_mismatch`, which is listed in the step's errors, and it reaches `iteration_fail_rate` when the scenario returns that error |
 | step `failed` | runs of the step whose function returned an error |
 | iteration `failed` | runs of the scenario whose function returned an error. A failed step does not fail the iteration when the scenario ignores its error |
 
@@ -57,10 +57,10 @@ In the JSON every duration is an integer in nanoseconds (the field name ends in 
 | `dns` | the host name could not be resolved |
 | `tls` | the handshake or certificate verification failed |
 | `canceled` | the run ended while the request was in flight (for example `Plan.Grace` ran out) |
-| `expect_mismatch` | the response arrived but `ExpectStatus` did not match |
+| `expect_mismatch` | the response arrived but an `Expect*` check did not match. It is counted in a step's (and, when the scenario returns it, an iteration's) errors and in step `failed`; it does not appear in the request `errors` |
 | `other` | anything else |
 
-Without `Plan.Raw`, p50 to p99 are approximations within 1% relative error; count, min, max and mean are exact. With `Plan.Raw` (and when reading raw data) the percentiles are exact.
+The `Report` that `Run` returns, and the JSON saved from it, hold p50 to p99 as approximations within 1% relative error, with or without `Plan.Raw`; count, min, max and mean are exact. Exact percentiles come from re-aggregating raw data (`Plan.Raw`) with `jotaro report -raw` or `report.FromRaw`, which `summarize_result` and `check_result` do when given `raw: true`.
 
 ## Reading a result
 
@@ -68,7 +68,7 @@ Check these in order. The first two decide whether the other numbers can be trus
 
 1. **Did the test measure the target?** When the CPU of the load generator reached 90% or more, the generator itself was the bottleneck and latencies look worse than they are. Lower the load or split it over several machines and combine the results with `jotaro merge`.
 2. **Was the planned load applied?** `dropped > 0` means `MaxUsers` iterations were already running when new arrivals were due, so fewer scenarios started than planned. The target could not keep up with the rate (or `MaxUsers` is too low for the scenario's length).
-3. **Errors.** Look at the kinds, not only the rate. `timeout` and `connection_refused` point at the target being overloaded or down; `expect_mismatch` means it answered with the wrong status, so check `status` for `5xx` (server failure) or `4xx` (the scenario sends something wrong, such as a missing token). `4xx` or `5xx` responses with no matching errors come from requests that are not checked with `ExpectStatus`.
+3. **Errors.** Look at the kinds, not only the rate. `timeout` and `connection_refused` point at the target being overloaded or down. The request errors say nothing about wrong answers: a step with `failed` above 0 but no request errors, or `4xx` / `5xx` in `status`, means the target answered with something the scenario did not accept (an `Expect*` check failed, `expect_mismatch`). Check `status` for `5xx` (server failure) or `4xx` (the scenario sends something wrong, such as a missing token). `4xx` or `5xx` responses with no failed steps come from requests that are not checked with an `Expect*` call. To make wrong answers fail a threshold, have the scenario return the step's error and judge `iteration_fail_rate`.
 4. **Latency per step.** Compare the steps to find the slow one. Prefer p95 and p99 over the mean, and compare `max` with p99 to spot rare stalls.
 5. **Open model: `corrected` against `latency`.** `corrected` much larger than `latency` means iterations started later than scheduled, so users would have waited longer than the per-request latency shows. Judge the open model by `corrected_p95` and the like.
 6. **Connections.** `dns` / `connect` / `tls` with many observations means connections are not being reused, and their setup time is part of `latency`.

@@ -9,14 +9,16 @@ import (
 
 // addTools registers the scenario tools (check_scenario, validate_threshold) and the result tools
 // (summarize_result, check_result).
-func addTools(s *mcp.Server) {
+func addTools(s *mcp.Server, version string) {
 	mcp.AddTool(s, &mcp.Tool{
 		Name: "check_scenario",
 		Description: "Check a jotaro scenario file without running it: Go syntax, jotaro-specific lint rules " +
 			"(Plan load model, unchecked responses, duplicate step names) and a type check with go build. " +
-			"Pass the whole file (package main). Fix every error and call again until ok is true.",
+			"Pass the whole file (package main). The code is checked as a single file: it cannot refer to other files of the same package, " +
+			"so put the scenario, the Plan and main in one file to check it (split the files afterwards). " +
+			"Fix every error and call again until ok is true.",
 		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true},
-	}, checkScenario)
+	}, checkScenario(version))
 
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "validate_threshold",
@@ -64,7 +66,7 @@ type ThresholdOutput struct {
 func validateThreshold(_ context.Context, _ *mcp.CallToolRequest, in ThresholdInput) (*mcp.CallToolResult, ThresholdOutput, error) {
 	th, err := report.ParseThreshold(in.Expression)
 	if err != nil {
-		return nil, ThresholdOutput{Error: err.Error()}, nil
+		return nil, ThresholdOutput{Error: trimPrefix(err)}, nil
 	}
 	return nil, ThresholdOutput{
 		Valid:     true,

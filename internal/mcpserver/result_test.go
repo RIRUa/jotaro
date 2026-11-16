@@ -13,6 +13,8 @@ import (
 
 // sampleRaw is a small open-model run: scenario "checkout" with steps "login" (fast, all 200)
 // and "order" (slow, one 500 that failed its expectation and one timeout), plus two dropped arrivals.
+// As in a real run, the failed expectation is in the step and iteration records only: the request record
+// of that 500 has no Err, because only transport-level errors are recorded on requests.
 func sampleRaw() *record.Raw {
 	start := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
 	raw := &record.Raw{StartedAt: start, Elapsed: 10 * time.Second, Open: true, Dropped: 2}
@@ -29,7 +31,7 @@ func sampleRaw() *record.Raw {
 		stepErr := record.ErrNone
 		switch i {
 		case 0:
-			order.Code, order.Err, stepErr = 500, record.ErrExpect, record.ErrExpect
+			order.Code, stepErr = 500, record.ErrExpect
 		case 1:
 			order.Code, order.Err, stepErr = 0, record.ErrTimeout, record.ErrTimeout
 		}
@@ -86,7 +88,7 @@ func TestCheckResult(t *testing.T) {
 			"path":       jsonPath,
 			"thresholds": []string{"p95{step=login}<100ms", "requests>=20"},
 		}, &out)
-		if !out.Passed || out.Error != "" || len(out.Results) != 2 {
+		if !out.Passed || len(out.Results) != 2 {
 			t.Fatalf("want both met, got %+v", out)
 		}
 		r := out.Results[0]
@@ -107,8 +109,8 @@ func TestCheckResult(t *testing.T) {
 		if out.Passed || out.Results[0].Pass || out.Results[1].Pass {
 			t.Fatalf("want both not met, got %+v", out)
 		}
-		if got := out.Results[1].Actual; got != 0.1 { // 2 failures out of 20 requests
-			t.Errorf("error_rate actual = %v, want 0.1", got)
+		if got := out.Results[1].Actual; got != 0.05 { // 1 transport error out of 20 requests; the failed expectation is not counted
+			t.Errorf("error_rate actual = %v, want 0.05", got)
 		}
 	})
 
@@ -133,16 +135,33 @@ func TestCheckResult(t *testing.T) {
 		}
 	})
 
-	for name, args := range map[string]map[string]any{
-		"bad threshold": {"path": jsonPath, "thresholds": []string{"p95~200ms"}},
-		"missing file":  {"path": filepath.Join(t.TempDir(), "none.json"), "thresholds": []string{"p95<1s"}},
-		"no thresholds": {"path": jsonPath, "thresholds": []string{}},
+	dir := t.TempDir()
+	empty := filepath.Join(dir, "empty.jsonl")
+	if err := os.WriteFile(empty, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for name, tc := range map[string]struct {
+		args map[string]any
+		want string // a part of the error text
+	}{
+		"bad threshold": {map[string]any{"path": jsonPath, "thresholds": []string{"p95~200ms"}}, "threshold"},
+		"missing file":  {map[string]any{"path": filepath.Join(dir, "none.json"), "thresholds": []string{"p95<1s"}}, "none.json"},
+		"no thresholds": {map[string]any{"path": jsonPath, "thresholds": []string{}}, "no thresholds"},
+		"empty path":    {map[string]any{"path": "", "thresholds": []string{"p95<1s"}}, "path is empty"},
+		// An aggregated JSON result with raw: true must not read as an empty run that fails with "no data".
+		"aggregated JSON as raw": {map[string]any{"path": jsonPath, "raw": true, "thresholds": []string{"p95<1s"}}, "raw: true"},
+		"empty file as raw":      {map[string]any{"path": empty, "raw": true, "thresholds": []string{"p95<1s"}}, "raw: true"},
+		"raw data without raw":   {map[string]any{"path": rawPath, "thresholds": []string{"p95<1s"}}, "raw: true"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			var out CheckResultOutput
-			callTool(t, cs, "check_result", args, &out)
-			if out.Passed || out.Error == "" {
-				t.Errorf("want an error, got %+v", out)
+			msg := callToolError(t, cs, "check_result", tc.args)
+			if !strings.Contains(msg, tc.want) {
+				t.Errorf("error = %q, want it to contain %q", msg, tc.want)
+			}
+			for _, bad := range []string{"-raw", "ReadRaw", "jotaro:"} {
+				if strings.Contains(msg, bad) {
+					t.Errorf("error = %q should not mention %q", msg, bad)
+				}
 			}
 		})
 	}
@@ -161,14 +180,11 @@ func TestSummarizeResult(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			var out SummaryOutput
 			callTool(t, cs, "summarize_result", args, &out)
-			if out.Error != "" {
-				t.Fatal(out.Error)
-			}
 			if out.Model != "open" || out.ElapsedSeconds != 10 || out.RPS != 2 || out.Dropped != 2 || out.PeakConcurrency != 1 {
 				t.Errorf("unexpected totals %+v", out)
 			}
-			if q := out.Requests; q.Count != 20 || q.ErrorRate != 0.1 || q.Corrected == nil ||
-				q.Errors["timeout"] != 1 || q.Errors["expect_mismatch"] != 1 || q.Status["5xx"] != 1 {
+			if q := out.Requests; q.Count != 20 || q.ErrorRate != 0.05 || q.Corrected == nil ||
+				q.Errors["timeout"] != 1 || len(q.Errors) != 1 || q.Status["5xx"] != 1 {
 				t.Errorf("unexpected request summary %+v", q)
 			}
 			if len(out.Scenarios) != 1 || len(out.Scenarios[0].Steps) != 2 {
@@ -182,7 +198,7 @@ func TestSummarizeResult(t *testing.T) {
 			if login.Name != "login" || login.Failed != 0 || login.Requests.Latency.P95Ms != 10 {
 				t.Errorf("unexpected login step %+v", login)
 			}
-			if order.Name != "order" || order.Failed != 2 || order.Requests.Latency.P95Ms != 300 || order.Requests.ErrorRate != 0.2 {
+			if order.Name != "order" || order.Failed != 2 || order.Requests.Latency.P95Ms != 300 || order.Requests.ErrorRate != 0.1 {
 				t.Errorf("unexpected order step %+v", order)
 			}
 			if out.WorstSecond == nil || out.WorstSecond.P95Ms != 300 || out.WorstSecond.Requests != 2 {
@@ -208,11 +224,42 @@ func TestSummarizeResult(t *testing.T) {
 		}
 	})
 
-	t.Run("missing file", func(t *testing.T) {
-		var out SummaryOutput
-		callTool(t, cs, "summarize_result", map[string]any{"path": filepath.Join(t.TempDir(), "none.json")}, &out)
-		if out.Error == "" {
-			t.Errorf("want an error, got %+v", out)
-		}
-	})
+	dir := t.TempDir()
+	empty := filepath.Join(dir, "empty.jsonl")
+	if err := os.WriteFile(empty, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for name, tc := range map[string]struct {
+		args map[string]any
+		want string
+	}{
+		"missing file":           {map[string]any{"path": filepath.Join(dir, "none.json")}, "none.json"},
+		"aggregated JSON as raw": {map[string]any{"path": jsonPath, "raw": true}, "raw: true"},
+		"empty file as raw":      {map[string]any{"path": empty, "raw": true}, "raw: true"},
+		"raw data without raw":   {map[string]any{"path": rawPath}, "raw: true"},
+		"not a result":           {map[string]any{"path": empty}, "EOF"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			// A file that cannot be read is a tool error, not a summary of zeros.
+			msg := callToolError(t, cs, "summarize_result", tc.args)
+			if !strings.Contains(msg, tc.want) {
+				t.Errorf("error = %q, want it to contain %q", msg, tc.want)
+			}
+		})
+	}
+}
+
+// TestRawWithoutRequests pins that a valid raw stream of a run without requests (a meta line only) is not
+// mistaken for the wrong kind of input.
+func TestRawWithoutRequests(t *testing.T) {
+	cs := connect(t)
+	path := filepath.Join(t.TempDir(), "raw.jsonl")
+	if err := os.WriteFile(path, []byte(`{"type":"meta","version":1,"elapsed_ns":1000000000}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var out SummaryOutput
+	callTool(t, cs, "summarize_result", map[string]any{"path": path, "raw": true}, &out)
+	if len(out.Warnings) != 1 || !strings.Contains(out.Warnings[0], "no requests") {
+		t.Errorf("want the no-requests warning, got %+v", out)
+	}
 }

@@ -14,7 +14,7 @@ var docResources = []struct {
 		uri:         "jotaro://guide",
 		file:        "content/guide.md",
 		name:        "guide",
-		description: "How to write a jotaro scenario: skeleton, API overview, load models (Users / Arrival) and a checklist.",
+		description: "How to write a jotaro scenario: skeleton, API overview, load models (Users / UserStages / Arrival) and a checklist.",
 	},
 	{
 		uri:         "jotaro://thresholds",
