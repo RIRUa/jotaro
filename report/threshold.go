@@ -23,11 +23,16 @@ import (
 //   - Latency: [phase_]statistic. The statistic is one of min / mean / p50 / p90 / p95 / p99 / max.
 //     The phase is none (the whole request) / corrected_ (after Coordinated Omission correction) /
 //     ttfb_ / dns_ / connect_ / tls_. Examples: p95, corrected_p99, ttfb_p50
-//   - Ratio: error_rate (network errors and Expect mismatches) / http_4xx_rate / http_5xx_rate
-//     (all relative to the number of requests), iteration_fail_rate (relative to the number of iterations)
+//   - Ratio: error_rate / http_4xx_rate / http_5xx_rate (all relative to the number of requests),
+//     iteration_fail_rate (relative to the number of iterations)
 //   - Scenario latency: iteration_[active_]statistic, the time of a whole scenario iteration.
 //     iteration_ includes Think time and iteration_active_ leaves it out. Examples: iteration_p95, iteration_active_p99
 //   - Count: requests / rps / dropped
+//
+// error_rate is the share of requests that ended in a transport-level error (timeout, connection refused,
+// DNS failure and so on). A failed Expect* check is not counted as a request error: it fails the step with
+// expect_mismatch, which is listed in the step's errors, and it reaches iteration_fail_rate when the scenario
+// returns that error. An HTTP error status is counted by http_4xx_rate / http_5xx_rate.
 //
 // {step=...} (optionally together with scenario=...) looks at latency, ratios and requests per step.
 // iteration_fail_rate and the scenario latencies are looked at per scenario with {scenario=...}. rps and dropped are overall only.

@@ -27,8 +27,10 @@ var ErrAborted = errors.New("jotaro: run aborted")
 //		{When: "p95>2s", For: 10 * time.Second},
 //	},
 //
-// Mind which metric sees the failure: error_rate counts network errors (timeouts, refused connections, ...) and
-// Expect mismatches, while an HTTP error status is counted by http_4xx_rate / http_5xx_rate.
+// Mind which metric sees the failure: error_rate is the share of requests that ended in a transport-level error
+// (timeout, connection refused, DNS failure and so on). A failed Expect* check is not a request error: it fails the
+// step with expect_mismatch and reaches iteration_fail_rate when the scenario returns that error. An HTTP error
+// status is counted by http_4xx_rate / http_5xx_rate.
 //
 // The condition is evaluated every second against the whole run so far (not a sliding window), the same way
 // Report.Check reads a finished report. Percentiles are therefore the approximate ones of a run without Plan.Raw.

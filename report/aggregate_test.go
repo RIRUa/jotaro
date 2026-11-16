@@ -25,6 +25,8 @@ func genRun(seed uint64) (origin time.Time, reqs []record.Record, steps []record
 	origin = time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	scenarios := []string{"checkout", "browse", "admin"}
 	stepNames := []string{"login", "list", "order"}
+	// Requests only ever fail at the transport level; an Expect mismatch is recorded on steps and iterations.
+	reqErrKinds := []record.ErrKind{record.ErrNone, record.ErrNone, record.ErrNone, record.ErrTimeout, record.ErrConnRefused}
 	errKinds := []record.ErrKind{record.ErrNone, record.ErrNone, record.ErrNone, record.ErrTimeout, record.ErrExpect}
 	codes := []int{200, 200, 201, 404, 500, 503, 0}
 
@@ -39,7 +41,7 @@ func genRun(seed uint64) (origin time.Time, reqs []record.Record, steps []record
 				lat := time.Duration(1+rng.IntN(300_000)) * time.Microsecond
 				r := record.Record{
 					Scenario: sc, Step: name, UserID: u, Method: "GET", URL: "/" + name,
-					Code: codes[rng.IntN(len(codes))], Err: errKinds[rng.IntN(len(errKinds))],
+					Code: codes[rng.IntN(len(codes))], Err: reqErrKinds[rng.IntN(len(reqErrKinds))],
 					Start: cur, Scheduled: cur.Add(-time.Duration(rng.IntN(5)) * time.Millisecond), Latency: lat,
 					BytesIn: int64(rng.IntN(5000)), BytesOut: int64(rng.IntN(500)),
 				}

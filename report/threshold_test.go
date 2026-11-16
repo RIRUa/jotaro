@@ -86,7 +86,7 @@ func checkReport() *Report {
 		{Scenario: "checkout", Step: "login", Code: 200, Latency: 10 * ms},
 		{Scenario: "checkout", Step: "login", Code: 200, Latency: 20 * ms},
 		{Scenario: "checkout", Step: "order", Code: 500, Latency: 100 * ms},
-		{Scenario: "checkout", Step: "order", Code: 201, Latency: 200 * ms, Err: record.ErrExpect},
+		{Scenario: "checkout", Step: "order", Latency: 200 * ms, Err: record.ErrTimeout}, // no response, like a real transport error
 		{Scenario: "browse", Step: "login", Code: 404, Latency: 30 * ms},
 	}
 	iters := []record.IterationRecord{
