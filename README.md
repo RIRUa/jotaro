@@ -167,6 +167,7 @@ jotaro compare -max-p95-regression 10 base.json new.json
 | `error_rate` | Share of network errors and `ExpectStatus` mismatches (`1%` or `0.01`) |
 | `http_4xx_rate` `http_5xx_rate` | Share of HTTP 4xx / 5xx |
 | `iteration_fail_rate` | Share of failed iterations |
+| `iteration_min` … `iteration_max`, `iteration_active_min` … `iteration_active_max` | Latency of a whole scenario iteration, with / without Think time (filter with `{scenario=...}`) |
 | `requests` `rps` `dropped` | Number of requests / requests per second / number of dropped arrivals |
 
 When the target or the data is missing, the threshold counts as not met, so that a mistyped step name cannot pass silently. See chapter 5 of [`docs/result.md`](docs/result.md) for details.
