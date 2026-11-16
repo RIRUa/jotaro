@@ -28,7 +28,8 @@ func addPrompts(s *mcp.Server) {
 1. Read the jotaro://guide resource (and jotaro://thresholds if you will add thresholds).
 2. Write one complete package main file: a Scenario with a u.Step per meaningful request, a Plan against %s, and report output.
 3. Call check_scenario with the code%s and fix every error and warning it reports. Repeat until it passes.
-4. Show the final code, and say which load model you chose (Users or Arrival) and why.
+4. Show the final code, and say which load model you chose (Users, UserStages or Arrival) and why. Also give the command that runs it and saves the result (the guide's skeleton writes results/result.json; run it with go run . from the directory of the file), and tell the user to run it.
+5. After the user has run it, call summarize_result with the absolute path of the saved result.json, and check_result to judge it against thresholds.
 
 Only target servers the user owns or is allowed to load-test.`,
 			args["flow"], baseURL, dirHint(args["dir"]))
