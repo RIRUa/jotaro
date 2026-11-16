@@ -276,3 +276,42 @@ func TestRunOpenStreamed(t *testing.T) {
 		t.Errorf("concurrency = %d, want 1 (MaxUsers)", got)
 	}
 }
+
+func TestPlanScenariosValidate(t *testing.T) {
+	ok := NewScenario("a", func(ctx context.Context, u *User) error { return nil })
+	dup := NewScenario("a", func(ctx context.Context, u *User) error { return nil })
+	cases := map[string]Plan{
+		"both set":    {Scenario: ok, Scenarios: []Weighted{{ok, 1}}, Users: 1, Duration: time.Second},
+		"empty":       {Scenarios: []Weighted{}, Users: 1, Duration: time.Second},
+		"nil":         {Scenarios: []Weighted{{nil, 1}}, Users: 1, Duration: time.Second},
+		"zero weight": {Scenarios: []Weighted{{ok, 0}}, Users: 1, Duration: time.Second},
+		"dup name":    {Scenarios: []Weighted{{ok, 1}, {dup, 1}}, Users: 1, Duration: time.Second},
+	}
+	for name, p := range cases {
+		if err := p.validate(); err == nil {
+			t.Errorf("%s: want error", name)
+		}
+	}
+}
+
+func TestPlanScenariosMix(t *testing.T) {
+	noop := func(ctx context.Context, u *User) error { return nil }
+	mix := []Weighted{{NewScenario("browse", noop), 3}, {NewScenario("checkout", noop), 1}}
+	for name, p := range map[string]Plan{
+		"closed": {Scenarios: mix, Users: 4, Duration: 300 * time.Millisecond},
+		"open":   {Scenarios: mix, Arrival: Rate(1000, time.Second), Duration: 300 * time.Millisecond},
+	} {
+		rep, err := Run(context.Background(), p)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		counts := map[string]int{}
+		for _, s := range rep.Scenarios {
+			counts[s.Name] = s.Iterations.Count
+		}
+		b, c := counts["browse"], counts["checkout"]
+		if b == 0 || c == 0 || b < c {
+			t.Errorf("%s: browse=%d checkout=%d, want both run and browse more often", name, b, c)
+		}
+	}
+}
