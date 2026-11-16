@@ -10,6 +10,20 @@ Runnable samples of jotaro. Each one starts its own mock server, so nothing else
 | [`mix`](mix) | A weighted mix of scenarios (70% browse, 30% buy), waves of users, aborting a broken run, live progress and metrics, and thresholds per scenario. A layout to copy for a small load test |
 | [`marketplace`](marketplace) | A deep, realistic scenario: several kinds of visitors in one scenario, stateful sessions, retries, polling and thresholds that fail the run |
 
+Which one to read for a flow of your own: when the visitors follow independent flows (browse or buy), write one scenario per flow and mix them with `Plan.Scenarios`, as in `mix`. When one visitor branches on the result of an earlier step, keep one scenario and branch inside it, as in `marketplace`.
+
+## Run, check, read
+
+The whole loop with the `jotaro` command, using `checkout`: run and save the result, judge it against thresholds, then read it. From the repository root, `go run ./cmd/jotaro` is the command. To use it anywhere, install it once with `go install github.com/RIRUa/jotaro/cmd/jotaro@latest` and write `jotaro` instead.
+
+```sh
+go run ./examples/checkout -format json -o result.json                             # run and save the result
+go run ./cmd/jotaro check -t 'p95<200ms' -t 'error_rate<1%' result.json           # judge it; exit status 1 if a threshold is not met
+go run ./cmd/jotaro report -format text result.json                                # read it (HTML by default; add -o result.html)
+```
+
+To compare two runs, or to hand the data to other tools, save the raw data as well (`-raw raw.jsonl`), then use `jotaro compare -max-p95-regression 20 base.json new.json` (exit status 1 if a p95 got more than 20% worse) or `jotaro export -format csv -o series.csv raw.jsonl` (also `-format vegeta`).
+
 ## checkout
 
 A small sample that starts its own mock server.
