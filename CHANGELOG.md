@@ -10,6 +10,7 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ### Added
 
+- The text report now prints a `warning:` line under `dropped:` when arrivals were dropped by the `Plan.MaxUsers` cap ("I'll tell you exactly what just happened: N arrivals were dropped..."), so drops are hard to miss. Nothing changes when no arrival was dropped.
 - `Plan.Scenarios` and `Weighted`: run a weighted mix of scenarios in one plan (for example 70% browse, 30% checkout). Each iteration (closed model) or arrival (open model) picks one scenario at random in proportion to its weight. It is mutually exclusive with `Plan.Scenario`, and the scenarios must have distinct names. Reports and thresholds already separate results by scenario name. `jotaro mcp`'s lint accepts the new field.
 - Richer response checks: `Response.ExpectStatusIn`, `ExpectHeader`, `ExpectBodyContains` and `ExpectJSON(path, want)`, all reported as `expect_mismatch` like `ExpectStatus`, and `Response.JSON(path)` to pull one value out of a JSON body with a dot path such as `data.items.0.id`, without a struct. `ExpectError` gains a `Detail` field for non-status mismatches (`Want` is 0 for them). No new dependencies.
 - `jotaro compare base.json new.json` and `report.Compare`: per-step and overall diffs (rps, p50/p95/p99, error rate) between two results, with `-max-p95-regression <percent>` to exit with code 1 on a regression.

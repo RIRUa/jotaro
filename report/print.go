@@ -22,6 +22,10 @@ func (r *Report) Print(w io.Writer) {
 	if r.Open {
 		fmt.Fprintf(w, "corrected:  %s (from scheduled start)\n", fmtPercentiles(r.Requests.Corrected))
 		fmt.Fprintf(w, "dropped:    %d\n", r.Dropped)
+		if r.Dropped > 0 {
+			// Make drops hard to miss: the concurrency cap (Plan.MaxUsers) was reached.
+			fmt.Fprintf(w, "warning:    I'll tell you exactly what just happened: %d arrivals were dropped because the concurrency cap (Plan.MaxUsers) was reached\n", r.Dropped)
+		}
 	}
 	fmt.Fprintf(w, "ttfb:       %s\n", fmtPercentiles(r.Requests.TTFB))
 	if q := r.Requests; q.NewConns+q.ReusedConns > 0 {
