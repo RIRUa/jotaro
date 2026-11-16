@@ -80,10 +80,10 @@ func startMetricsServer(addr string, snapshot func() *report.Report) (stop func(
 	mux := http.NewServeMux()
 	mux.Handle("/metrics", metricsHandler(snapshot))
 	srv := &http.Server{Handler: mux, ReadHeaderTimeout: 5 * time.Second}
-	go srv.Serve(ln)
+	go func() { _ = srv.Serve(ln) }()
 	return func() {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
-		srv.Shutdown(ctx)
+		_ = srv.Shutdown(ctx)
 	}, nil
 }
