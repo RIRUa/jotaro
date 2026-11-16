@@ -313,3 +313,43 @@ func TestCompareErrors(t *testing.T) {
 		t.Errorf("missing file code = %d, want 1", code)
 	}
 }
+
+func TestExport(t *testing.T) {
+	in := filepath.Join(t.TempDir(), "raw.jsonl")
+	writeSampleRaw(t, in)
+
+	for _, tc := range []struct {
+		format string
+		want   string
+	}{
+		{"vegeta", `"attack":`},
+		{"csv", "second,requests,"},
+	} {
+		var stdout, stderr bytes.Buffer
+		if code := run([]string{"export", "-format", tc.format, in}, nil, &stdout, &stderr); code != 0 {
+			t.Fatalf("%s: exit code %d: %s", tc.format, code, stderr.String())
+		}
+		if !strings.Contains(stdout.String(), tc.want) {
+			t.Errorf("%s: output lacks %q:\n%s", tc.format, tc.want, stdout.String())
+		}
+	}
+}
+
+func TestExportUsage(t *testing.T) {
+	in := filepath.Join(t.TempDir(), "raw.jsonl")
+	writeSampleRaw(t, in)
+	for _, args := range [][]string{
+		{"export", in},                   // no format
+		{"export", "-format", "xml", in}, // unknown format
+		{"export", "-format", "csv"},     // no input
+	} {
+		var stdout, stderr bytes.Buffer
+		if code := run(args, nil, &stdout, &stderr); code != 2 {
+			t.Errorf("%v: exit code %d, want 2", args, code)
+		}
+	}
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"export", "-format", "csv", filepath.Join(t.TempDir(), "missing")}, nil, &stdout, &stderr); code != 1 {
+		t.Errorf("missing file: exit code %d, want 1", code)
+	}
+}

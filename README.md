@@ -150,6 +150,10 @@ jotaro check -t 'p95<200ms' -t 'error_rate<1%' -t 'p99{step=login}<100ms' result
 
 # Compare with a previous run; fail if any p95 got more than 10% worse
 jotaro compare -max-p95-regression 10 base.json new.json
+
+# Convert raw data (Plan.Raw output) for other tools
+jotaro export -format vegeta -o results.json raw.jsonl   # then: vegeta report -type=json results.json
+jotaro export -format csv -o series.csv raw.jsonl        # per-second counts and percentiles
 ```
 
 - Pass `-` as the input to read from standard input (`report` / `check`)

@@ -5,6 +5,7 @@
 //   - report: build a report in text, JSON or HTML from a saved result
 //   - merge: combine results from several runs (for example several load generators) into one
 //   - compare: diff two results, optionally failing when p95 regressed by more than a given percentage
+//   - export: convert raw data to another tool's format (vegeta results, or a per-second CSV)
 //   - check: compare a result with thresholds and exit with code 1 if any fail, which suits CI
 //   - mcp: run an MCP server over stdio that helps an AI assistant write scenarios
 //   - version: print the version
@@ -15,6 +16,7 @@
 //	jotaro merge  [-raw] [-format html|text|json] [-o output] <result.json>...
 //	jotaro check  [-raw] -t <threshold> [-t <threshold>]... <result.json | ->
 //	jotaro compare [-raw] [-max-p95-regression <percent>] <base.json> <new.json>
+//	jotaro export -format vegeta|csv [-o output] <raw.jsonl | ->
 //	jotaro mcp
 //	jotaro version
 //
@@ -43,6 +45,7 @@ commands:
   merge    combine several JSON results into one
   check    check whether a result meets the thresholds (e.g. p95<200ms); exit code 1 if not
   compare  diff two results; with -max-p95-regression, exit code 1 on a regression
+  export   convert raw data to vegeta results or a per-second CSV
   mcp      run an MCP server over stdio that helps write scenarios
   version  print the version
 `
@@ -67,6 +70,8 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return runCheck(args[1:], stdin, stdout, stderr)
 	case "compare":
 		return runCompare(args[1:], stdin, stdout, stderr)
+	case "export":
+		return runExport(args[1:], stdin, stdout, stderr)
 	case "mcp":
 		return runMCP(args[1:], stderr)
 	case "version", "-version", "--version":
@@ -79,6 +84,80 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "jotaro: unknown command %q\n\n%s", args[0], usage)
 		return 2
 	}
+}
+
+// runExport implements "jotaro export". The input is always raw JSON Lines data (the output of Plan.Raw).
+// Format "vegeta" writes one vegeta result per request, and "csv" writes the per-second time series.
+// The exit code is 0 on success, 1 when reading or writing fails, 2 for bad usage.
+func runExport(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("export", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	fs.Usage = func() {
+		fmt.Fprintln(stderr, "usage: jotaro export -format vegeta|csv [-o output] <raw.jsonl | ->")
+		fs.PrintDefaults()
+	}
+	format := fs.String("format", "", "output format (vegeta, csv); required")
+	out := fs.String("o", "", "output file; standard output if empty")
+	if err := fs.Parse(args); err != nil {
+		if err == flag.ErrHelp {
+			return 0
+		}
+		return 2
+	}
+	if fs.NArg() != 1 {
+		fs.Usage()
+		return 2
+	}
+	var write func(io.Writer, *record.Raw) error
+	switch *format {
+	case "vegeta":
+		write = report.WriteVegeta
+	case "csv":
+		write = func(w io.Writer, raw *record.Raw) error { return report.FromRaw(raw).WriteSeriesCSV(w) }
+	default:
+		fmt.Fprintf(stderr, "jotaro: unknown export format %q (want vegeta or csv)\n", *format)
+		return 2
+	}
+
+	in := stdin
+	if path := fs.Arg(0); path != "-" {
+		file, err := os.Open(path)
+		if err != nil {
+			fmt.Fprintln(stderr, "jotaro:", err)
+			return 1
+		}
+		defer file.Close()
+		in = file
+	}
+	raw, err := record.ReadRaw(in)
+	if err != nil {
+		fmt.Fprintln(stderr, "jotaro:", errMessage(err))
+		return 1
+	}
+
+	if *out == "" {
+		if err := write(stdout, raw); err != nil {
+			fmt.Fprintln(stderr, "jotaro:", err)
+			return 1
+		}
+		return 0
+	}
+	file, err := os.Create(*out)
+	if err != nil {
+		fmt.Fprintln(stderr, "jotaro:", err)
+		return 1
+	}
+	if err := write(file, raw); err != nil {
+		file.Close()
+		_ = os.Remove(*out) // the write error comes first
+		fmt.Fprintln(stderr, "jotaro:", err)
+		return 1
+	}
+	if err := file.Close(); err != nil {
+		fmt.Fprintln(stderr, "jotaro:", err)
+		return 1
+	}
+	return 0
 }
 
 // runMCP implements "jotaro mcp". It serves MCP over the process's standard input and output
