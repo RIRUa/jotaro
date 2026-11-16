@@ -4,6 +4,10 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ## [Unreleased]
 
+### Added
+
+- `jotaro mcp`: the `check_result` tool judges a saved result file (JSON, or raw data with `raw: true`) against thresholds, like `jotaro check`, and returns pass or fail per threshold with the measured value.
+
 ## [0.1.2] - 2026-11-12
 
 ### Changed

@@ -161,9 +161,9 @@ jotaro check -t 'p95<200ms' -t 'error_rate<1%' -t 'p99{step=login}<100ms' result
 
 When the target or the data is missing, the threshold counts as not met, so that a mistyped step name cannot pass silently. See chapter 5 of [`docs/result.md`](docs/result.md) for details.
 
-## MCP server (scenario authoring)
+## MCP server (scenario authoring and result checks)
 
-`jotaro mcp` starts an [MCP](https://modelcontextprotocol.io) server that helps an AI assistant write scenarios. It talks over stdio and never runs the scenario it checks.
+`jotaro mcp` starts an [MCP](https://modelcontextprotocol.io) server that helps an AI assistant write scenarios and read saved results. It talks over stdio and never runs a scenario: it only checks code and reads result files.
 
 ```sh
 claude mcp add jotaro -- jotaro mcp     # Claude Code; other clients take the same command
@@ -176,6 +176,7 @@ claude mcp add jotaro -- jotaro mcp     # Claude Code; other clients take the sa
 | Prompt | `write_scenario` | Write a scenario for a described flow, then check it |
 | Tool | `check_scenario` | Check a scenario file: Go syntax, jotaro lint (`Users` xor `Arrival`, unchecked responses, duplicate step names, ...) and a type check by compiling. Pass `dir` (a module that requires jotaro) to check against its jotaro version; without it a temporary module with the latest jotaro is used, which needs network access |
 | Tool | `validate_threshold` | Parse a threshold such as `p99{step=login}<100ms` |
+| Tool | `check_result` | Judge a saved result file against thresholds, like `jotaro check`: pass or fail per threshold with the measured value. `raw: true` reads raw JSON Lines data |
 
 ## Packages
 

@@ -5,7 +5,7 @@
 //   - report: build a report in text, JSON or HTML from a saved result
 //   - merge: combine results from several runs (for example several load generators) into one
 //   - check: compare a result with thresholds and exit with code 1 if any fail, which suits CI
-//   - mcp: run an MCP server over stdio that helps an AI assistant write scenarios
+//   - mcp: run an MCP server over stdio that helps an AI assistant write scenarios and read results
 //   - version: print the version
 //
 // Usage:
@@ -40,7 +40,7 @@ commands:
   report   build a report from a saved JSON result
   merge    combine several JSON results into one
   check    check whether a result meets the thresholds (e.g. p95<200ms); exit code 1 if not
-  mcp      run an MCP server over stdio that helps write scenarios
+  mcp      run an MCP server over stdio that helps write scenarios and read results
   version  print the version
 `
 
