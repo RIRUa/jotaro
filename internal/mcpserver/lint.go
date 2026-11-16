@@ -76,8 +76,8 @@ func (l *linter) checkPlans(f *ast.File) {
 		if !keys["Duration"] {
 			l.add("error", "plan-duration", lit.Pos(), "Plan.Duration is not set; Run rejects a non-positive Duration")
 		}
-		if !keys["Scenario"] {
-			l.add("error", "plan-scenario", lit.Pos(), "Plan.Scenario is not set")
+		if !keys["Scenario"] && !keys["Scenarios"] {
+			l.add("error", "plan-scenario", lit.Pos(), "neither Plan.Scenario nor Plan.Scenarios is set")
 		}
 		return true
 	})

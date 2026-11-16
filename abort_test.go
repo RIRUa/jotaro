@@ -143,7 +143,7 @@ func TestRunAbortsEarly(t *testing.T) {
 	}
 }
 
-// The raw data of an aborted run is still written, and the report is the exact one.
+// The raw data of an aborted run is still written.
 func TestRunAbortWithRaw(t *testing.T) {
 	fastAbort(t)
 	srv := failingServer(t)

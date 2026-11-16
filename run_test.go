@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -194,9 +195,16 @@ func TestRunWritesRaw(t *testing.T) {
 	if len(raw.Requests) != rep.Requests.Count || len(raw.Requests) == 0 {
 		t.Fatalf("request count: raw = %d, rep = %d", len(raw.Requests), rep.Requests.Count)
 	}
-	// The result re-aggregated from raw data matches the result of Run.
-	if again := report.FromRaw(raw); !reflect.DeepEqual(again, rep) {
+	// The result re-aggregated from raw data agrees with the result of Run. Run aggregates incrementally,
+	// so the percentiles are within 1% of the exact ones that FromRaw computes; the rest is identical.
+	again := report.FromRaw(raw)
+	if again.Requests.Count != rep.Requests.Count || again.Elapsed != rep.Elapsed || again.Open != rep.Open ||
+		again.Dropped != rep.Dropped || !reflect.DeepEqual(again.Health, rep.Health) {
 		t.Errorf("the re-aggregated result differs from the result of Run:\n got %+v\nwant %+v", again, rep)
+	}
+	exact, approx := float64(again.Requests.Latency.P95), float64(rep.Requests.Latency.P95)
+	if math.Abs(exact-approx) > 0.011*exact {
+		t.Errorf("p95: exact %v, streamed %v (more than 1%% apart)", again.Requests.Latency.P95, rep.Requests.Latency.P95)
 	}
 }
 
@@ -214,7 +222,7 @@ func TestRunRawWriteErrorStillReturnsReport(t *testing.T) {
 	}
 }
 
-// Without Plan.Raw, Run folds records into histograms; with it, Run aggregates exactly. Both give the same counts.
+// Run folds records into histograms with and without Plan.Raw. Both give the same counts.
 func TestRunAggregatesWithAndWithoutRaw(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		time.Sleep(2 * time.Millisecond)
@@ -237,7 +245,7 @@ func TestRunAggregatesWithAndWithoutRaw(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	for name, rep := range map[string]*report.Report{"streamed": streamed, "exact": exact} {
+	for name, rep := range map[string]*report.Report{"streamed": streamed, "with raw": exact} {
 		if rep.Requests.Count == 0 || len(rep.Scenarios) != 1 || len(rep.Scenarios[0].Steps) != 1 {
 			t.Fatalf("%s: unexpected report %+v", name, rep)
 		}
@@ -274,5 +282,44 @@ func TestRunOpenStreamed(t *testing.T) {
 	}
 	if got := rep.Series[0].Concurrency; got != 1 {
 		t.Errorf("concurrency = %d, want 1 (MaxUsers)", got)
+	}
+}
+
+func TestPlanScenariosValidate(t *testing.T) {
+	ok := NewScenario("a", func(ctx context.Context, u *User) error { return nil })
+	dup := NewScenario("a", func(ctx context.Context, u *User) error { return nil })
+	cases := map[string]Plan{
+		"both set":    {Scenario: ok, Scenarios: []Weighted{{ok, 1}}, Users: 1, Duration: time.Second},
+		"empty":       {Scenarios: []Weighted{}, Users: 1, Duration: time.Second},
+		"nil":         {Scenarios: []Weighted{{nil, 1}}, Users: 1, Duration: time.Second},
+		"zero weight": {Scenarios: []Weighted{{ok, 0}}, Users: 1, Duration: time.Second},
+		"dup name":    {Scenarios: []Weighted{{ok, 1}, {dup, 1}}, Users: 1, Duration: time.Second},
+	}
+	for name, p := range cases {
+		if err := p.validate(); err == nil {
+			t.Errorf("%s: want error", name)
+		}
+	}
+}
+
+func TestPlanScenariosMix(t *testing.T) {
+	noop := func(ctx context.Context, u *User) error { return nil }
+	mix := []Weighted{{NewScenario("browse", noop), 3}, {NewScenario("checkout", noop), 1}}
+	for name, p := range map[string]Plan{
+		"closed": {Scenarios: mix, Users: 4, Duration: 300 * time.Millisecond},
+		"open":   {Scenarios: mix, Arrival: Rate(1000, time.Second), Duration: 300 * time.Millisecond},
+	} {
+		rep, err := Run(context.Background(), p)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		counts := map[string]int{}
+		for _, s := range rep.Scenarios {
+			counts[s.Name] = s.Iterations.Count
+		}
+		b, c := counts["browse"], counts["checkout"]
+		if b == 0 || c == 0 || b < c {
+			t.Errorf("%s: browse=%d checkout=%d, want both run and browse more often", name, b, c)
+		}
 	}
 }

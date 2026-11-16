@@ -139,11 +139,3 @@ func (f fanout) ObserveIterationStart(t time.Time) {
 		o.ObserveIterationStart(t)
 	}
 }
-
-// keeper is an Observer that stores records in a Collector, so that Plan.Raw and Plan.Progress can be used together.
-type keeper struct{ col *record.Collector }
-
-func (k keeper) ObserveRequest(r record.Record)            { k.col.AddRequest(r) }
-func (k keeper) ObserveStep(r record.StepRecord)           { k.col.AddStep(r) }
-func (k keeper) ObserveIteration(r record.IterationRecord) { k.col.AddIteration(r) }
-func (keeper) ObserveIterationStart(time.Time)             {}

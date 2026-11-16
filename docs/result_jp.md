@@ -73,8 +73,8 @@ HTTP 4xx/5xx は `ErrKind` ではなくステータス（`Status`）として記
 ### 補足
 
 - `RPS()` は `Requests.Count / Elapsed`。
-- `Plan.Raw` を指定しない `Run` は逐次集計する（`report.Aggregator`）。記録は届くたびにカウンタと対数ヒストグラムへ畳み込み、保持しないので、メモリはリクエスト数に比例して増えない。件数・最小・最大・平均は正確で、`P50`〜`P99` は相対誤差 1% 以内の近似値（`[最小, 最大]` に収める）。
-- `Plan.Raw` を指定した `Run`、`FromRaw`、`BuildReport` は全記録を持ち（受け取り）ソートするので、`P50`〜`P99` は nearest-rank の正確な値になる。メモリよりパーセンタイルの正確さを優先したいときはこちらを使う。
+- `Run` は `Plan.Raw` の有無にかかわらず逐次集計する（`report.Aggregator`）。記録は届くたびにカウンタと対数ヒストグラムへ畳み込み、保持しないので、メモリはリクエスト数に比例して増えない。件数・最小・最大・平均は正確で、`P50`〜`P99` は相対誤差 1% 以内の近似値（`[最小, 最大]` に収める）。
+- `FromRaw`、`BuildReport` は全記録を受け取ってソートするので、`P50`〜`P99` は nearest-rank の正確な値になる。ある実行の正確なパーセンタイルが欲しいときは、`Plan.Raw` に書き出してから集計し直す（`jotaro report -raw`）。
 
 ### JSON 出力（実装済み）
 
@@ -134,7 +134,7 @@ jotaro merge -format html -o report.html a.json b.json
 | シナリオ・ステップ | 名前で突き合わせ。並びは最初に現れた順 |
 | `Open` が揃っていない | エラー（モデルが違う結果は混ぜられない） |
 
-- **ヒストグラム**: 各 `latency` に対数バケット（DDSketch 方式、相対誤差 1%）を持たせた（JSON の `buckets`: バケット番号 → 件数）。バケットは足し算で結合できるので、何台分でも順序に関係なく同じ結果になる。全記録から作ったレポート（`BuildReport`、`FromRaw`、`Plan.Raw` つきの `Run`）の `P50`〜`P99` は nearest-rank の正確な値。逐次集計したもの（`Plan.Raw` なしの `Run`）と、結合したものは近似になる。
+- **ヒストグラム**: 各 `latency` に対数バケット（DDSketch 方式、相対誤差 1%）を持たせた（JSON の `buckets`: バケット番号 → 件数）。バケットは足し算で結合できるので、何台分でも順序に関係なく同じ結果になる。全記録から作ったレポート（`BuildReport`、`FromRaw`）の `P50`〜`P99` は nearest-rank の正確な値。逐次集計したもの（`Run`。`Plan.Raw` の有無は問わない）と、結合したものは近似になる。
 - **サイズ**: バケットの数は分布の広がりで決まる（件数には比例しない）。10 万件・裾の重い分布で 1 つの `latency` あたり数百バケット。
 - **接続の内訳 (`requests` と各ステップの `requests`、version 3)**: `dns` / `connect`（TCP）/ `tls` は、その区間が実際に起きたリクエストだけのレイテンシ分布（`buckets` つき）。接続を再利用したリクエストや、http の TLS は含まない。`conn_new` / `conn_reused` は接続を新しく張った / 再利用したリクエストの数で、再利用率は `conn_reused / (conn_new + conn_reused)`。接続を得る前に失敗したリクエストはどちらにも数えない。version 1・2 の JSON には無い（0・空として読める）。
 - **時系列 (`series`、version 3)**: `started_at` からの 1 秒ごとの配列。要素は `second` / `requests` / `errors`（通信エラー。HTTP 4xx/5xx は含まない）/ `http_5xx`（HTTP 5xx の数。`errors` とは重ならない。無ければ 0）/ `latency`（`buckets` つき）/ `conn_new` / `conn_reused`（その秒に開始したリクエストのうち、接続を新しく張った / 再利用した数）/ `dns` / `connect` / `tls`（その区間が起きたリクエストだけの分布。`buckets` つき。`requests` の同名のフィールドと同じ範囲）/ `concurrency`（その秒の実行中イテレーション数の最大）。`started_at` が無いと空。結合では `started_at` の差だけ秒をずらして足し、`concurrency` は合計（上限の見積り）。version 1・2 の JSON には無い。`conn_new` 以降は version 3 に後から足した項目で、無い JSON は 0・空として読む（互換を壊さないので版は上げていない）。
@@ -153,7 +153,7 @@ jotaro merge -format html -o report.html a.json b.json
 ```go
 f, _ := os.Create("raw.jsonl")
 defer f.Close()
-rep, err := jotaro.Run(ctx, jotaro.Plan{ /* ... */ Raw: f }) // 終了時に書き出す
+rep, err := jotaro.Run(ctx, jotaro.Plan{ /* ... */ Raw: f }) // 実行中に書き出す
 ```
 
 ```
@@ -163,14 +163,15 @@ jotaro report -raw -format json raw.jsonl | jotaro check -t 'p95<200ms' -   # �
 jotaro check -raw -t 'p95<200ms' raw.jsonl                    # 直接判定もできる
 ```
 
-ライブラリでは `record.WriteRaw(w, *record.Raw)` / `record.ReadRaw(r)` / `report.FromRaw(*record.Raw)`。`Run` の結果も `report.FromRaw` を通すので、書き出した生データから再集計した結果は `Run` が返した `Report` と一致する。`report` / `merge` / `check` の `-raw` で読める。
+ライブラリでは `record.WriteRaw(w, *record.Raw)` / `record.RawWriter`（逐次書き出し）/ `record.ReadRaw(r)` / `report.FromRaw(*record.Raw)`。書き出した生データから再集計した結果は、件数・エラー・時系列が `Run` が返した `Report` と一致する。違うのは `P50`〜`P99` だけで、`Run` は逐次集計、`FromRaw` は正確に計算するため、差は 1% 以内。`report` / `merge` / `check` の `-raw` で読める。
 
 - 先頭の行は実行全体の情報（`type` が `meta`）。`version`（`RawVersion`、現在 `1`）/ `open` / `dropped` / `started_at` / `elapsed_ns`。そのあとに `request` / `step` / `iteration` / `health` の行が続く。
 - 時間は集計の JSON と同じく**ナノ秒の整数**（`_ns`）。時刻は UTC の RFC 3339。0・空のフィールドは省く（`code`、`err`、`dns_ns`、`scheduled` など。読むときは 0・空に戻る）。
 - `request` は `Record` と同じ内容: `scenario` / `step` / `user_id` / `iteration` / `method` / `url` / `code` / `err` / `scheduled` / `start` / `latency_ns` / `conn` / `dns_ns` / `connect_ns` / `tls_ns` / `ttfb_ns` / `bytes_out` / `bytes_in`。`step` は `StepRecord`、`iteration` は `IterationRecord`、`health` は `HealthPoint` と同じ。
 - `ReadRaw` は知らない `type` の行を読み飛ばす（新しい版が行を足しても、古い読み手が壊れない）。`meta` が無くても読める（実行時間は記録から求める）。
 - 集計済みの JSON（`ReadJSON`）に生データを渡すと、先頭の `meta` 行が `version: 1` の JSON として読めてしまう。`ReadJSON` は JSON の後ろに別のデータが続くとエラーにするので、`-raw` の付け忘れは「生データなら `-raw` を使う」というエラーになる。
-- 生データは `Run` が終わってからまとめて書く（記録はもともとメモリに溜めているため。溜めるのは `Plan.Raw` を指定したときだけ）。実行中に少しずつ書く（メモリを使わない）形にはなっていない。
+- `Run` は生データを実行中に少しずつ書く（`record.RawWriter`）。記録は届くたびに書くので、リクエスト数が増えてもメモリは一定。そのため行は到着順（`request` / `step` / `iteration` が混ざる）で、最後に `health` が続く。先頭に `meta` 行（`open`、`started_at`）を書き、最後に最終的な `dropped` と `elapsed_ns` を持つ 2 つ目の `meta` 行を書く。`ReadRaw` は同じ項目では最後の値を採る。途中で落ちたときも読めるファイルが残る（実行時間は記録から求める）。
+- 実行中に書くので、中断・キャンセルされた実行でも、そこまでに書いた分が残る。
 - 書き出しに失敗しても、`Run` は集計した `Report` を返す（`error` も同時に返す）。
 
 ## 2. 未実装（提案）

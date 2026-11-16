@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math/rand/v2"
 	"net/http"
 	"net/http/cookiejar"
 	"sync"
@@ -34,8 +35,13 @@ const (
 //   - UserStages: like Users, but the number of users changes over time (ramp up, hold, ramp down).
 //   - Arrival: scenarios start at a fixed rate, regardless of how long a scenario takes.
 type Plan struct {
-	// Scenario is the flow every virtual user runs.
+	// Scenario is the flow every virtual user runs. Exactly one of Scenario and Scenarios must be set.
 	Scenario *Scenario
+	// Scenarios is a weighted mix of flows, for example 70% browse and 30% checkout. It cannot be set together
+	// with Scenario. Every iteration (closed model) or arrival (open model) picks one scenario at random with
+	// probability Weight divided by the sum of the weights. The report and thresholds already separate the
+	// results by scenario name, so the scenarios of a mix need distinct names.
+	Scenarios []Weighted
 	// BaseURL is prepended to the relative paths of requests (for example "http://localhost:8080").
 	BaseURL string
 
@@ -66,8 +72,13 @@ type Plan struct {
 	// Those that exceed it are aborted and recorded as record.ErrCanceled. 0 means 30 seconds.
 	Grace time.Duration
 
-	// If Raw is not nil, the raw data is written as JSON Lines when Run finishes (record.WriteRaw).
+	// If Raw is not nil, the raw data is written to it as JSON Lines while the run is in progress, one line per
+	// record as it arrives (record.RawWriter), so memory stays constant however many requests there are.
 	// Even if writing fails, the aggregated Report is returned (together with an error).
+	//
+	// The Report that Run returns is aggregated incrementally, as without Raw, so its percentiles are within
+	// 1% relative error. For exact percentiles, read the raw data back (record.ReadRaw, report.FromRaw,
+	// or `jotaro report -raw`).
 	Raw io.Writer
 
 	// If Progress is not nil, one line is written to it every second while the run is in progress,
@@ -88,12 +99,71 @@ type Plan struct {
 	AbortOn []AbortRule
 }
 
+// Weighted is a scenario with its share in Plan.Scenarios.
+type Weighted struct {
+	// Scenario is the flow to run.
+	Scenario *Scenario
+	// Weight is the relative share of this scenario. It must be positive; only the ratio between weights matters.
+	Weight int
+}
+
+// pick returns the scenario for the next iteration or arrival.
+//
+// With Plan.Scenario it is that scenario; with Plan.Scenarios it is chosen at random in proportion to the weights.
+func (p Plan) pick() *Scenario {
+	if p.Scenarios == nil {
+		return p.Scenario
+	}
+	total := 0
+	for _, w := range p.Scenarios {
+		total += w.Weight
+	}
+	n := rand.IntN(total)
+	for _, w := range p.Scenarios {
+		if n < w.Weight {
+			return w.Scenario
+		}
+		n -= w.Weight
+	}
+	return p.Scenarios[len(p.Scenarios)-1].Scenario // unreachable: n < total
+}
+
+// validateScenarios checks that exactly one of Scenario and Scenarios is set and that each scenario is runnable.
+func (p Plan) validateScenarios() error {
+	if p.Scenarios == nil {
+		if p.Scenario == nil || p.Scenario.Fn == nil {
+			return errors.New("jotaro: Plan.Scenario is not set")
+		}
+		return nil
+	}
+	if p.Scenario != nil {
+		return errors.New("jotaro: Plan.Scenario and Plan.Scenarios cannot be set together")
+	}
+	if len(p.Scenarios) == 0 {
+		return errors.New("jotaro: Plan.Scenarios must not be empty")
+	}
+	names := map[string]bool{}
+	for i, w := range p.Scenarios {
+		switch {
+		case w.Scenario == nil || w.Scenario.Fn == nil:
+			return fmt.Errorf("jotaro: Plan.Scenarios[%d].Scenario is not set", i)
+		case w.Weight <= 0:
+			return fmt.Errorf("jotaro: Plan.Scenarios[%d].Weight must be positive", i)
+		case names[w.Scenario.Name]:
+			return fmt.Errorf("jotaro: Plan.Scenarios has two scenarios named %q", w.Scenario.Name)
+		}
+		names[w.Scenario.Name] = true
+	}
+	return nil
+}
+
 // validate checks that the Plan is runnable: a scenario is set, exactly one of Users, UserStages and Arrival
 // is given, and Duration is positive. Run calls it first, so a bad Plan fails before any load is sent.
 func (p Plan) validate() error {
+	if err := p.validateScenarios(); err != nil {
+		return err
+	}
 	switch {
-	case p.Scenario == nil || p.Scenario.Fn == nil:
-		return errors.New("jotaro: Plan.Scenario is not set")
 	case p.modelCount() > 1:
 		return errors.New("jotaro: Plan.Users, Plan.UserStages and Plan.Arrival cannot be set together")
 	case p.StartUsers != 0 && p.UserStages == nil:
@@ -155,9 +225,9 @@ func (p Plan) maxConcurrency() int {
 //  1. validate the Plan, and clone the default Transport so connections are not shared with other code
 //  2. start the health sampler, then run the closed (Users or UserStages) or open (Arrival) loop until Duration ends
 //  3. wait up to Grace for running iterations, then cancel them
-//  4. build the report and write the raw data if Plan.Raw is set. Without Plan.Raw, records are folded into
-//     histograms as they arrive (percentiles within 1% relative error, memory independent of the run length).
-//     With Plan.Raw, every record is kept and the percentiles are exact
+//  4. build the report. Records are folded into histograms as they arrive (percentiles within 1% relative
+//     error, memory independent of the run length). With Plan.Raw each record is also written to it at once,
+//     and the stream is finished (health and final run info) when the run ends
 //
 // When ctx is done, everything stops at once, including running iterations,
 // and the results so far are returned. Report.Elapsed is the real time until all users have stopped.
@@ -186,45 +256,30 @@ func Run(ctx context.Context, p Plan) (*report.Report, error) {
 	abortRules, _ := parseAbortRules(p.AbortOn) // already checked by validate
 
 	start := time.Now()
-	// Raw data needs every record, so keep them in that case and aggregate exactly at the end.
-	// Otherwise fold each record into histograms as it arrives, so memory does not grow with the run.
-	var (
-		keep *record.Collector // keeps every record (Plan.Raw)
-		agg  *report.Aggregator
-		col  *record.Collector // what the users report to
-	)
+	// Every record is folded into an Aggregator as it arrives, so memory does not grow with the run.
+	// The other observers see the same records: the raw data writer (Plan.Raw), which writes each record
+	// to the output at once, and the progress counter (Plan.Progress). AbortOn reads the Aggregator.
+	agg := report.NewAggregator(start)
+	obs := fanout{agg}
+	var rw *record.RawWriter
 	if p.Raw != nil {
-		keep = record.NewCollector()
-		col = keep
-	} else {
-		agg = report.NewAggregator(start)
-		col = record.NewStreamingCollector(agg)
+		rw = record.NewRawWriter(p.Raw, p.Arrival != nil, start)
+		obs = append(obs, rw)
 	}
-	// Progress and AbortOn need to see the records too, so route them through a streaming collector that feeds
-	// every observer. AbortOn reads an Aggregator: the one of the run, or (with Plan.Raw) a second one just for it.
-	var (
-		prog *progress
-		live *report.Aggregator
-	)
-	if p.Progress != nil || len(abortRules) > 0 {
-		var obs fanout
-		if keep != nil {
-			obs = append(obs, keeper{keep})
-		} else {
-			obs = append(obs, agg)
-		}
-		if p.Progress != nil {
-			prog = &progress{}
-			obs = append(obs, prog)
-		}
-		if len(abortRules) > 0 {
-			live = agg
-			if live == nil {
-				live = report.NewAggregator(start)
-				obs = append(obs, live)
-			}
-		}
+	var prog *progress
+	if p.Progress != nil {
+		prog = &progress{}
+		obs = append(obs, prog)
+	}
+	var col *record.Collector
+	if len(obs) == 1 {
+		col = record.NewStreamingCollector(agg)
+	} else {
 		col = record.NewStreamingCollector(obs)
+	}
+	var live *report.Aggregator
+	if len(abortRules) > 0 {
+		live = agg
 	}
 	var stopProgress, stopAbort func()
 	if prog != nil {
@@ -265,28 +320,12 @@ func Run(ctx context.Context, p Plan) (*report.Report, error) {
 	}
 	healthPoints := health.stop()
 
-	if agg != nil {
-		rep := agg.Report(elapsed)
-		rep.Open = p.Arrival != nil
-		rep.Dropped = r.col.Dropped()
-		rep.Health = healthPoints
-		return rep, abortErr
-	}
-
-	reqs, steps, iters := keep.Take()
-	raw := &record.Raw{
-		Open:       p.Arrival != nil,
-		Dropped:    r.col.Dropped(),
-		StartedAt:  start,
-		Elapsed:    elapsed,
-		Requests:   reqs,
-		Steps:      steps,
-		Iterations: iters,
-		Health:     healthPoints,
-	}
-	rep := report.FromRaw(raw)
-	if p.Raw != nil {
-		if err := record.WriteRaw(p.Raw, raw); err != nil {
+	rep := agg.Report(elapsed)
+	rep.Open = p.Arrival != nil
+	rep.Dropped = r.col.Dropped()
+	rep.Health = healthPoints
+	if rw != nil {
+		if err := rw.Close(rep.Dropped, elapsed, healthPoints); err != nil {
 			return rep, errors.Join(abortErr, fmt.Errorf("jotaro: failed to write raw data: %w", err))
 		}
 	}
@@ -312,11 +351,12 @@ func (r *runner) runClosed() {
 		go func() {
 			defer wg.Done()
 			for iter := 0; r.stopCtx.Err() == nil; iter++ {
-				u, err := newUser(r.runCtx, r.p, id, iter, r.tr, r.timeout, r.col)
+				sc := r.p.pick()
+				u, err := newUser(r.runCtx, r.p, sc, id, iter, r.tr, r.timeout, r.col)
 				if err != nil {
 					return
 				}
-				_ = r.p.Scenario.run(u) // the error is kept in the IterationRecord
+				_ = sc.run(u) // the error is kept in the IterationRecord
 			}
 		}()
 	}
@@ -351,11 +391,12 @@ func (r *runner) runStaged() {
 					}
 					continue // check the count and the context again
 				}
-				u, err := newUser(r.runCtx, r.p, id, iter, r.tr, r.timeout, r.col)
+				sc := r.p.pick()
+				u, err := newUser(r.runCtx, r.p, sc, id, iter, r.tr, r.timeout, r.col)
 				if err != nil {
 					return
 				}
-				_ = r.p.Scenario.run(u) // the error is kept in the IterationRecord
+				_ = sc.run(u) // the error is kept in the IterationRecord
 				iter++
 			}
 		}()
@@ -430,18 +471,19 @@ func (r *runner) runOpen() {
 			defer wg.Done()
 			defer func() { <-slots }()
 			// In the open model, each arrival is treated as a separate user.
-			u, err := newUser(r.runCtx, r.p, i, 0, r.tr, r.timeout, r.col)
+			sc := r.p.pick()
+			u, err := newUser(r.runCtx, r.p, sc, i, 0, r.tr, r.timeout, r.col)
 			if err != nil {
 				return
 			}
 			u.scheduled = at
-			_ = r.p.Scenario.run(u) // the error is kept in the IterationRecord
+			_ = sc.run(u) // the error is kept in the IterationRecord
 		}()
 	}
 }
 
 // newUser creates the user for one iteration. The cookie jar is new every time.
-func newUser(ctx context.Context, p Plan, id, iter int, tr http.RoundTripper, timeout time.Duration, col *record.Collector) (*User, error) {
+func newUser(ctx context.Context, p Plan, sc *Scenario, id, iter int, tr http.RoundTripper, timeout time.Duration, col *record.Collector) (*User, error) {
 	jar, err := cookiejar.New(nil)
 	if err != nil {
 		return nil, err
@@ -451,7 +493,7 @@ func newUser(ctx context.Context, p Plan, id, iter int, tr http.RoundTripper, ti
 		Iteration: iter,
 		Client:    &http.Client{Transport: tr, Jar: jar, Timeout: timeout},
 		ctx:       ctx,
-		scenario:  p.Scenario.Name,
+		scenario:  sc.Name,
 		baseURL:   p.BaseURL,
 		col:       col,
 	}, nil
