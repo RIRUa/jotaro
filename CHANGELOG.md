@@ -10,6 +10,7 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ### Added
 
+- `Plan.MetricsAddr`: serve the live state of a run at `/metrics` in the Prometheus text format (requests, responses by status class, errors, throughput, latency quantiles), so Grafana and similar tools can chart it during the run. It is written by hand, adds no dependency, and stops when `Run` returns.
 - `Plan.Scenarios` and `Weighted`: run a weighted mix of scenarios in one plan (for example 70% browse, 30% checkout). Each iteration (closed model) or arrival (open model) picks one scenario at random in proportion to its weight. It is mutually exclusive with `Plan.Scenario`, and the scenarios must have distinct names. Reports and thresholds already separate results by scenario name. `jotaro mcp`'s lint accepts the new field.
 - Richer response checks: `Response.ExpectStatusIn`, `ExpectHeader`, `ExpectBodyContains` and `ExpectJSON(path, want)`, all reported as `expect_mismatch` like `ExpectStatus`, and `Response.JSON(path)` to pull one value out of a JSON body with a dot path such as `data.items.0.id`, without a struct. `ExpectError` gains a `Detail` field for non-status mismatches (`Want` is 0 for them). No new dependencies.
 - `jotaro compare base.json new.json` and `report.Compare`: per-step and overall diffs (rps, p50/p95/p99, error rate) between two results, with `-max-p95-regression <percent>` to exit with code 1 on a regression.
