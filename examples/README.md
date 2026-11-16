@@ -81,7 +81,7 @@ The tally of what visitors did and what the mock server saw is written to standa
 A small load test that puts the plan-level features together. Seventy percent of the iterations run the `browse` scenario and thirty percent run `buy`, against a mock shop. It shows:
 
 - `Plan.Scenarios` with `Weighted`: independent flows picked at random by weight
-- `Plan.UserStages`, `RepeatStages` and `StartUsers`: two waves of users that go from 5 up to 20 and back
+- `Plan.UserStages`, `RepeatUserStages` and `StartUsers`: two waves of users that go from 5 up to 20 and back
 - `Plan.AbortOn` and `ErrAborted`: stop hitting a broken server, and still print the report of the run up to the abort
 - `Plan.Progress` (one line per second on standard error) and `Plan.MetricsAddr` (a Prometheus `/metrics` endpoint, on only with `-metrics`)
 - `ExpectStatusIn`, `ExpectJSON` and `Response.JSON(path)` to check and read JSON without declaring a struct

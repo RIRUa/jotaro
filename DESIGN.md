@@ -91,7 +91,7 @@ How the `UserStages` model works:
 - Stopping is cooperative: a user above the count finishes the iteration it is running and then waits (a buffered one-slot channel per user wakes it, so there is no thundering herd). Nothing is interrupted, so `Series.Concurrency` can be above the target for a while when iterations are long.
 - `User.ID` and the iteration number are stable for the whole run; a restarted user continues with the next iteration number. The cookie jar is still new for each iteration.
 - The load shape is read from `Series.Concurrency` (the peak number of running iterations per second); no separate series is kept.
-- `RepeatStages(n, stages...)` is only a helper that returns the stages repeated n times as a plain `[]UserStage`. The controller and validation know nothing about repetition, so a repeated shape behaves exactly like the same stages written out by hand.
+- `RepeatUserStages(n, stages...)` is only a helper that returns the stages repeated n times as a plain `[]UserStage`. The controller and validation know nothing about repetition, so a repeated shape behaves exactly like the same stages written out by hand.
 
 How the `Rate` model works:
 

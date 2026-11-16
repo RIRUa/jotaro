@@ -114,12 +114,12 @@ func ExamplePlan_userStages() {
 	// open model: false
 }
 
-// RepeatStages repeats a sequence of stages, for a load shape that goes up and down several times.
+// RepeatUserStages repeats a sequence of stages, for a load shape that goes up and down several times.
 // Join it with other stages using append.
-func ExampleRepeatStages() {
+func ExampleRepeatUserStages() {
 	stages := append(
 		[]jotaro.UserStage{{Target: 10, For: 10 * time.Second}}, // warm up
-		jotaro.RepeatStages(2,
+		jotaro.RepeatUserStages(2,
 			jotaro.UserStage{Target: 100, For: 20 * time.Second},
 			jotaro.UserStage{Target: 100, For: 30 * time.Second},
 			jotaro.UserStage{Target: 10, For: 10 * time.Second},
