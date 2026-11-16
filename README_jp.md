@@ -169,9 +169,9 @@ jotaro check -t 'p95<200ms' -t 'error_rate<1%' -t 'p99{step=login}<100ms' result
 
 対象が無い、またはデータが無いときは「満たさなかった」扱いになります。ステップ名の打ち間違いで通ってしまわないようにするためです。詳しくは [`docs/result_jp.md`](docs/result_jp.md) の 5 章を見てください。
 
-## MCP サーバー（シナリオ作成の補助）
+## MCP サーバー（シナリオ作成と結果確認の補助）
 
-`jotaro mcp` は、AI アシスタントがシナリオを書くのを助ける [MCP](https://modelcontextprotocol.io) サーバーを起動します。stdio で通信し、チェック対象のシナリオを実行することはありません。
+`jotaro mcp` は、AI アシスタントがシナリオを書き、保存した結果を読むのを助ける [MCP](https://modelcontextprotocol.io) サーバーを起動します。stdio で通信し、シナリオを実行することはありません（コードの検査と結果ファイルの読み取りだけを行います）。
 
 ```sh
 claude mcp add jotaro -- jotaro mcp     # Claude Code の場合。他のクライアントも同じコマンドを登録する
@@ -181,9 +181,12 @@ claude mcp add jotaro -- jotaro mcp     # Claude Code の場合。他のクラ�
 |---|---|---|
 | Resource | `jotaro://guide` | シナリオの書き方（雛形・API の概要・負荷モデル・チェックリスト） |
 | Resource | `jotaro://thresholds` | しきい値の文法と指標 |
+| Resource | `jotaro://result` | 結果の保存方法と読み方（構造、各数値とエラー種別の意味、最初に確認すること） |
 | Prompt | `write_scenario` | 指定したフローのシナリオを書き、チェックまで行う |
 | Tool | `check_scenario` | シナリオを検査する。Go の構文、jotaro 固有の lint（`Users` と `Arrival` はどちらか一方、レスポンス未検証、Step 名の重複など）、コンパイルによる型チェック。`dir`（jotaro を require している module）を渡すとその jotaro のバージョンで検査し、省略すると最新の jotaro を使う一時 module を作る（ネットワークが必要） |
 | Tool | `validate_threshold` | `p99{step=login}<100ms` のようなしきい値をパースする |
+| Tool | `summarize_result` | 保存した結果ファイルを要約する。スループット、エラー率、ステップごとのレイテンシ、dropped、最も遅かった 1 秒、負荷生成側の CPU 飽和などの警告を返す。ヒストグラムと毎秒の時系列を含む結果ファイルそのものよりずっと小さい |
+| Tool | `check_result` | 保存した結果ファイルをしきい値で判定する（`jotaro check` と同じ）。しきい値ごとの合否と実測値を返す。`raw: true` で生データ（JSON Lines）を読む |
 
 ## パッケージ
 

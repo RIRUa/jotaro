@@ -178,7 +178,7 @@ Feeder はシナリオの外で作り、クロージャで共有する（`User` 
 | | `threshold.go` | `Threshold` / `ParseThreshold` / `Report.Check`（しきい値判定。[`docs/result_jp.md`](docs/result_jp.md) 5 章） |
 | `internal/histogram` | `histogram.go` | 結合のための対数ヒストグラム |
 | `cmd/jotaro` | `main.go` | CLI（`report` / `merge` / `check` / `mcp`） |
-| `internal/mcpserver` | `server.go` `resources.go` `tools.go` `check.go` `lint.go` `prompts.go` | `jotaro mcp` の MCP サーバー（シナリオ作成の補助。ガイドの resource、`check_scenario`、`validate_threshold`） |
+| `internal/mcpserver` | `server.go` `resources.go` `tools.go` `check.go` `lint.go` `result.go` `summary.go` `prompts.go` | `jotaro mcp` の MCP サーバー（シナリオ作成の補助: ガイドの resource、`check_scenario`、`validate_threshold`。保存した結果の読み取り: `summarize_result`、`check_result`） |
 
 実装中に決めたこと:
 

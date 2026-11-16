@@ -22,6 +22,12 @@ var docResources = []struct {
 		name:        "thresholds",
 		description: "Threshold syntax (p95<200ms, error_rate<1%, p99{step=login}<100ms) and the available metrics.",
 	},
+	{
+		uri:         "jotaro://result",
+		file:        "content/result.md",
+		name:        "result",
+		description: "How to save a result and read it: structure, what each number and error kind means, and what to check first.",
+	},
 }
 
 // addResources registers the embedded documents as markdown resources.

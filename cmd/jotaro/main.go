@@ -7,7 +7,7 @@
 //   - compare: diff two results, optionally failing when p95 regressed by more than a given percentage
 //   - export: convert raw data to another tool's format (vegeta results, or a per-second CSV)
 //   - check: compare a result with thresholds and exit with code 1 if any fail, which suits CI
-//   - mcp: run an MCP server over stdio that helps an AI assistant write scenarios
+//   - mcp: run an MCP server over stdio that helps an AI assistant write scenarios and read results
 //   - version: print the version
 //
 // Usage:
@@ -46,7 +46,7 @@ commands:
   check    check whether a result meets the thresholds (e.g. p95<200ms); exit code 1 if not
   compare  diff two results; with -max-p95-regression, exit code 1 on a regression
   export   convert raw data to vegeta results or a per-second CSV
-  mcp      run an MCP server over stdio that helps write scenarios
+  mcp      run an MCP server over stdio that helps write scenarios and read results
   version  print the version
 `
 

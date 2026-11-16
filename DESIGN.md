@@ -178,7 +178,7 @@ There are four packages. The entry point for users is `jotaro` (the side that ap
 | | `threshold.go` | `Threshold` / `ParseThreshold` / `Report.Check` (threshold checks; [`docs/result.md`](docs/result.md) chapter 5) |
 | `internal/histogram` | `histogram.go` | Logarithmic histogram for merging |
 | `cmd/jotaro` | `main.go` | CLI (`report` / `merge` / `check` / `mcp`) |
-| `internal/mcpserver` | `server.go` `resources.go` `tools.go` `check.go` `lint.go` `prompts.go` | MCP server behind `jotaro mcp` (scenario authoring: guide resources, `check_scenario`, `validate_threshold`) |
+| `internal/mcpserver` | `server.go` `resources.go` `tools.go` `check.go` `lint.go` `result.go` `summary.go` `prompts.go` | MCP server behind `jotaro mcp` (scenario authoring: guide resources, `check_scenario`, `validate_threshold`; reading saved results: `summarize_result`, `check_result`) |
 
 Decisions made during implementation:
 

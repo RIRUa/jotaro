@@ -7,7 +7,8 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// addTools registers check_scenario and validate_threshold.
+// addTools registers the scenario tools (check_scenario, validate_threshold) and the result tools
+// (summarize_result, check_result).
 func addTools(s *mcp.Server) {
 	mcp.AddTool(s, &mcp.Tool{
 		Name: "check_scenario",
@@ -22,6 +23,22 @@ func addTools(s *mcp.Server) {
 		Description: "Parse a threshold expression such as 'p95<200ms' or 'p99{step=login}<100ms' and return its parts, or the parse error.",
 		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true},
 	}, validateThreshold)
+
+	mcp.AddTool(s, &mcp.Tool{
+		Name: "check_result",
+		Description: "Judge a saved jotaro result file against thresholds such as 'p95<200ms', like 'jotaro check'. " +
+			"Returns pass or fail per threshold with the measured value. A threshold whose step or data is missing counts as not met. " +
+			"Only reads the file; no load is generated.",
+		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true},
+	}, checkResult)
+
+	mcp.AddTool(s, &mcp.Tool{
+		Name: "summarize_result",
+		Description: "Summarize a saved jotaro result file: throughput, error rate, latency percentiles per step, dropped arrivals, " +
+			"and warnings such as a saturated load generator. Use this instead of reading the file, which is large " +
+			"(histograms and a per-second series). Only reads the file; no load is generated.",
+		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true},
+	}, summarizeResult)
 }
 
 // ThresholdInput is the input of validate_threshold.

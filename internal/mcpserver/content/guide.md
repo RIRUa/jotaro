@@ -128,7 +128,7 @@ if !checks.Passed() {
 }
 ```
 
-See the `jotaro://thresholds` resource for the threshold syntax. A saved JSON result can be judged later with `jotaro check -t 'p95<200ms' result.json`.
+See the `jotaro://thresholds` resource for the threshold syntax, and the `jotaro://result` resource for how to save a result and what its numbers mean. A saved JSON result can be read later with the `summarize_result` tool and judged with the `check_result` tool or `jotaro check -t 'p95<200ms' result.json`.
 
 ## Checklist
 

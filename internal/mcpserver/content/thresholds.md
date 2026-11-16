@@ -25,4 +25,4 @@ iteration_fail_rate{scenario=checkout}<=5%
 
 - The `{...}` selector narrows the threshold to a scenario and/or a step. Step names must match the names given to `u.Step`.
 - When the target or the data is missing, the threshold counts as **not met**, so a mistyped step name cannot pass silently.
-- In Go: `report.ParseThreshold(s)` then `rep.Check(th)`. On the CLI: `jotaro check -t '<threshold>' result.json` (exit code 1 when any threshold is not met).
+- In Go: `report.ParseThreshold(s)` then `rep.Check(th)`. On the CLI: `jotaro check -t '<threshold>' result.json` (exit code 1 when any threshold is not met). Over MCP: the `check_result` tool.

@@ -10,6 +10,9 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ### Added
 
+- `jotaro mcp`: the `jotaro://result` resource explains how to save a result and how to read it (structure, what each number and error kind means, what to check first).
+- `jotaro mcp`: the `summarize_result` tool returns the key numbers of a saved result file (throughput, error rate, latency per step, dropped arrivals, the worst second) and warnings such as a saturated load generator, without the histograms and the per-second series.
+- `jotaro mcp`: the `check_result` tool judges a saved result file (JSON, or raw data with `raw: true`) against thresholds, like `jotaro check`, and returns pass or fail per threshold with the measured value.
 - The text report now prints a `warning:` line under `dropped:` when arrivals were dropped by the `Plan.MaxUsers` cap ("I'll tell you exactly what just happened: N arrivals were dropped..."), so drops are hard to miss. Nothing changes when no arrival was dropped.
 - `Plan.MetricsAddr`: serve the live state of a run at `/metrics` in the Prometheus text format (requests, responses by status class, errors, throughput, latency quantiles), so Grafana and similar tools can chart it during the run. It is written by hand, adds no dependency, and stops when `Run` returns.
 - `jotaro export -format vegeta|csv [-o file] <raw.jsonl | ->`, `report.WriteVegeta` and `Report.WriteSeriesCSV`: convert raw data (the output of `Plan.Raw`) to vegeta's JSON result lines, which `vegeta report -type=json` and `vegeta plot` can read, or to a CSV of per-second request counts, errors, connections, concurrency and latency percentiles. The vegeta format cannot carry scenario or step details, so the attack name is `<scenario>/<step>`.
