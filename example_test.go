@@ -2,9 +2,11 @@ package jotaro_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sort"
 	"strings"
 	"time"
 
@@ -76,6 +78,156 @@ func ExamplePlan_open() {
 		MaxUsers: 500, // arrivals beyond this are counted as dropped
 	}
 	_ = plan // jotaro.Run(ctx, plan)
+}
+
+// UserStages changes the number of users over time in the closed model, here from 2 users up to 4 and down to 0.
+// StartUsers is how many users are already running when the first stage begins.
+func ExamplePlan_userStages() {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	defer srv.Close()
+
+	ping := jotaro.NewScenario("ping", func(ctx context.Context, u *jotaro.User) error {
+		return u.Step("ping", func(s *jotaro.Step) error {
+			return s.Get("/").Do().ExpectStatus(http.StatusOK)
+		})
+	})
+
+	rep, err := jotaro.Run(context.Background(), jotaro.Plan{
+		Scenario:   ping,
+		BaseURL:    srv.URL,
+		StartUsers: 2,
+		UserStages: []jotaro.UserStage{
+			{Target: 4, For: 100 * time.Millisecond},
+			{Target: 4, For: 100 * time.Millisecond},
+			{Target: 0, For: 100 * time.Millisecond},
+		},
+		Duration: 300 * time.Millisecond,
+	})
+	if err != nil {
+		fmt.Println("error:", err)
+		return
+	}
+	fmt.Println("ran:", rep.Requests.Count > 0)
+	fmt.Println("open model:", rep.Open)
+	// Output:
+	// ran: true
+	// open model: false
+}
+
+// RepeatUserStages repeats a sequence of stages, for a load shape that goes up and down several times.
+// Join it with other stages using append.
+func ExampleRepeatUserStages() {
+	stages := append(
+		[]jotaro.UserStage{{Target: 10, For: 10 * time.Second}}, // warm up
+		jotaro.RepeatUserStages(2,
+			jotaro.UserStage{Target: 100, For: 20 * time.Second},
+			jotaro.UserStage{Target: 100, For: 30 * time.Second},
+			jotaro.UserStage{Target: 10, For: 10 * time.Second},
+		)...,
+	)
+	for _, st := range stages {
+		fmt.Println(st.Target, st.For)
+	}
+	// Output:
+	// 10 10s
+	// 100 20s
+	// 100 30s
+	// 10 10s
+	// 100 20s
+	// 100 30s
+	// 10 10s
+}
+
+// Scenarios runs a weighted mix of flows in one plan. Every iteration picks one scenario in proportion to its
+// weight, and the report keeps the results apart by scenario name, so the names must differ.
+func ExamplePlan_scenarios() {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	defer srv.Close()
+
+	visit := func(name, path string) *jotaro.Scenario {
+		return jotaro.NewScenario(name, func(ctx context.Context, u *jotaro.User) error {
+			return u.Step("visit", func(s *jotaro.Step) error {
+				return s.Get(path).Do().ExpectStatus(http.StatusOK)
+			})
+		})
+	}
+
+	rep, err := jotaro.Run(context.Background(), jotaro.Plan{
+		Scenarios: []jotaro.Weighted{
+			{Scenario: visit("browse", "/products"), Weight: 1}, // 1 : 1 is 50% each; 70 : 30 would be 70% and 30%
+			{Scenario: visit("buy", "/orders"), Weight: 1},
+		},
+		BaseURL:  srv.URL,
+		Duration: 200 * time.Millisecond,
+		Users:    2,
+	})
+	if err != nil {
+		fmt.Println("error:", err)
+		return
+	}
+	var names []string
+	for _, sc := range rep.Scenarios {
+		if sc.Iterations.Count > 0 {
+			names = append(names, sc.Name)
+		}
+	}
+	sort.Strings(names)
+	fmt.Println("scenarios that ran:", names)
+	// Output: scenarios that ran: [browse buy]
+}
+
+// AbortOn stops a run early when a condition holds, so a broken server is not hit for the whole Duration.
+// Run then returns the report up to that point together with an error that wraps ErrAborted.
+func ExamplePlan_abortOn() {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable) // a broken server
+	}))
+	defer srv.Close()
+
+	ping := jotaro.NewScenario("ping", func(ctx context.Context, u *jotaro.User) error {
+		return u.Step("ping", func(s *jotaro.Step) error {
+			return s.Get("/").Do().ExpectStatus(http.StatusOK)
+		})
+	})
+
+	rep, err := jotaro.Run(context.Background(), jotaro.Plan{
+		Scenario: ping,
+		BaseURL:  srv.URL,
+		Duration: time.Minute,
+		Users:    2,
+		AbortOn:  []jotaro.AbortRule{{When: "http_5xx_rate>50%"}}, // For: 0 aborts at the first evaluation that holds
+	})
+	fmt.Println("aborted:", errors.Is(err, jotaro.ErrAborted))
+	fmt.Println("report returned:", rep != nil && rep.Requests.Count > 0)
+	// Output:
+	// aborted: true
+	// report returned: true
+}
+
+// JSON reads one value from a JSON body by a dot path, without declaring a struct.
+// Object keys are looked up by name and array elements by index. Numbers come back as float64.
+func ExampleResponse_JSON() {
+	resp := &jotaro.Response{Code: 200, Body: []byte(`{"data":{"items":[{"id":7,"name":"tea"}]}}`)}
+
+	id, _ := resp.JSON("data.items.0.id")
+	name, _ := resp.JSON("data.items.0.name")
+	_, err := resp.JSON("data.items.1.id")
+	fmt.Println(id, name)
+	fmt.Println(err)
+	// Output:
+	// 7 tea
+	// jotaro: JSON path "data.items.1.id": bad index "1" (len 1)
+}
+
+// ExpectJSON checks the value at a path. A mismatch is an *ExpectError (expect_mismatch), which fails the step.
+func ExampleResponse_ExpectJSON() {
+	resp := &jotaro.Response{Code: 200, Body: []byte(`{"status":"accepted","count":2}`)}
+
+	fmt.Println(resp.ExpectJSON("status", "accepted"))
+	fmt.Println(resp.ExpectJSON("count", 3))
+	// Output:
+	// <nil>
+	// jotaro: unexpected JSON at "count" (want 3, got 2)
 }
 
 // A Feeder hands out different data to each user.

@@ -241,3 +241,102 @@ func TestStagesValidate(t *testing.T) {
 		}
 	}
 }
+
+// TestRampDescendingBounds checks that a descending Ramp stays monotonic,
+// non-negative and within over for every arrival, including the last ones where the
+// discriminant of the quadratic formula used to round below 0 and produce NaN.
+func TestRampDescendingBounds(t *testing.T) {
+	cases := []struct {
+		name      string
+		from, to  int
+		per, over time.Duration
+	}{
+		{"11to0 over 10s", 11, 0, time.Second, 10 * time.Second},
+		{"5to0 over 300ms per 1s", 5, 0, 300 * time.Millisecond, 3 * time.Second},
+		{"10to0 over 10s", 10, 0, time.Second, 10 * time.Second},
+		{"100to0 over 1s", 100, 0, time.Second, time.Second},
+		{"50to3 over 30s", 50, 3, time.Second, 30 * time.Second},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			a := Ramp(tc.from, tc.to, tc.per, tc.over)
+			prev := time.Duration(0)
+			for i := 0; i < 2000; i++ {
+				got, ok := a.at(i)
+				if !ok {
+					break
+				}
+				// to > 0 continues past over at a constant rate, so only the ramp part is bounded.
+				if got < prev || got < 0 || (tc.to == 0 && got > tc.over) {
+					t.Fatalf("at(%d) = %v (prev %v), want within [prev, %v]", i, got, prev, tc.over)
+				}
+				prev = got
+			}
+		})
+	}
+}
+
+func TestRampDescendingStageCount(t *testing.T) {
+	// 11 → 0/s over 10s is 55 arrivals; one extra arrival used to start immediately.
+	st := Stage{Ramp(11, 0, time.Second, 10*time.Second), 10 * time.Second}
+	if got := st.count(); got != 55 {
+		t.Errorf("count = %d, want 55", got)
+	}
+	// 5 per 300ms over 3s: the integral is 5·(3s/300ms)/2 = 25 arrivals.
+	st = Stage{Ramp(5, 0, 300*time.Millisecond, 3*time.Second), 3 * time.Second}
+	if got := st.count(); got != 25 {
+		t.Errorf("count = %d, want 25", got)
+	}
+}
+
+// TestRampDescendingSweep sweeps from and over to catch rounding in the final arrivals.
+func TestRampDescendingSweep(t *testing.T) {
+	overs := []time.Duration{time.Second, 3 * time.Second, 7 * time.Second, 10 * time.Second, 30 * time.Second}
+	for from := 1; from <= 300; from++ {
+		for _, over := range overs {
+			a := Ramp(from, 0, time.Second, over)
+			prev := time.Duration(0)
+			for i := 0; i < from*int(over/time.Second)+10; i++ {
+				got, ok := a.at(i)
+				if !ok {
+					break
+				}
+				if got < prev || got < 0 || got > over {
+					t.Fatalf("Ramp(%d, 0, 1s, %v).at(%d) = %v (prev %v)", from, over, i, got, prev)
+				}
+				prev = got
+			}
+			// An arrival is dropped by Stage.count only if it does not fit in over, so count must not exceed
+			// the exact integral from·over/2 by more than the arrival on its boundary.
+			want := float64(from) * over.Seconds() / 2
+			if got := (Stage{a, over}).count(); float64(got) > want+1 || float64(got) < want-1 {
+				t.Fatalf("Ramp(%d, 0, 1s, %v) count = %d, want about %v", from, over, got, want)
+			}
+		}
+	}
+}
+
+func FuzzRampAt(f *testing.F) {
+	f.Add(11, 0, int64(time.Second), int64(10*time.Second))
+	f.Add(5, 0, int64(300*time.Millisecond), int64(3*time.Second))
+	f.Add(0, 10, int64(time.Second), int64(10*time.Second))
+	f.Add(10, 10, int64(time.Second), int64(10*time.Second))
+	f.Add(50, 3, int64(time.Second), int64(30*time.Second))
+	f.Fuzz(func(t *testing.T, from, to int, per, over int64) {
+		a := Ramp(from%1000, to%1000, time.Duration(per), time.Duration(over))
+		if a.validate() != nil {
+			t.Skip()
+		}
+		prev := time.Duration(0)
+		for i := 0; i < 3000; i++ {
+			got, ok := a.at(i)
+			if !ok {
+				return
+			}
+			if got < prev || got < 0 {
+				t.Fatalf("at(%d) = %v (prev %v)", i, got, prev)
+			}
+			prev = got
+		}
+	})
+}

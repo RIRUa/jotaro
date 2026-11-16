@@ -14,7 +14,7 @@ func connect(t *testing.T) *mcp.ClientSession {
 	t.Helper()
 	ctx := context.Background()
 	t1, t2 := mcp.NewInMemoryTransports()
-	if _, err := newServer().Connect(ctx, t1, nil); err != nil {
+	if _, err := newServer("v1.2.3").Connect(ctx, t1, nil); err != nil {
 		t.Fatal(err)
 	}
 	cs, err := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "v0"}, nil).Connect(ctx, t2, nil)
@@ -23,6 +23,28 @@ func connect(t *testing.T) *mcp.ClientSession {
 	}
 	t.Cleanup(func() { cs.Close() })
 	return cs
+}
+
+// callToolError calls a tool that must fail with isError and returns the error text.
+func callToolError(t *testing.T, cs *mcp.ClientSession, name string, args map[string]any) string {
+	t.Helper()
+	res, err := cs.CallTool(context.Background(), &mcp.CallToolParams{Name: name, Arguments: args})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.IsError {
+		t.Fatalf("%s: want isError, got %+v", name, res)
+	}
+	var text strings.Builder
+	for _, c := range res.Content {
+		if tc, ok := c.(*mcp.TextContent); ok {
+			text.WriteString(tc.Text)
+		}
+	}
+	if text.Len() == 0 {
+		t.Fatalf("%s: isError without a message", name)
+	}
+	return text.String()
 }
 
 // callTool calls a tool and decodes its structured result into out.
@@ -44,11 +66,19 @@ func callTool(t *testing.T, cs *mcp.ClientSession, name string, args map[string]
 	}
 }
 
+func TestServerVersion(t *testing.T) {
+	cs := connect(t)
+	if got := cs.InitializeResult().ServerInfo.Version; got != "v1.2.3" {
+		t.Errorf("serverInfo.version = %q, want the version given to newServer", got)
+	}
+}
+
 func TestResources(t *testing.T) {
 	cs := connect(t)
 	for _, tt := range []struct{ uri, contains string }{
 		{"jotaro://guide", "exactly one"},
 		{"jotaro://thresholds", "error_rate"},
+		{"jotaro://result", "expect_mismatch"},
 	} {
 		res, err := cs.ReadResource(context.Background(), &mcp.ReadResourceParams{URI: tt.uri})
 		if err != nil {
@@ -86,10 +116,14 @@ func TestValidateThreshold(t *testing.T) {
 		t.Errorf("valid expression parsed as %+v", ok)
 	}
 
+	// An invalid expression is a normal answer (valid: false), not a tool error.
 	var bad ThresholdOutput
 	callTool(t, cs, "validate_threshold", map[string]any{"expression": "p95~200ms"}, &bad)
 	if bad.Valid || bad.Error == "" {
 		t.Errorf("invalid expression parsed as %+v", bad)
+	}
+	if strings.HasPrefix(bad.Error, "jotaro:") {
+		t.Errorf("error %q keeps the jotaro: prefix", bad.Error)
 	}
 }
 
@@ -170,4 +204,23 @@ func TestCheckScenario(t *testing.T) {
 			t.Errorf("want a note about go.mod, got %+v", out)
 		}
 	})
+}
+
+func TestModuleQuery(t *testing.T) {
+	for _, tc := range []struct{ version, want string }{
+		{"v0.1.3", "github.com/RIRUa/jotaro@v0.1.3"},
+		{"v1.2.3-rc.1", "github.com/RIRUa/jotaro@v1.2.3-rc.1"},
+		{"dev", "github.com/RIRUa/jotaro@latest"},
+		{"", "github.com/RIRUa/jotaro@latest"},
+		{"v0.1.3+dirty", "github.com/RIRUa/jotaro@latest"},
+		{"v0.1.4-0.20260102030405-0123456789ab", "github.com/RIRUa/jotaro@latest"},
+		{"v0.1.4-0.20260102030405-0123456789ab+dirty", "github.com/RIRUa/jotaro@latest"},
+		{"v0.1.3-20260102030405-0123456789ab", "github.com/RIRUa/jotaro@latest"},
+		{"0.1.3", "github.com/RIRUa/jotaro@latest"},
+		{"(devel)", "github.com/RIRUa/jotaro@latest"},
+	} {
+		if got := moduleQuery(tc.version); got != tc.want {
+			t.Errorf("moduleQuery(%q) = %q, want %q", tc.version, got, tc.want)
+		}
+	}
 }

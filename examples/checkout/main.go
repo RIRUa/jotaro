@@ -129,9 +129,11 @@ func main() {
 		defer file.Close()
 		plan.Raw = file
 	}
-	rep, err := jotaro.Run(ctx, plan)
-	if err != nil {
-		log.Fatal(err)
+	// Run can return a report together with an error (for example when writing -raw fails),
+	// so print the report before looking at the error. Without a report, nothing ran.
+	rep, runErr := jotaro.Run(ctx, plan)
+	if rep == nil {
+		log.Fatal(runErr)
 	}
 
 	w := io.Writer(os.Stdout)
@@ -145,6 +147,9 @@ func main() {
 	}
 	if err := rep.Write(w, f); err != nil {
 		log.Fatal(err)
+	}
+	if runErr != nil {
+		log.Fatal(runErr)
 	}
 }
 

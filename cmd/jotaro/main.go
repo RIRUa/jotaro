@@ -4,23 +4,30 @@
 //
 //   - report: build a report in text, JSON or HTML from a saved result
 //   - merge: combine results from several runs (for example several load generators) into one
+//   - compare: diff two results, optionally failing when p95 regressed by more than a given percentage
+//   - export: convert raw data to another tool's format (vegeta results, or a per-second CSV)
 //   - check: compare a result with thresholds and exit with code 1 if any fail, which suits CI
-//   - mcp: run an MCP server over stdio that helps an AI assistant write scenarios
+//   - mcp: run an MCP server over stdio that helps an AI assistant write scenarios and read results
 //   - version: print the version
 //
 // Usage:
 //
 //	jotaro report [-raw] [-format html|text|json] [-o output] <result.json | ->
-//	jotaro merge  [-raw] [-format html|text|json] [-o output] <result.json>...
+//	jotaro merge  [-raw] [-format html|text|json] [-o output] <result.json | ->...
 //	jotaro check  [-raw] -t <threshold> [-t <threshold>]... <result.json | ->
+//	jotaro compare [-raw] [-max-p95-regression <percent>] <base.json | -> <new.json | ->
+//	jotaro export -format vegeta|csv [-o output] <raw.jsonl | ->
 //	jotaro mcp
 //	jotaro version
 //
 // With -raw, the input is read as raw JSON Lines data (the output of Plan.Raw) and re-aggregated.
+// "-" reads standard input, which can be consumed once, so at most one input of merge or compare can be "-".
+// Raw data given where aggregated JSON is expected, and the reverse, is an error.
 package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -40,8 +47,14 @@ commands:
   report   build a report from a saved JSON result
   merge    combine several JSON results into one
   check    check whether a result meets the thresholds (e.g. p95<200ms); exit code 1 if not
-  mcp      run an MCP server over stdio that helps write scenarios
+  compare  diff two results; with -max-p95-regression, exit code 1 on a regression
+  export   convert raw data to vegeta results or a per-second CSV
+  mcp      run an MCP server over stdio that helps write scenarios and read results
   version  print the version
+
+report, merge, check and compare read a result file, or standard input when the file is "-"
+(only one input can be "-", since standard input is read once). With -raw they read raw data,
+the output of Plan.Raw. export reads raw data only.
 `
 
 // main only forwards to run, which holds the logic and can be tested.
@@ -62,6 +75,10 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return runMerge(args[1:], stdin, stdout, stderr)
 	case "check":
 		return runCheck(args[1:], stdin, stdout, stderr)
+	case "compare":
+		return runCompare(args[1:], stdin, stdout, stderr)
+	case "export":
+		return runExport(args[1:], stdin, stdout, stderr)
 	case "mcp":
 		return runMCP(args[1:], stderr)
 	case "version", "-version", "--version":
@@ -74,6 +91,80 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "jotaro: unknown command %q\n\n%s", args[0], usage)
 		return 2
 	}
+}
+
+// runExport implements "jotaro export". The input is always raw JSON Lines data (the output of Plan.Raw).
+// Format "vegeta" writes one vegeta result per request, and "csv" writes the per-second time series.
+// The exit code is 0 on success, 1 when reading or writing fails, 2 for bad usage.
+func runExport(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("export", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	fs.Usage = func() {
+		fmt.Fprintln(stderr, "usage: jotaro export -format vegeta|csv [-o output] <raw.jsonl | ->")
+		fs.PrintDefaults()
+	}
+	format := fs.String("format", "", "output format (vegeta, csv); required")
+	out := fs.String("o", "", "output file; standard output if empty")
+	if err := fs.Parse(args); err != nil {
+		if err == flag.ErrHelp {
+			return 0
+		}
+		return 2
+	}
+	if fs.NArg() != 1 {
+		fs.Usage()
+		return 2
+	}
+	var write func(io.Writer, *record.Raw) error
+	switch *format {
+	case "vegeta":
+		write = report.WriteVegeta
+	case "csv":
+		write = func(w io.Writer, raw *record.Raw) error { return report.FromRaw(raw).WriteSeriesCSV(w) }
+	default:
+		fmt.Fprintf(stderr, "jotaro: unknown export format %q (want vegeta or csv)\n", *format)
+		return 2
+	}
+
+	in := stdin
+	if path := fs.Arg(0); path != "-" {
+		file, err := os.Open(path)
+		if err != nil {
+			fmt.Fprintln(stderr, "jotaro:", err)
+			return 1
+		}
+		defer file.Close()
+		in = file
+	}
+	raw, err := readRawData(in)
+	if err != nil {
+		fmt.Fprintln(stderr, "jotaro:", errMessage(err))
+		return 1
+	}
+
+	if *out == "" {
+		if err := write(stdout, raw); err != nil {
+			fmt.Fprintln(stderr, "jotaro:", err)
+			return 1
+		}
+		return 0
+	}
+	file, err := os.Create(*out)
+	if err != nil {
+		fmt.Fprintln(stderr, "jotaro:", err)
+		return 1
+	}
+	if err := write(file, raw); err != nil {
+		file.Close()
+		_ = os.Remove(*out) // the write error comes first
+		fmt.Fprintln(stderr, "jotaro:", err)
+		return 1
+	}
+	if err := file.Close(); err != nil {
+		fmt.Fprintln(stderr, "jotaro:", err)
+		return 1
+	}
+	return 0
 }
 
 // runMCP implements "jotaro mcp". It serves MCP over the process's standard input and output
@@ -99,7 +190,7 @@ func runMCP(args []string, stderr io.Writer) int {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
-	if err := mcpserver.Run(ctx); err != nil && ctx.Err() == nil {
+	if err := mcpserver.Run(ctx, versionNumber()); err != nil && ctx.Err() == nil {
 		fmt.Fprintln(stderr, "jotaro:", err)
 		return 1
 	}
@@ -167,7 +258,7 @@ func runMerge(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("merge", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.Usage = func() {
-		fmt.Fprintln(stderr, "usage: jotaro merge [-raw] [-format html|text|json] [-o output] <result.json>...")
+		fmt.Fprintln(stderr, "usage: jotaro merge [-raw] [-format html|text|json] [-o output] <result.json | ->...")
 		fs.PrintDefaults()
 	}
 	format := fs.String("format", "json", "output format (text, json, html)")
@@ -205,6 +296,54 @@ func runMerge(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return 1
 	}
 	return emit(merged, f, *out, stdout, stderr)
+}
+
+// runCompare implements "jotaro compare". It prints per-step and overall diffs.
+// With -max-p95-regression, it returns 1 when a p95 got worse by more than that percentage.
+// Bad usage is 2, and unreadable input is 1.
+func runCompare(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("compare", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	fs.Usage = func() {
+		fmt.Fprintln(stderr, "usage: jotaro compare [-raw] [-max-p95-regression <percent>] <base.json | -> <new.json | ->")
+		fs.PrintDefaults()
+	}
+	gate := fs.Float64("max-p95-regression", -1, "exit with code 1 if any p95 got worse by more than this percentage (disabled if negative)")
+	raw := fs.Bool("raw", false, rawUsage)
+	if err := fs.Parse(args); err != nil {
+		if err == flag.ErrHelp {
+			return 0
+		}
+		return 2
+	}
+	if fs.NArg() != 2 {
+		fs.Usage()
+		return 2
+	}
+
+	var reps [2]*report.Report
+	for i, path := range fs.Args() {
+		rep, err := readReport(path, *raw, stdin)
+		if err != nil {
+			fmt.Fprintf(stderr, "jotaro: %s: %s\n", path, errMessage(err))
+			return 1
+		}
+		reps[i] = rep
+	}
+
+	cmp := report.Compare(reps[0], reps[1])
+	cmp.Print(stdout)
+	if *gate < 0 {
+		return 0
+	}
+	bad := cmp.Violations(*gate)
+	for _, d := range bad {
+		fmt.Fprintf(stdout, "FAIL %s %s regressed by %.1f%% (limit %.1f%%)\n", d.Scope, d.Metric, d.Regression(), *gate)
+	}
+	if len(bad) > 0 {
+		return 1
+	}
+	return 0
 }
 
 // thresholdFlags lets -t be given repeatedly.
@@ -269,6 +408,16 @@ func errMessage(err error) string {
 // rawUsage is the shared help text of the -raw flag.
 const rawUsage = "read the input as raw JSON Lines data and re-aggregate it"
 
+// readRawData reads raw JSON Lines data. When the input is not raw data at all (an aggregated JSON result,
+// or an empty file), the error says which input is wanted instead, so a mix-up is not silently accepted.
+func readRawData(in io.Reader) (*record.Raw, error) {
+	raw, err := record.ReadRaw(in)
+	if errors.Is(err, record.ErrNotRaw) {
+		return nil, fmt.Errorf("%s\nthe input is not raw data: pass the output of Plan.Raw. An aggregated JSON result (-format json) is not raw data; report, check, merge and compare read it without -raw", errMessage(err))
+	}
+	return raw, err
+}
+
 // readReport reads a result from path (stdin if "-"). With raw, it aggregates raw data.
 func readReport(path string, raw bool, stdin io.Reader) (*report.Report, error) {
 	in := stdin
@@ -281,7 +430,7 @@ func readReport(path string, raw bool, stdin io.Reader) (*report.Report, error) 
 		in = file
 	}
 	if raw {
-		r, err := record.ReadRaw(in)
+		r, err := readRawData(in)
 		if err != nil {
 			return nil, err
 		}

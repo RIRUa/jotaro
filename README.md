@@ -10,7 +10,7 @@ A Go library for load-testing HTTP servers with scenarios (a flow such as login 
 
 - Scenarios are plain Go code (`if` and variables just work)
 - Two ways to apply load
-  - **Closed**: a fixed number of users repeat the scenario (`Users`)
+  - **Closed**: a fixed number of users repeat the scenario (`Users`), or the number of users changes stage by stage (`UserStages`)
   - **Open**: scenarios start at a fixed rate (`Rate` / `Ramp` / `Stages`). Arrivals keep their pace even when the server slows down, and latency is measured from the scheduled start time (Coordinated Omission correction)
 - Measures per-step latency (p50 / p90 / p95 / p99 / max), error breakdown, throughput, TTFB, DNS / TCP / TLS time, and connection reuse rate
 - Also records a per-second time series and the health of the load generator itself (CPU, goroutine count)
@@ -65,7 +65,11 @@ var checkout = jotaro.NewScenario("checkout", func(ctx context.Context, u *jotar
   - Headers: `Header(k, v)` / `Headers(map)` / `Bearer(token)` / `Basic(user, pass)`
   - Query: `Query(k, v)` / `Queries(url.Values)` (values are escaped)
   - Body: `JSON(v)` / `Form(url.Values)` / `Body(v)` (`[]byte` / `string` / `io.Reader` are sent as is, `url.Values` as a form, anything else as JSON. Set `Content-Type` with `Header` when you need it)
-- After `Do()`, chain `Decode(&v)` (read JSON) or `ExpectStatus(code)` (verify the status)
+- After `Do()`, chain `Decode(&v)` (read JSON) or one of the `Expect*` checks
+  - `ExpectStatus(code)` / `ExpectStatusIn(codes...)`: the status code
+  - `ExpectHeader(key, want)` / `ExpectBodyContains(substr)`: a header value / a substring of the body
+  - `ExpectJSON(path, want)`: the value at a dot path such as `data.items.0.id`. `Response.JSON(path)` returns that value so you can use it in the next request without defining a struct
+  - A failed check returns an error and the step is recorded as `expect_mismatch`. It is not counted as a request error (see `error_rate` under [Threshold syntax](#threshold-syntax))
 - `Think` is think time. Scenario time is reported both without and with `Think`
 - Even if a step fails, the iteration counts as successful as long as the scenario function returns `nil`. Step failures show up in the per-step stats
 - Cookies are fresh for each iteration. The connection pool is shared by all users
@@ -89,18 +93,32 @@ rep, err := jotaro.Run(ctx, jotaro.Plan{
 	Duration: time.Minute,
 	Users:    20, // closed model. For the open model, use Arrival instead of Users
 })
+if err != nil && !errors.Is(err, jotaro.ErrAborted) {
+	log.Fatal(err) // an invalid Plan (rep is nil), or a failure to write Raw (rep is still returned)
+}
 ```
 
-Specify exactly one of `Users` and `Arrival`.
+When `AbortOn` (below) stops a run, `Run` returns the partial report **and** an error that wraps `jotaro.ErrAborted`, so use the report even when `err` is not nil.
+
+Specify exactly one of `Users`, `UserStages` and `Arrival`.
 
 | Setting | Meaning |
 |---|---|
 | `Users: 20` | 20 users repeat the scenario for `Duration` |
+| `UserStages: []jotaro.UserStage{{Target: 100, For: 30*time.Second}, {Target: 100, For: time.Minute}, {Target: 0, For: 10*time.Second}}` | Change the number of users stage by stage: ramp up to 100 over 30 seconds, hold for 1 minute, ramp down to 0 over 10 seconds (the first stage starts from `StartUsers`, 0 by default) |
 | `Arrival: jotaro.Rate(50, time.Second)` | Start 50 scenarios per second |
 | `Arrival: jotaro.Ramp(0, 100, time.Second, 10*time.Second)` | Increase from 0 to 100 per second over 10 seconds |
 | `Arrival: jotaro.Stages(...)` | Switch `Arrival` stage by stage (ramp up → hold → ramp down, etc.) |
 
-You can also set `MaxUsers` (the cap on concurrency in the open model; arrivals beyond it are counted as dropped), `Timeout` (the limit for a single request), `Grace` (how long to wait for running iterations after `Duration`), and `Raw` (where to write raw data).
+To run several flows in one plan, set `Scenarios` instead of `Scenario`: `Scenarios: []jotaro.Weighted{{Scenario: browse, Weight: 7}, {Scenario: checkout, Weight: 3}}`. Each iteration (closed) or arrival (open) picks one of them at random in proportion to the weights, and the report separates the results by scenario name (so the names must differ).
+
+With `UserStages`, a user that is stopped by a lower target finishes the iteration it is running and then waits; it is not interrupted. Users keep their `User.ID` and iteration count when they are started again. The number of concurrent iterations over time is `Series.Concurrency` in the report, so you can check the load shape there.
+
+To repeat a sequence of stages (for example three waves), use `jotaro.RepeatUserStages(3, stage1, stage2, ...)`; it returns the stages repeated 3 times and can be joined with other stages by `append`. Each round starts from the Target the previous round ended at.
+
+You can also set `MaxUsers` (the cap on concurrency in the open model; an arrival that comes in while the cap is reached is not run and not waited for, but counted as dropped, and the text report prints a `warning:` line when that happened), `Timeout` (the limit for a single request), `Grace` (how long to wait for running iterations after `Duration`), `Raw` (where to write raw data), `Progress` (an `io.Writer`, such as `os.Stderr`, that gets one line per second while the run is in progress, e.g. `12s/60s rps=480 p95=38ms err=0.2%`), and `MetricsAddr` (for example `":9090"`: serve the state of the run so far at `/metrics` in the Prometheus text format, so Grafana and similar tools can chart it during the run; it needs no extra dependency and stops when `Run` returns).
+
+To stop a run as soon as the server is clearly broken, set `AbortOn`, for example `AbortOn: []jotaro.AbortRule{{When: "http_5xx_rate>50%", For: 5 * time.Second}}`. `When` uses the threshold syntax but describes the state to stop at; it is checked every second against the whole run so far, and `For` is how long it must hold. Running iterations get `Grace` to finish, then `Run` returns the partial report together with an error that satisfies `errors.Is(err, jotaro.ErrAborted)`.
 
 ### 3. Output the results
 
@@ -118,6 +136,23 @@ if !checks.Passed() {
 	os.Exit(1)
 }
 ```
+
+### 4. Lay out the project
+
+A layout that works well for a load test that lives next to the service it tests:
+
+```
+myservice/
+├─ go.mod
+└─ loadtest/
+   ├─ main.go          # flags, Plan, Run, save the result, Check
+   ├─ checkout.go      # scenario (package main)
+   ├─ thresholds.go    # var thresholds = []string{"p95<200ms", ...}
+   ├─ testdata/        # CSV for Feeder; no secrets
+   └─ results/         # git-ignored: result.json, report.html, raw.jsonl
+```
+
+When the scenarios grow in number or you run them against several environments, move them into a module of their own.
 
 ## CLI
 
@@ -140,11 +175,19 @@ jotaro merge -o merged.json a.json b.json
 
 # Check the thresholds. Exit code 1 if any of them is not met
 jotaro check -t 'p95<200ms' -t 'error_rate<1%' -t 'p99{step=login}<100ms' result.json
+
+# Compare with a previous run; fail if any p95 got more than 10% worse
+jotaro compare -max-p95-regression 10 base.json new.json
+
+# Convert raw data (Plan.Raw output) for other tools
+jotaro export -format vegeta -o results.json raw.jsonl   # then: vegeta report -type=json results.json
+jotaro export -format csv -o series.csv raw.jsonl        # per-second counts and percentiles
 ```
 
-- Pass `-` as the input to read from standard input (`report` / `check`)
-- With `-raw`, the input is read as raw JSON Lines data (the output of `Plan.Raw`) and re-aggregated
-- Choose the output format with `-format text|json|html`
+- Pass `-` as the input to read from standard input (`report` / `merge` / `check` / `compare` / `export`)
+- With `-raw`, the input is read as raw JSON Lines data (the output of `Plan.Raw`) and re-aggregated (`report` / `merge` / `check` / `compare`). `export` always reads raw data. Passing non-raw data to `-raw` or `export` is an error
+- Choose the output format of `report` / `merge` with `-format text|json|html`, and that of `export` with `-format vegeta|csv`
+- `compare` prints the differences of rps, p50 / p95 / p99 and error rate (overall and per step). With `-max-p95-regression <percent>` it exits with code 1 when a p95 got worse by more than that
 
 ### Threshold syntax
 
@@ -154,16 +197,22 @@ jotaro check -t 'p95<200ms' -t 'error_rate<1%' -t 'p99{step=login}<100ms' result
 |---|---|
 | `min` `mean` `p50` `p90` `p95` `p99` `max` | Request latency (`200ms`, `1.5s`) |
 | The above prefixed with `corrected_` `ttfb_` `dns_` `connect_` `tls_` | After CO correction / TTFB / DNS / TCP / TLS time |
-| `error_rate` | Share of network errors and `ExpectStatus` mismatches (`1%` or `0.01`) |
+| `error_rate` | Share of requests that ended in a transport-level error: timeout, connection refused, DNS failure and so on (`1%` or `0.01`). A failed `Expect*` check is not included |
 | `http_4xx_rate` `http_5xx_rate` | Share of HTTP 4xx / 5xx |
 | `iteration_fail_rate` | Share of failed iterations |
+| `iteration_min` … `iteration_max`, `iteration_active_min` … `iteration_active_max` | Latency of a whole scenario iteration, with / without Think time (filter with `{scenario=...}`) |
 | `requests` `rps` `dropped` | Number of requests / requests per second / number of dropped arrivals |
 
 When the target or the data is missing, the threshold counts as not met, so that a mistyped step name cannot pass silently. See chapter 5 of [`docs/result.md`](docs/result.md) for details.
 
-## MCP server (scenario authoring)
+Two things to know when you choose thresholds:
 
-`jotaro mcp` starts an [MCP](https://modelcontextprotocol.io) server that helps an AI assistant write scenarios. It talks over stdio and never runs the scenario it checks.
+- `error_rate` is the share of requests that ended in a transport-level error (timeout, connection refused, DNS failure and so on). A failed `Expect*` check is not counted as a request error: it fails the step with `expect_mismatch`, which is listed in the step's errors, and it reaches `iteration_fail_rate` when the scenario returns that error. To fail a run on wrong responses, return the step's error from the scenario (as in the example above) and set `iteration_fail_rate<1%`; use `http_5xx_rate` / `http_4xx_rate` for HTTP error statuses.
+- In the open model, when `MaxUsers` is full an arrival is dropped instead of waited for, and a dropped arrival leaves no latency sample. When you use `corrected_*` thresholds, add `dropped<1` so that a run that dropped arrivals cannot pass on the latencies of the arrivals that did run.
+
+## MCP server (scenario authoring and result checks)
+
+`jotaro mcp` starts an [MCP](https://modelcontextprotocol.io) server that helps an AI assistant write scenarios and read saved results. It talks over stdio and never runs a scenario: it only checks code and reads result files.
 
 ```sh
 claude mcp add jotaro -- jotaro mcp     # Claude Code; other clients take the same command
@@ -173,24 +222,27 @@ claude mcp add jotaro -- jotaro mcp     # Claude Code; other clients take the sa
 |---|---|---|
 | Resource | `jotaro://guide` | How to write a scenario: skeleton, API overview, load models, checklist |
 | Resource | `jotaro://thresholds` | Threshold syntax and metrics |
+| Resource | `jotaro://result` | How to save a result and read it: structure, what each number and error kind means, what to check first |
 | Prompt | `write_scenario` | Write a scenario for a described flow, then check it |
-| Tool | `check_scenario` | Check a scenario file: Go syntax, jotaro lint (`Users` xor `Arrival`, unchecked responses, duplicate step names, ...) and a type check by compiling. Pass `dir` (a module that requires jotaro) to check against its jotaro version; without it a temporary module with the latest jotaro is used, which needs network access |
+| Tool | `check_scenario` | Check a scenario file: Go syntax, jotaro lint (exactly one of `Users` / `UserStages` / `Arrival`, unchecked responses, duplicate step names, ...) and a type check by compiling. Pass `dir` (a module that requires jotaro) to check against its jotaro version; without it a temporary module with the jotaro version of the running `jotaro` binary (the latest one for a development build) is used, which needs network access |
 | Tool | `validate_threshold` | Parse a threshold such as `p99{step=login}<100ms` |
+| Tool | `summarize_result` | Summarize a saved result file: throughput, error rate, latency per step, dropped arrivals, the worst second, and warnings such as a saturated load generator. Much smaller than the file itself, which holds histograms and a per-second series |
+| Tool | `check_result` | Judge a saved result file against thresholds, like `jotaro check`: pass or fail per threshold with the measured value. `raw: true` reads raw JSON Lines data |
 
 ## Packages
 
 | Package | Contents |
 |---|---|
-| `jotaro` | Scenarios (`Scenario` / `User` / `Step`) and load models (`Plan` / `Run` / `Rate` / `Ramp` / `Stages`). The entry point for users |
-| `report` | Aggregation of results (`Report`), output (text / JSON / HTML), merging, and threshold checks |
+| `jotaro` | Scenarios (`Scenario` / `User` / `Step`) and load models (`Plan` / `Run` / `Rate` / `Ramp` / `Stages` / `UserStages`). The entry point for users |
+| `report` | Aggregation of results (`Report`), output (text / JSON / HTML), merging, comparing, conversion for other tools, and threshold checks |
 | `record` | Per-request records and reading/writing raw data (JSON Lines) |
-| `cmd/jotaro` | CLI (`report` / `merge` / `check` / `mcp`) |
+| `cmd/jotaro` | CLI (`report` / `merge` / `check` / `compare` / `export` / `mcp` / `version`) |
 
 ## Caveats
 
 - Only HTTP can be measured
-- Without `Plan.Raw`, percentiles such as p50 are approximations within 1% relative error (records are folded into histograms as they arrive, so memory does not grow with the run). Count, min, max and mean stay exact. With `Plan.Raw`, every record is kept in memory and the percentiles are exact
-- There is no statistical comparison (whether two results differ significantly). `check` works by setting criteria and judging pass or fail
+- Without `Plan.Raw`, percentiles such as p50 are approximations within 1% relative error (records are folded into histograms as they arrive, so memory does not grow with the run). Count, min, max and mean stay exact. With `Plan.Raw` each record is also written to it as it arrives (still constant memory); to get exact percentiles, re-aggregate the file with `jotaro report -raw`
+- There is no statistical comparison (whether two results differ significantly). `check` works by setting criteria and judging pass or fail, and `compare` shows the differences between two results with a gate on the p95 regression only
 
 ## License
 

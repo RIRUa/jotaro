@@ -3,6 +3,7 @@ package report
 import (
 	"cmp"
 	"fmt"
+	"maps"
 	"slices"
 	"sync"
 	"time"
@@ -139,8 +140,8 @@ func (q *reqAcc) stats() RequestStats {
 		NewConns:    q.newConns,
 		ReusedConns: q.reusedConns,
 		Corrected:   q.corrected.latency(),
-		Status:      q.status,
-		Errors:      q.errors,
+		Status:      maps.Clone(q.status),
+		Errors:      maps.Clone(q.errors),
 		BytesIn:     q.bytesIn,
 		BytesOut:    q.bytesOut,
 	}
@@ -343,12 +344,33 @@ func (a *Aggregator) ObserveIterationStart(t time.Time) {
 
 // Report returns the result so far. elapsed is the length of the run.
 // Open, Dropped and Health are not known here; the caller sets them.
+//
+// The Report is a snapshot: it shares nothing with the Aggregator, so it can be read (for example
+// with Check) while records keep arriving.
 func (a *Aggregator) Report(elapsed time.Duration) *Report {
+	return a.build(elapsed, true)
+}
+
+// Snapshot is a cheaper Report for polling while a run is in progress: it returns the same values
+// except that Series is left nil. Building the time series walks every second of the run and dominates
+// the cost of Report on a long run, while Snapshot takes about the same time however long the run is
+// (and holds the Aggregator's lock for correspondingly less time, so observers are not kept waiting).
+//
+// Use it when only the totals are needed, such as evaluating thresholds with Check or serving live metrics.
+// Open, Dropped and Health are not known here either; the caller sets them.
+func (a *Aggregator) Snapshot(elapsed time.Duration) *Report {
+	return a.build(elapsed, false)
+}
+
+// build assembles a Report from the accumulators, with the time series only when withSeries is set.
+func (a *Aggregator) build(elapsed time.Duration, withSeries bool) *Report {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
 	rep := &Report{StartedAt: wallUTC(a.origin), Elapsed: elapsed, Requests: a.all.stats()}
-	rep.Series = a.series()
+	if withSeries {
+		rep.Series = a.series()
+	}
 
 	scs := make([]*scenarioAcc, 0, len(a.scenarios))
 	for _, sc := range a.scenarios {
@@ -364,7 +386,7 @@ func (a *Aggregator) Report(elapsed time.Duration) *Report {
 				Failed: sc.failed,
 				Active: sc.active.latency(),
 				Total:  sc.total.latency(),
-				Errors: sc.errors,
+				Errors: maps.Clone(sc.errors),
 			},
 		}
 		steps := make([]*stepAcc, 0, len(sc.steps))
@@ -382,7 +404,7 @@ func (a *Aggregator) Report(elapsed time.Duration) *Report {
 				Count:    st.count,
 				Failed:   st.failed,
 				Duration: st.dur.latency(),
-				Errors:   st.errors,
+				Errors:   maps.Clone(st.errors),
 				Requests: st.reqs.stats(),
 			})
 		}

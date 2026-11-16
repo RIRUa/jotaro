@@ -23,12 +23,19 @@ import (
 //   - Latency: [phase_]statistic. The statistic is one of min / mean / p50 / p90 / p95 / p99 / max.
 //     The phase is none (the whole request) / corrected_ (after Coordinated Omission correction) /
 //     ttfb_ / dns_ / connect_ / tls_. Examples: p95, corrected_p99, ttfb_p50
-//   - Ratio: error_rate (network errors and Expect mismatches) / http_4xx_rate / http_5xx_rate
-//     (all relative to the number of requests), iteration_fail_rate (relative to the number of iterations)
+//   - Ratio: error_rate / http_4xx_rate / http_5xx_rate (all relative to the number of requests),
+//     iteration_fail_rate (relative to the number of iterations)
+//   - Scenario latency: iteration_[active_]statistic, the time of a whole scenario iteration.
+//     iteration_ includes Think time and iteration_active_ leaves it out. Examples: iteration_p95, iteration_active_p99
 //   - Count: requests / rps / dropped
 //
+// error_rate is the share of requests that ended in a transport-level error (timeout, connection refused,
+// DNS failure and so on). A failed Expect* check is not counted as a request error: it fails the step with
+// expect_mismatch, which is listed in the step's errors, and it reaches iteration_fail_rate when the scenario
+// returns that error. An HTTP error status is counted by http_4xx_rate / http_5xx_rate.
+//
 // {step=...} (optionally together with scenario=...) looks at latency, ratios and requests per step.
-// iteration_fail_rate is looked at per scenario with {scenario=...}. rps and dropped are overall only.
+// iteration_fail_rate and the scenario latencies are looked at per scenario with {scenario=...}. rps and dropped are overall only.
 type Threshold struct {
 	Metric   string
 	Scenario string
@@ -63,7 +70,7 @@ type metric struct {
 	kind  metricKind
 	scope metricScope
 	req   func(q RequestStats) (v float64, ok bool)
-	iter  func(count, failed int) (v float64, ok bool)
+	iter  func(it IterationStats) (v float64, ok bool)
 	glob  func(r *Report) float64
 }
 
@@ -107,11 +114,11 @@ func lookupMetric(name string) (metric, bool) {
 	case "http_5xx_rate":
 		return requestRatio(func(q RequestStats) int { return q.Status["5xx"] }), true
 	case "iteration_fail_rate":
-		return metric{kind: kindRatio, scope: scopeIteration, iter: func(count, failed int) (float64, bool) {
-			if count == 0 {
+		return metric{kind: kindRatio, scope: scopeIteration, iter: func(it IterationStats) (float64, bool) {
+			if it.Count == 0 {
 				return 0, false
 			}
-			return float64(failed) / float64(count), true
+			return float64(it.Failed) / float64(it.Count), true
 		}}, true
 	case "requests":
 		return metric{kind: kindNumber, scope: scopeRequests, req: func(q RequestStats) (float64, bool) {
@@ -121,6 +128,9 @@ func lookupMetric(name string) (metric, bool) {
 		return metric{kind: kindNumber, scope: scopeGlobal, glob: (*Report).RPS}, true
 	case "dropped":
 		return metric{kind: kindNumber, scope: scopeGlobal, glob: func(r *Report) float64 { return float64(r.Dropped) }}, true
+	}
+	if m, ok := iterationLatencyMetric(name); ok {
+		return m, true
 	}
 	for prefix, part := range latencyParts {
 		stat, ok := strings.CutPrefix(name, prefix)
@@ -138,6 +148,29 @@ func lookupMetric(name string) (metric, bool) {
 		}
 	}
 	return metric{}, false
+}
+
+// iterationLatencyMetric resolves "iteration_<stat>" (Total, with Think) and "iteration_active_<stat>" (Active, without Think).
+func iterationLatencyMetric(name string) (metric, bool) {
+	rest, ok := strings.CutPrefix(name, "iteration_")
+	if !ok {
+		return metric{}, false
+	}
+	part := func(it IterationStats) Latency { return it.Total }
+	if r, ok := strings.CutPrefix(rest, "active_"); ok {
+		rest, part = r, func(it IterationStats) Latency { return it.Active }
+	}
+	pick, ok := latencyStats[rest]
+	if !ok {
+		return metric{}, false
+	}
+	return metric{kind: kindDuration, scope: scopeIteration, iter: func(it IterationStats) (float64, bool) {
+		l := part(it)
+		if l.Count == 0 {
+			return 0, false
+		}
+		return float64(pick(l)), true
+	}}, true
 }
 
 // requestRatio is a ratio metric: n(q) of the requests, as a share of all requests.
@@ -380,20 +413,20 @@ func (r *Report) check(t Threshold) []CheckResult {
 		return []CheckResult{judge("", m.glob(r), true)}
 
 	case scopeIteration:
-		var count, failed int
+		var agg IterationStats
 		matched := false
 		for _, sc := range r.Scenarios {
 			if t.Scenario != "" && sc.Name != t.Scenario {
 				continue
 			}
 			matched = true
-			count += sc.Iterations.Count
-			failed += sc.Iterations.Failed
+			// Merging keeps the histograms, so percentiles over several scenarios are computed from the combined distribution.
+			agg = mergeIterations(agg, sc.Iterations)
 		}
 		if !matched {
 			return []CheckResult{{Threshold: t, Note: "no matching scenario"}}
 		}
-		v, ok := m.iter(count, failed)
+		v, ok := m.iter(agg)
 		return []CheckResult{judge(t.Scenario, v, ok)}
 	}
 

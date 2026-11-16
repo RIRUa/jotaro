@@ -1,6 +1,7 @@
 package mcpserver
 
 import (
+	"os"
 	"strings"
 	"testing"
 )
@@ -42,6 +43,17 @@ func TestLintScenario(t *testing.T) {
 			want: []string{"plan-load-model"},
 		},
 		{
+			name: "valid plan with UserStages",
+			src: head + `var _ = jotaro.Plan{Scenario: nil, UserStages: []jotaro.UserStage{{Target: 5, For: time.Second}}, Duration: time.Second}
+`,
+		},
+		{
+			name: "both Users and UserStages",
+			src: head + `var _ = jotaro.Plan{Scenario: nil, Users: 1, UserStages: []jotaro.UserStage{{Target: 5, For: time.Second}}, Duration: time.Second}
+`,
+			want: []string{"plan-load-model"},
+		},
+		{
 			name: "neither Users nor Arrival",
 			src: head + `var _ = jotaro.Plan{Scenario: nil, Duration: time.Second}
 `,
@@ -52,6 +64,49 @@ func TestLintScenario(t *testing.T) {
 			src: head + `var _ = jotaro.Plan{Users: 1}
 `,
 			want: []string{"plan-duration", "plan-scenario"},
+		},
+		{
+			name: "model assigned after the literal",
+			src: head + `func f() {
+	plan := jotaro.Plan{Scenario: nil, Duration: time.Second}
+	plan.Users = 20
+	_ = plan
+}
+`,
+		},
+		{
+			name: "model assigned in branches, as in examples/checkout",
+			src: head + `func f(rate int) {
+	plan := jotaro.Plan{Scenario: nil, Duration: time.Second}
+	if rate > 0 {
+		plan.Arrival = jotaro.Rate(rate, time.Second)
+	} else {
+		plan.Users = 20
+	}
+	_ = plan
+}
+`,
+		},
+		{
+			name: "duration and scenario assigned after a pointer literal",
+			src: head + `func f() {
+	plan := &jotaro.Plan{Users: 1}
+	plan.Duration = time.Second
+	plan.Scenarios = []jotaro.Weighted{}
+	_ = plan
+}
+`,
+		},
+		{
+			name: "model missing though another variable is assigned",
+			src: head + `func f() {
+	plan := jotaro.Plan{Scenario: nil, Duration: time.Second}
+	other := jotaro.Plan{Scenario: nil, Duration: time.Second}
+	other.Users = 20
+	_, _ = plan, other
+}
+`,
+			want: []string{"plan-load-model"},
 		},
 		{
 			name: "duplicate step name",
@@ -100,5 +155,34 @@ var _ = jotaro.NewScenario("b", func(ctx context.Context, u *jotaro.User) error 
 				t.Errorf("rules = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+// TestLintCheckoutExample pins that the way examples/checkout builds its Plan (a literal, then the load model
+// assigned in branches) is accepted, since the guide points readers at that example.
+func TestLintCheckoutExample(t *testing.T) {
+	src, err := os.ReadFile("../../examples/checkout/main.go")
+	if err != nil {
+		t.Skip("examples/checkout is not available:", err)
+	}
+	for _, d := range lintScenario(string(src)) {
+		if d.Severity == "error" || d.Rule == "plan-load-model" {
+			t.Errorf("examples/checkout should lint clean of load-model problems, got %+v", d)
+		}
+	}
+}
+
+// TestLintLoadModelSeverity pins that a literal setting two models stays an error, but only a warning
+// when later assignments could have changed it.
+func TestLintLoadModelSeverity(t *testing.T) {
+	const head = "package main\nimport (\n\"time\"\n\"github.com/RIRUa/jotaro\"\n)\n"
+	for _, tc := range []struct{ name, src, sev string }{
+		{"literal only", head + "var _ = jotaro.Plan{Scenario: nil, Users: 1, Arrival: jotaro.Rate(1, time.Second), Duration: time.Second}\n", "error"},
+		{"with later assignment", head + "func f() {\n\tplan := jotaro.Plan{Scenario: nil, Users: 1, Arrival: jotaro.Rate(1, time.Second), Duration: time.Second}\n\tplan.Users = 0\n}\n", "warning"},
+	} {
+		diags := lintScenario(tc.src)
+		if len(diags) != 1 || diags[0].Rule != "plan-load-model" || diags[0].Severity != tc.sev {
+			t.Errorf("%s: want one %s of plan-load-model, got %+v", tc.name, tc.sev, diags)
+		}
 	}
 }

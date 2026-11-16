@@ -37,11 +37,14 @@ var thresholds = []string{
 	// Checkout does real work and is rate limited, so it gets more room.
 	"p95{step=checkout}<500ms",
 	// 4xx are mostly business outcomes (sold out, rejected coupon) and expired sessions, 5xx the lost checkout responses.
-	// Network errors and unexpected statuses would show up in error_rate and iteration_fail_rate.
+	// error_rate is the share of requests that ended in a transport-level error (timeout, connection refused, DNS
+	// failure and so on). A failed Expect* check is not counted as a request error: it fails the step with
+	// expect_mismatch, and it reaches iteration_fail_rate when the scenario returns that error.
 	"http_4xx_rate<10%",
 	"http_5xx_rate<3%",
 	"error_rate<1%",
-	// Visitors who gave up for a reason that is not business as usual.
+	// Visitors who gave up for a reason that is not business as usual. A checkout attempt that fails and is retried
+	// successfully (429, a lost response) fails its step, but not the iteration.
 	"iteration_fail_rate<2%",
 	// The generator must keep up, or the numbers above mean nothing.
 	"dropped<1",
@@ -121,9 +124,11 @@ func run() error {
 		plan.Raw = file
 	}
 
-	rep, err := jotaro.Run(ctx, plan)
-	if err != nil {
-		return err
+	// Run can return a report together with an error (for example when writing -raw fails),
+	// so write the report before looking at the error. Without a report, nothing ran.
+	rep, runErr := jotaro.Run(ctx, plan)
+	if rep == nil {
+		return runErr
 	}
 
 	w := io.Writer(os.Stdout)
@@ -140,6 +145,9 @@ func run() error {
 	}
 
 	printTally(os.Stderr, cfg.tally, &shop.stats)
+	if runErr != nil {
+		return runErr
+	}
 	if err := shop.checkInventory(); err != nil {
 		return fmt.Errorf("mock server: %w", err)
 	}

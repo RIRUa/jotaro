@@ -25,7 +25,7 @@ const goTimeout = 2 * time.Minute
 type CheckInput struct {
 	Code string `json:"code" jsonschema:"the complete scenario file (package main)"`
 	// Dir is optional.
-	Dir string `json:"dir,omitempty" jsonschema:"optional absolute path of a Go module that requires jotaro; the code is type-checked against that module. Without it a temporary module with the latest jotaro is used (needs network)"`
+	Dir string `json:"dir,omitempty" jsonschema:"optional absolute path of a Go module that requires jotaro; the code is type-checked against that module. Without it a temporary module with the jotaro version of this server (the latest when unknown) is used (needs network)"`
 }
 
 // CheckOutput is the output of check_scenario.
@@ -38,22 +38,49 @@ type CheckOutput struct {
 	Note        string `json:"note,omitempty"`
 }
 
-// checkScenario lints the code and, when it parses, type-checks it by compiling it with go build. Nothing is executed.
-func checkScenario(ctx context.Context, _ *mcp.CallToolRequest, in CheckInput) (*mcp.CallToolResult, CheckOutput, error) {
-	diags := lintScenario(in.Code)
-	out := CheckOutput{Diagnostics: diags}
-	if hasSource(diags, "syntax") {
-		out.Note = "type check skipped: fix the syntax errors first"
+// checkScenario returns the handler of check_scenario. It lints the code and, when it parses, type-checks it
+// by compiling it with go build. Nothing is executed. version is the version of this binary, which picks the
+// jotaro version for the type check when there is no dir (see moduleQuery).
+func checkScenario(version string) func(context.Context, *mcp.CallToolRequest, CheckInput) (*mcp.CallToolResult, CheckOutput, error) {
+	return func(ctx context.Context, _ *mcp.CallToolRequest, in CheckInput) (*mcp.CallToolResult, CheckOutput, error) {
+		diags := lintScenario(in.Code)
+		out := CheckOutput{Diagnostics: diags}
+		if hasSource(diags, "syntax") {
+			out.Note = "type check skipped: fix the syntax errors first"
+			return nil, finish(out), nil
+		}
+		buildDiags, err := buildScenario(ctx, in.Code, in.Dir, version)
+		if err != nil {
+			out.Note = "type check skipped: " + err.Error()
+			return nil, finish(out), nil
+		}
+		out.TypeChecked = true
+		out.Diagnostics = append(out.Diagnostics, buildDiags...)
 		return nil, finish(out), nil
 	}
-	buildDiags, err := buildScenario(ctx, in.Code, in.Dir)
-	if err != nil {
-		out.Note = "type check skipped: " + err.Error()
-		return nil, finish(out), nil
+}
+
+// jotaroModule is the module path of jotaro.
+const jotaroModule = "github.com/RIRUa/jotaro"
+
+var (
+	// releaseVersion matches a tagged version such as v0.1.3 or v0.2.0-rc.1, without build metadata.
+	releaseVersion = regexp.MustCompile(`^v\d+\.\d+\.\d+(-[0-9A-Za-z]+(\.[0-9A-Za-z]+)*)?$`)
+	// pseudoVersion matches the tail of a pseudo-version, which names a commit and not a release.
+	pseudoVersion = regexp.MustCompile(`\d{14}-[0-9a-f]{12}$`)
+)
+
+// moduleQuery returns the argument of "go get" that fetches jotaro for the type check without a dir.
+//
+// The code is checked against the version of this binary, because the guide embedded in the binary describes that
+// version's API; the latest published version may be older and reject what the guide teaches (an unknown field, for example).
+// A version that cannot be fetched by name (an untagged development build, whose version is "dev", "", a pseudo-version
+// or one with build metadata such as +dirty) falls back to latest.
+func moduleQuery(version string) string {
+	if releaseVersion.MatchString(version) && !pseudoVersion.MatchString(version) {
+		return jotaroModule + "@" + version
 	}
-	out.TypeChecked = true
-	out.Diagnostics = append(out.Diagnostics, buildDiags...)
-	return nil, finish(out), nil
+	return jotaroModule + "@latest"
 }
 
 func finish(out CheckOutput) CheckOutput {
@@ -94,8 +121,9 @@ func syntaxDiagnostics(err error) []Diagnostic {
 // buildScenario type-checks code with go build and returns what it reports.
 //
 // With dir, the file is added to that module as a throwaway package through an overlay, so nothing
-// is written into it. Without dir, a temporary module that depends on the latest jotaro is used.
-func buildScenario(ctx context.Context, code, dir string) ([]Diagnostic, error) {
+// is written into it. Without dir, a temporary module that depends on the jotaro version of this binary
+// (moduleQuery) is used.
+func buildScenario(ctx context.Context, code, dir, version string) ([]Diagnostic, error) {
 	if _, err := exec.LookPath("go"); err != nil {
 		return nil, errors.New("the go command is not in PATH")
 	}
@@ -146,7 +174,7 @@ func buildScenario(ctx context.Context, code, dir string) ([]Diagnostic, error) 
 		}
 		for _, args := range [][]string{
 			{"mod", "init", "scenariocheck"},
-			{"get", "github.com/RIRUa/jotaro@latest"},
+			{"get", moduleQuery(version)},
 		} {
 			if out, err := runGo(ctx, modDir, args...); err != nil {
 				return nil, fmt.Errorf("go %s: %s", strings.Join(args, " "), firstLines(out, 5))

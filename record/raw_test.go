@@ -95,6 +95,23 @@ func TestReadRawErrors(t *testing.T) {
 			t.Errorf("%s: should be an error", name)
 		}
 	}
+	// Input that is not raw data at all wraps ErrNotRaw.
+	notRaw := map[string]string{
+		"empty":             ``,
+		"blank":             " \n\n",
+		"aggregated JSON":   `{"version":1,"open":false,"elapsed_ns":1000,"requests":{"count":1}}`,
+		"line without type": `{"type":"meta","version":1}` + "\n" + `{"x":1}`,
+		"null":              `null`,
+	}
+	for name, in := range notRaw {
+		if _, err := ReadRaw(strings.NewReader(in)); !errors.Is(err, ErrNotRaw) {
+			t.Errorf("%s: err = %v, want ErrNotRaw", name, err)
+		}
+	}
+	// A stream with only the meta line (a run without requests) is valid.
+	if raw, err := ReadRaw(strings.NewReader(`{"type":"meta","version":1,"elapsed_ns":5}`)); err != nil || raw.Elapsed != 5 {
+		t.Errorf("meta only: raw = %+v, err = %v", raw, err)
+	}
 	// The failing line can be identified.
 	_, err := ReadRaw(strings.NewReader(`{"type":"meta","version":1}` + "\n" + `{"type":"request","latency_ns":"x"}`))
 	if err == nil || !strings.Contains(err.Error(), "record 2") {

@@ -40,8 +40,8 @@ type Record struct {
 	Code   int     // 0 means no response (network error)
 	Err    ErrKind // kind of network error. HTTP 4xx/5xx are expressed by Code
 
-	// Scheduled is the scheduled start time. In the Users model it equals Start.
-	// In the Arrival model, only the first request of an iteration gets the scheduled arrival time.
+	// Scheduled is the scheduled start time. In the closed model it equals Start.
+	// In the open model, only the first request of an iteration gets the scheduled arrival time.
 	// It is used for Coordinated Omission correction.
 	Scheduled time.Time
 	Start     time.Time
