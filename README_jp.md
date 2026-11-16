@@ -164,6 +164,7 @@ jotaro check -t 'p95<200ms' -t 'error_rate<1%' -t 'p99{step=login}<100ms' result
 | `error_rate` | 通信エラーと `ExpectStatus` 不一致の割合（`1%` または `0.01`） |
 | `http_4xx_rate` `http_5xx_rate` | HTTP 4xx / 5xx の割合 |
 | `iteration_fail_rate` | 失敗したイテレーションの割合 |
+| `iteration_min` 〜 `iteration_max`、`iteration_active_min` 〜 `iteration_active_max` | シナリオ 1 周ぶんのレイテンシ（Think を含む / 含まない。`{scenario=...}` で絞り込み） |
 | `requests` `rps` `dropped` | リクエスト数 / 毎秒のリクエスト数 / ドロップされた到着の数 |
 
 対象が無い、またはデータが無いときは「満たさなかった」扱いになります。ステップ名の打ち間違いで通ってしまわないようにするためです。詳しくは [`docs/result_jp.md`](docs/result_jp.md) の 5 章を見てください。

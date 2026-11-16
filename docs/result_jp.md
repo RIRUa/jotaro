@@ -356,6 +356,8 @@ jotaro check -t 'p95<200ms' -t 'error_rate<1%' -t 'p99{step=login}<100ms' result
 | `error_rate` | 通信エラーと Expect 不一致の割合（リクエスト数に対して） | `1%` または `0.01` | `{step=...}` |
 | `http_4xx_rate` `http_5xx_rate` | HTTP 4xx / 5xx の割合 | 割合 | `{step=...}` |
 | `iteration_fail_rate` | 失敗したイテレーションの割合 | 割合 | `{scenario=...}` |
+| `iteration_` + `min` `mean` `p50` `p90` `p95` `p99` `max` | シナリオ 1 周ぶんのレイテンシ（Think を含む。例: `iteration_p95`） | 時間 | `{scenario=...}` |
+| `iteration_active_` + 同じ統計値 | 同上（Think を含まない） | 時間 | `{scenario=...}` |
 | `requests` | リクエスト数 | 数 | `{step=...}` |
 | `rps` `dropped` | 1 秒あたりのリクエスト数 / ドロップされた到着の数 | 数 | 全体のみ |
 

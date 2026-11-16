@@ -356,6 +356,8 @@ Exit code 1 if any threshold is not met. If a threshold is malformed or the file
 | `error_rate` | Share of network errors and Expect mismatches (of the number of requests) | `1%` or `0.01` | `{step=...}` |
 | `http_4xx_rate` `http_5xx_rate` | Share of HTTP 4xx / 5xx | Ratio | `{step=...}` |
 | `iteration_fail_rate` | Share of failed iterations | Ratio | `{scenario=...}` |
+| `iteration_` + `min` `mean` `p50` `p90` `p95` `p99` `max` | Latency of a whole scenario iteration, including Think time (e.g. `iteration_p95`) | Duration | `{scenario=...}` |
+| `iteration_active_` + the same statistics | Same, without Think time | Duration | `{scenario=...}` |
 | `requests` | Number of requests | Number | `{step=...}` |
 | `rps` `dropped` | Requests per second / number of dropped arrivals | Number | Overall only |
 
