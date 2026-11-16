@@ -91,7 +91,8 @@ func (r ramp) validate() error {
 // After over has passed, the rate stays constant at to.
 //
 // Inside the ramp this solves a·t² + from·t = i for t with the quadratic formula
-// (a straight division when the slope is flat, where a is about 0).
+// (a straight division when the slope is flat, where a is about 0). The discriminant is clamped at 0
+// so that rounding at the end of a descending ramp cannot turn the root into NaN.
 // After the ramp it continues at the constant rate to; if to is 0 there are no more arrivals.
 func (r ramp) at(i int) (time.Duration, bool) {
 	per, over := r.per.Seconds(), r.over.Seconds()
@@ -106,7 +107,10 @@ func (r ramp) at(i int) (time.Duration, bool) {
 		if math.Abs(a) < 1e-12 {
 			t = n / from
 		} else {
-			t = (-from + math.Sqrt(from*from+4*a*n)) / (2 * a)
+			// On a descending ramp the discriminant reaches 0 exactly at the end of the ramp,
+			// and rounding can push it slightly below 0, which would make the root NaN.
+			disc := math.Max(from*from+4*a*n, 0)
+			t = (-from + math.Sqrt(disc)) / (2 * a)
 		}
 	case to == 0:
 		return 0, false
