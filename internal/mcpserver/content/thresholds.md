@@ -20,6 +20,7 @@ iteration_fail_rate{scenario=checkout}<=5%
 | `error_rate` | share of network errors and `ExpectStatus` mismatches | `1%` or `0.01` |
 | `http_4xx_rate` `http_5xx_rate` | share of HTTP 4xx / 5xx | ratio |
 | `iteration_fail_rate` | share of failed iterations | ratio |
+| `iteration_<stat>` / `iteration_active_<stat>` | latency of a whole scenario iteration with / without Think time (`stat` is min, mean, p50, p90, p95, p99 or max; e.g. `iteration_p95{scenario=checkout}<2s`) | duration |
 | `requests` `rps` `dropped` | number of requests / requests per second / number of dropped arrivals | number |
 
 - The `{...}` selector narrows the threshold to a scenario and/or a step. Step names must match the names given to `u.Step`.
