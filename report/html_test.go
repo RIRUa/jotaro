@@ -44,7 +44,7 @@ func TestWriteHTML(t *testing.T) {
 		t.Error("the scenario name is not escaped")
 	}
 	if strings.Contains(out, "corrected (from scheduled start)") {
-		t.Error("corrected must not be shown in the Users model")
+		t.Error("corrected must not be shown in the closed model")
 	}
 	if strings.Contains(out, "http://") || strings.Contains(out, "https://") {
 		t.Error("must not contain external references")

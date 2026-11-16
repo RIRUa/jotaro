@@ -2,7 +2,9 @@
 // a flow such as login → list → order, written as plain Go code.
 //
 // This package is the entry point. It handles scenarios (Scenario / User / Step)
-// and how load is applied (Plan / Run / Rate / Ramp / Stages).
+// and how load is applied (Plan / Run). Load is applied either with a fixed number of users (Plan.Users),
+// with a number of users that changes over time (Plan.UserStages), or by arrival rate (Plan.Arrival with
+// Rate / Ramp / Stages). Plan.Scenarios runs a weighted mix of scenarios instead of a single one.
 // The result is returned as a [report.Report]. Writing it to the console, JSON or HTML,
 // and checking it against thresholds, is done by the report package;
 // raw per-request records are handled by the record package.
