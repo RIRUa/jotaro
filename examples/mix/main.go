@@ -115,7 +115,7 @@ func newPlan(baseURL string, d time.Duration) jotaro.Plan {
 			{Scenario: buy, Weight: 30},
 		},
 		StartUsers: 5, // already running at the start, so the first wave does not begin from 0
-		UserStages: jotaro.RepeatStages(2,
+		UserStages: jotaro.RepeatUserStages(2,
 			jotaro.UserStage{Target: 20, For: wave},
 			jotaro.UserStage{Target: 20, For: wave},
 			jotaro.UserStage{Target: 5, For: wave},

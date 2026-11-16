@@ -105,7 +105,7 @@ func userChanges(start int, stages []UserStage) []userChange {
 	return out
 }
 
-// RepeatStages returns stages repeated n times in a row, for a load shape that goes up and down
+// RepeatUserStages returns stages repeated n times in a row, for a load shape that goes up and down
 // several times. Every repetition starts from the Target the previous one ended at, so end the
 // sequence at the Target it begins from (or accept that the first stage of the next round moves from there).
 // Join the result with other stages using append.
@@ -114,7 +114,7 @@ func userChanges(start int, stages []UserStage) []userChange {
 //
 //	UserStages: append(
 //		[]jotaro.UserStage{{Target: 10, For: 10 * time.Second}},
-//		jotaro.RepeatStages(3,
+//		jotaro.RepeatUserStages(3,
 //			jotaro.UserStage{Target: 100, For: 20 * time.Second},
 //			jotaro.UserStage{Target: 100, For: 30 * time.Second},
 //			jotaro.UserStage{Target: 10, For: 10 * time.Second},
@@ -123,7 +123,7 @@ func userChanges(start int, stages []UserStage) []userChange {
 //
 // It returns nil when n is not positive or no stage is given. The result is a new slice,
 // so changing it does not change stages. Plan.UserStages rejects an empty result.
-func RepeatStages(n int, stages ...UserStage) []UserStage {
+func RepeatUserStages(n int, stages ...UserStage) []UserStage {
 	if n <= 0 || len(stages) == 0 {
 		return nil
 	}

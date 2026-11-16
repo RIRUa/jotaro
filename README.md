@@ -114,7 +114,7 @@ To run several flows in one plan, set `Scenarios` instead of `Scenario`: `Scenar
 
 With `UserStages`, a user that is stopped by a lower target finishes the iteration it is running and then waits; it is not interrupted. Users keep their `User.ID` and iteration count when they are started again. The number of concurrent iterations over time is `Series.Concurrency` in the report, so you can check the load shape there.
 
-To repeat a sequence of stages (for example three waves), use `jotaro.RepeatStages(3, stage1, stage2, ...)`; it returns the stages repeated 3 times and can be joined with other stages by `append`. Each round starts from the Target the previous round ended at.
+To repeat a sequence of stages (for example three waves), use `jotaro.RepeatUserStages(3, stage1, stage2, ...)`; it returns the stages repeated 3 times and can be joined with other stages by `append`. Each round starts from the Target the previous round ended at.
 
 You can also set `MaxUsers` (the cap on concurrency in the open model; an arrival that comes in while the cap is reached is not run and not waited for, but counted as dropped, and the text report prints a `warning:` line when that happened), `Timeout` (the limit for a single request), `Grace` (how long to wait for running iterations after `Duration`), `Raw` (where to write raw data), `Progress` (an `io.Writer`, such as `os.Stderr`, that gets one line per second while the run is in progress, e.g. `12s/60s rps=480 p95=38ms err=0.2%`), and `MetricsAddr` (for example `":9090"`: serve the state of the run so far at `/metrics` in the Prometheus text format, so Grafana and similar tools can chart it during the run; it needs no extra dependency and stops when `Run` returns).
 

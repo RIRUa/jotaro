@@ -81,7 +81,7 @@ go run ./examples/marketplace -users 10 -pace 0.2     # クローズドモデル
 プラン全体の機能をまとめた小さな負荷試験です。モックショップに対し、イテレーションの 70% が `browse`、30% が `buy` を実行します。次のものを扱います。
 
 - `Plan.Scenarios` と `Weighted`: 独立した流れを重みでランダムに選ぶ
-- `Plan.UserStages`・`RepeatStages`・`StartUsers`: 5 人から 20 人まで上げて戻す波を 2 回
+- `Plan.UserStages`・`RepeatUserStages`・`StartUsers`: 5 人から 20 人まで上げて戻す波を 2 回
 - `Plan.AbortOn` と `ErrAborted`: 壊れたサーバーを叩き続けず、中断までのレポートも出力する
 - `Plan.Progress`（1 秒ごとに 1 行、標準エラーへ）と `Plan.MetricsAddr`（Prometheus の `/metrics`。`-metrics` を付けたときだけ有効）
 - `ExpectStatusIn`・`ExpectJSON`・`Response.JSON(path)`: 構造体を宣言せずに JSON を検証・取り出し
