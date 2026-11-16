@@ -7,7 +7,8 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// addTools registers the scenario tools (check_scenario, validate_threshold) and the result tools (check_result).
+// addTools registers the scenario tools (check_scenario, validate_threshold) and the result tools
+// (summarize_result, check_result).
 func addTools(s *mcp.Server) {
 	mcp.AddTool(s, &mcp.Tool{
 		Name: "check_scenario",
@@ -30,6 +31,14 @@ func addTools(s *mcp.Server) {
 			"Only reads the file; no load is generated.",
 		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true},
 	}, checkResult)
+
+	mcp.AddTool(s, &mcp.Tool{
+		Name: "summarize_result",
+		Description: "Summarize a saved jotaro result file: throughput, error rate, latency percentiles per step, dropped arrivals, " +
+			"and warnings such as a saturated load generator. Use this instead of reading the file, which is large " +
+			"(histograms and a per-second series). Only reads the file; no load is generated.",
+		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true},
+	}, summarizeResult)
 }
 
 // ThresholdInput is the input of validate_threshold.

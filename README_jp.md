@@ -176,6 +176,7 @@ claude mcp add jotaro -- jotaro mcp     # Claude Code の場合。他のクラ�
 | Prompt | `write_scenario` | 指定したフローのシナリオを書き、チェックまで行う |
 | Tool | `check_scenario` | シナリオを検査する。Go の構文、jotaro 固有の lint（`Users` と `Arrival` はどちらか一方、レスポンス未検証、Step 名の重複など）、コンパイルによる型チェック。`dir`（jotaro を require している module）を渡すとその jotaro のバージョンで検査し、省略すると最新の jotaro を使う一時 module を作る（ネットワークが必要） |
 | Tool | `validate_threshold` | `p99{step=login}<100ms` のようなしきい値をパースする |
+| Tool | `summarize_result` | 保存した結果ファイルを要約する。スループット、エラー率、ステップごとのレイテンシ、dropped、最も遅かった 1 秒、負荷生成側の CPU 飽和などの警告を返す。ヒストグラムと毎秒の時系列を含む結果ファイルそのものよりずっと小さい |
 | Tool | `check_result` | 保存した結果ファイルをしきい値で判定する（`jotaro check` と同じ）。しきい値ごとの合否と実測値を返す。`raw: true` で生データ（JSON Lines）を読む |
 
 ## パッケージ

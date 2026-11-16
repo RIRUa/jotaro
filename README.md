@@ -176,6 +176,7 @@ claude mcp add jotaro -- jotaro mcp     # Claude Code; other clients take the sa
 | Prompt | `write_scenario` | Write a scenario for a described flow, then check it |
 | Tool | `check_scenario` | Check a scenario file: Go syntax, jotaro lint (`Users` xor `Arrival`, unchecked responses, duplicate step names, ...) and a type check by compiling. Pass `dir` (a module that requires jotaro) to check against its jotaro version; without it a temporary module with the latest jotaro is used, which needs network access |
 | Tool | `validate_threshold` | Parse a threshold such as `p99{step=login}<100ms` |
+| Tool | `summarize_result` | Summarize a saved result file: throughput, error rate, latency per step, dropped arrivals, the worst second, and warnings such as a saturated load generator. Much smaller than the file itself, which holds histograms and a per-second series |
 | Tool | `check_result` | Judge a saved result file against thresholds, like `jotaro check`: pass or fail per threshold with the measured value. `raw: true` reads raw JSON Lines data |
 
 ## Packages

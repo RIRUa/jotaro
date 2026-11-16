@@ -147,3 +147,72 @@ func TestCheckResult(t *testing.T) {
 		})
 	}
 }
+
+func TestSummarizeResult(t *testing.T) {
+	cs := connect(t)
+	raw := sampleRaw()
+	raw.Health = []record.HealthPoint{{Second: 0, Goroutines: 40, CPU: 0.5}, {Second: 1, Goroutines: 60, CPU: 0.95}}
+	jsonPath, rawPath := writeResult(t, raw)
+
+	for name, args := range map[string]map[string]any{
+		"json": {"path": jsonPath},
+		"raw":  {"path": rawPath, "raw": true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			var out SummaryOutput
+			callTool(t, cs, "summarize_result", args, &out)
+			if out.Error != "" {
+				t.Fatal(out.Error)
+			}
+			if out.Model != "open" || out.ElapsedSeconds != 10 || out.RPS != 2 || out.Dropped != 2 || out.PeakConcurrency != 1 {
+				t.Errorf("unexpected totals %+v", out)
+			}
+			if q := out.Requests; q.Count != 20 || q.ErrorRate != 0.1 || q.Corrected == nil ||
+				q.Errors["timeout"] != 1 || q.Errors["expect_mismatch"] != 1 || q.Status["5xx"] != 1 {
+				t.Errorf("unexpected request summary %+v", q)
+			}
+			if len(out.Scenarios) != 1 || len(out.Scenarios[0].Steps) != 2 {
+				t.Fatalf("want one scenario with two steps, got %+v", out.Scenarios)
+			}
+			sc := out.Scenarios[0]
+			if sc.Name != "checkout" || sc.Iterations != 10 || sc.FailedIterations != 2 {
+				t.Errorf("unexpected scenario %+v", sc)
+			}
+			login, order := sc.Steps[0], sc.Steps[1]
+			if login.Name != "login" || login.Failed != 0 || login.Requests.Latency.P95Ms != 10 {
+				t.Errorf("unexpected login step %+v", login)
+			}
+			if order.Name != "order" || order.Failed != 2 || order.Requests.Latency.P95Ms != 300 || order.Requests.ErrorRate != 0.2 {
+				t.Errorf("unexpected order step %+v", order)
+			}
+			if out.WorstSecond == nil || out.WorstSecond.P95Ms != 300 || out.WorstSecond.Requests != 2 {
+				t.Errorf("unexpected worst second %+v", out.WorstSecond)
+			}
+			if lg := out.LoadGenerator; lg == nil || lg.MaxCPU == nil || *lg.MaxCPU != 0.95 || lg.MaxGoroutines != 60 {
+				t.Errorf("unexpected load generator summary %+v", lg)
+			}
+			if len(out.Warnings) != 2 || !strings.Contains(out.Warnings[0], "dropped") || !strings.Contains(out.Warnings[1], "CPU") {
+				t.Errorf("want warnings about dropped arrivals and CPU, got %q", out.Warnings)
+			}
+		})
+	}
+
+	t.Run("closed model without warnings", func(t *testing.T) {
+		raw := sampleRaw()
+		raw.Open, raw.Dropped = false, 0
+		jsonPath, _ := writeResult(t, raw)
+		var out SummaryOutput
+		callTool(t, cs, "summarize_result", map[string]any{"path": jsonPath}, &out)
+		if out.Model != "closed" || out.Requests.Corrected != nil || out.LoadGenerator != nil || len(out.Warnings) != 0 {
+			t.Errorf("unexpected summary %+v", out)
+		}
+	})
+
+	t.Run("missing file", func(t *testing.T) {
+		var out SummaryOutput
+		callTool(t, cs, "summarize_result", map[string]any{"path": filepath.Join(t.TempDir(), "none.json")}, &out)
+		if out.Error == "" {
+			t.Errorf("want an error, got %+v", out)
+		}
+	})
+}
