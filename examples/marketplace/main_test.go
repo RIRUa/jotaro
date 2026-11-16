@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -20,11 +21,15 @@ func runFast(t *testing.T, plan jotaro.Plan) (*config, *market) {
 	srv := httptest.NewServer(shop.handler())
 	t.Cleanup(srv.Close)
 
+	// Play the personas in turn instead of drawing them at random, so every persona shows up in any run that
+	// has at least one iteration per persona.
+	var next atomic.Int64
 	cfg := &config{
 		members:   jotaro.NewFeeder(accounts, jotaro.Circular),
 		newcomers: jotaro.NewFeeder(newcomerAccounts(10), jotaro.Once),
 		pace:      0.05,
 		tally:     newTally(),
+		pick:      func(weights []int) int { return int(next.Add(1)-1) % len(weights) },
 	}
 	plan.Scenario = newScenario(cfg)
 	plan.BaseURL = srv.URL

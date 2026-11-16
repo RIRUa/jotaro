@@ -264,3 +264,92 @@ func TestReadErrorsHaveSinglePrefix(t *testing.T) {
 		t.Errorf("prefix doubled: %s", stderr.String())
 	}
 }
+
+// writeLatency writes a result whose only request took lat to path.
+func writeLatency(t *testing.T, path string, lat time.Duration) {
+	t.Helper()
+	rep := report.BuildReport(
+		[]record.Record{{Scenario: "checkout", Step: "login", Code: 200, Latency: lat}},
+		nil, nil, time.Second,
+	)
+	var buf bytes.Buffer
+	if err := rep.WriteJSON(&buf); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, buf.Bytes(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCompare(t *testing.T) {
+	dir := t.TempDir()
+	base, cur := filepath.Join(dir, "base.json"), filepath.Join(dir, "new.json")
+	writeLatency(t, base, 100*time.Millisecond)
+	writeLatency(t, cur, 150*time.Millisecond)
+
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"compare", base, cur}, nil, &stdout, &stderr); code != 0 {
+		t.Fatalf("code = %d, stderr = %s", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "+50.0%") {
+		t.Fatalf("diff missing: %s", stdout.String())
+	}
+
+	stdout.Reset()
+	if code := run([]string{"compare", "-max-p95-regression", "10", base, cur}, nil, &stdout, &stderr); code != 1 {
+		t.Fatalf("gate code = %d, want 1", code)
+	}
+	if code := run([]string{"compare", "-max-p95-regression", "60", base, cur}, nil, &stdout, &stderr); code != 0 {
+		t.Fatalf("loose gate code = %d, want 0", code)
+	}
+}
+
+func TestCompareErrors(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"compare", "only-one.json"}, nil, &stdout, &stderr); code != 2 {
+		t.Errorf("usage code = %d, want 2", code)
+	}
+	if code := run([]string{"compare", "missing-a.json", "missing-b.json"}, nil, &stdout, &stderr); code != 1 {
+		t.Errorf("missing file code = %d, want 1", code)
+	}
+}
+
+func TestExport(t *testing.T) {
+	in := filepath.Join(t.TempDir(), "raw.jsonl")
+	writeSampleRaw(t, in)
+
+	for _, tc := range []struct {
+		format string
+		want   string
+	}{
+		{"vegeta", `"attack":`},
+		{"csv", "second,requests,"},
+	} {
+		var stdout, stderr bytes.Buffer
+		if code := run([]string{"export", "-format", tc.format, in}, nil, &stdout, &stderr); code != 0 {
+			t.Fatalf("%s: exit code %d: %s", tc.format, code, stderr.String())
+		}
+		if !strings.Contains(stdout.String(), tc.want) {
+			t.Errorf("%s: output lacks %q:\n%s", tc.format, tc.want, stdout.String())
+		}
+	}
+}
+
+func TestExportUsage(t *testing.T) {
+	in := filepath.Join(t.TempDir(), "raw.jsonl")
+	writeSampleRaw(t, in)
+	for _, args := range [][]string{
+		{"export", in},                   // no format
+		{"export", "-format", "xml", in}, // unknown format
+		{"export", "-format", "csv"},     // no input
+	} {
+		var stdout, stderr bytes.Buffer
+		if code := run(args, nil, &stdout, &stderr); code != 2 {
+			t.Errorf("%v: exit code %d, want 2", args, code)
+		}
+	}
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"export", "-format", "csv", filepath.Join(t.TempDir(), "missing")}, nil, &stdout, &stderr); code != 1 {
+		t.Errorf("missing file: exit code %d, want 1", code)
+	}
+}

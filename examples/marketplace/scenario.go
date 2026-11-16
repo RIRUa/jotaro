@@ -53,6 +53,29 @@ type config struct {
 	newcomers *jotaro.Feeder[map[string]string] // accounts to sign up with, each usable once
 	pace      float64                           // multiplies every think time (1 = realistic, 0.05 = fast test)
 	tally     *tally
+
+	// pick chooses the persona of the next iteration and returns its index in weights. nil means a random pick
+	// weighted by weights. Tests set it to make the persona mix deterministic.
+	pick func(weights []int) int
+}
+
+// pickPersona returns the index of the persona the next iteration plays.
+func (c *config) pickPersona(weights []int) int {
+	if c.pick != nil {
+		return c.pick(weights)
+	}
+	total := 0
+	for _, w := range weights {
+		total += w
+	}
+	n := rand.IntN(total)
+	for i, w := range weights {
+		if n < w {
+			return i
+		}
+		n -= w
+	}
+	panic("unreachable: weights are exhausted")
 }
 
 // newScenario builds the scenario. It closes over cfg instead of using globals so tests can run it at any speed.
@@ -69,21 +92,15 @@ func newScenario(cfg *config) *jotaro.Scenario {
 		{"regret", 10, func(sh *shopper) error { return sh.member(intentBuyThenCancel) }},
 		{"abandoner", 10, func(sh *shopper) error { return sh.member(intentAbandon) }},
 	}
-	total := 0
-	for _, p := range personas {
-		total += p.weight
+	weights := make([]int, len(personas))
+	for i, p := range personas {
+		weights[i] = p.weight
 	}
 
 	return jotaro.NewScenario("marketplace", func(ctx context.Context, u *jotaro.User) error {
-		n := rand.IntN(total)
-		for _, p := range personas {
-			if n < p.weight {
-				cfg.tally.add("persona", p.name)
-				return p.run(&shopper{cfg: cfg, u: u})
-			}
-			n -= p.weight
-		}
-		panic("unreachable: weights are exhausted")
+		p := personas[cfg.pickPersona(weights)]
+		cfg.tally.add("persona", p.name)
+		return p.run(&shopper{cfg: cfg, u: u})
 	})
 }
 

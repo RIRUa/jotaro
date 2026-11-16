@@ -179,8 +179,13 @@ func BuildReport(reqs []record.Record, steps []record.StepRecord, iters []record
 	if elapsed == 0 {
 		elapsed = observedSpan(reqs, iters)
 	}
-	rep := &Report{StartedAt: observedStart(reqs, steps, iters), Elapsed: elapsed, Requests: requestStats(reqs, nil)}
-	rep.Series = buildSeries(rep.StartedAt, reqs, iters)
+	// The series is built from origin as is: if the records carry a monotonic clock reading, so does origin, and
+	// start offsets are then measured on the same clock as Duration. A wall-clock-only origin would mix the two,
+	// and consecutive iterations of one user could overlap by a few microseconds (the wall and the monotonic
+	// reading are taken separately), which counts one more running iteration. Only the reported StartedAt is wall-only.
+	origin := observedStart(reqs, steps, iters)
+	rep := &Report{StartedAt: wallUTC(origin), Elapsed: elapsed, Requests: requestStats(reqs, nil)}
+	rep.Series = buildSeries(origin, reqs, iters)
 
 	type stepKey struct{ scenario, step string }
 	var (
@@ -348,6 +353,7 @@ func observedSpan(reqs []record.Record, iters []record.IterationRecord) time.Dur
 }
 
 // observedStart returns the earliest start time among the records, or zero if there are none.
+// It keeps the monotonic clock reading of that record; use wallUTC for a value to report.
 func observedStart(reqs []record.Record, steps []record.StepRecord, iters []record.IterationRecord) time.Time {
 	var first time.Time
 	extend := func(t time.Time) {
@@ -364,7 +370,7 @@ func observedStart(reqs []record.Record, steps []record.StepRecord, iters []reco
 	for _, it := range iters {
 		extend(it.Start)
 	}
-	return wallUTC(first)
+	return first
 }
 
 // wallUTC drops the monotonic clock and the time zone, so the value is the same after a JSON round trip.

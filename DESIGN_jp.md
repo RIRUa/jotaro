@@ -79,7 +79,17 @@ jotaro.Run(ctx, jotaro.Plan{
 ```
 
 - `Users`（クローズド）: N 個の goroutine が逐次実行する。**実装済み**。
+- `UserStages`（クローズド、ユーザー数が変化）: `UserStage{Target, For}` の段階で、有効ユーザー数を直前の Target（開始時は `StartUsers`、既定は 0）から Target まで直線的に動かす。**実装済み**。
 - `Rate`（オープン）: 到着レート固定。vegeta の強みをシナリオ単位で再現する。**実装済み**。
+
+`UserStages` モデルの動き:
+
+- 全ユーザー（`StartUsers` と各 Target の最大値ぶん）を先に確保し、そのうち `StartUsers` 人は最初から動く。ユーザー `id` は有効人数が `id` を超えている間だけ動くので、ID の大きいユーザーから先に止まり、小さいユーザーから先に始まる。
+- コントローラが事前に計算した時刻で人数を動かす。`a` 人から `b` 人への段階は `For / |b - a|` ごとに 1 人ずつ動かすので、段階の終わりにちょうど Target に達する。最後の段階のあとは、`Duration` まで Target の人数を保つ。
+- 停止は協調的: 人数を超えたユーザーは、実行中のイテレーションを終えてから待機する（ユーザーごとの容量 1 のチャネルで起こすので、全員が一斉に起きることはない）。何も中断しないので、イテレーションが長いと `Series.Concurrency` が目標を上回る時間が出る。
+- `User.ID` とイテレーション番号は実行全体で安定している。再開したユーザーは次のイテレーション番号から続ける。Cookie jar はイテレーションごとに新しくする。
+- 負荷の形は `Series.Concurrency`（毎秒の実行中イテレーション数のピーク）から読む。専用の系列は持たない。
+- `RepeatStages(n, stages...)` は、段階の並びを n 回くり返した `[]UserStage` を返すだけのヘルパー。コントローラと検証は繰り返しを知らないので、くり返した形は同じ段階を手で書き並べた場合と完全に同じ動きになる。
 
 `Rate` モデルの動き:
 
@@ -91,6 +101,7 @@ jotaro.Run(ctx, jotaro.Plan{
 `Users` モデルの終了の仕方:
 
 - `Duration` を過ぎたら、新しいイテレーションを始めない。
+- `Plan.AbortOn` は実行を早めに終える。1 秒ごとに集計器のスナップショットを各ルール（「これが成り立ったら止める」と読む閾値）で判定し、`For` の間途切れず成り立ったルールが発動する。発動すると `Duration` の終わりと同じ扱い（新規イテレーションを始めない）になるが、`Grace` は中断した時点から数える。`Run` は途中までのレポートと `ErrAborted` を包んだエラーを返すので、CI では既定で失敗になる。条件は直近の窓ではなく「ここまでの実行全体」に対するものなので、実行の後半で起きた障害には反応が遅い。`http_5xx_rate>50%` のようなルールは、最初から壊れているサーバー向き。
 - 実行中のイテレーションは `Grace`（既定 30 秒）まで完了を待つ。超えたものは中断して `canceled` として記録する。リクエスト自体のタイムアウト（`Timeout`、既定 30 秒）は `timeout` で、区別される。
 - 親の `ctx` が終わったら、実行中のものも含めてすぐ止まる。
 - そのため `Report.Elapsed` は `Duration` より少し長くなり、RPS はわずかに低めに出る。
@@ -153,7 +164,8 @@ Feeder はシナリオの外で作り、クロージャで共有する（`User` 
 |---|---|---|
 | `jotaro` | `scenario.go` `user.go` `step.go` | `Scenario` / `User` / `Step`（`Think`、panic の回復を含む） |
 | | `request.go` `response.go` `exec.go` | リクエスト記述とビルダー、`httptrace` つきの実行、エラー分類 |
-| | `run.go` | `Plan` / `Run`（`Users` / `Arrival` の両モデル。`Plan.Raw` で生データを書く） |
+| | `run.go` | `Plan` / `Run`（`Users` / `UserStages` / `Arrival` の各モデル。`Plan.Raw` で生データを書く） |
+| | `user_stages.go` | `UserStage` と有効ユーザー数のスケジュール |
 | | `arrival.go` | `Arrival` / `Rate` / `Ramp` / `Stages` |
 | | `feeder.go` | `Feeder` / `LoadCSV` |
 | | `health.go` | 負荷生成側の健全性（ゴルーチン数・CPU）を 1 秒ごとにサンプリング |

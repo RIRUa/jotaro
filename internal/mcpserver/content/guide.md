@@ -98,18 +98,20 @@ creds, ok := accounts.Next() // ok is false when empty or when Once has run out
 
 ## Choosing the load: Plan
 
-Specify **exactly one** of `Users` and `Arrival`. `Duration` is required.
+Specify **exactly one** of `Users`, `UserStages` and `Arrival`. `Duration` is required.
 
 | Setting | Meaning |
 |---|---|
 | `Users: 20` | closed model: 20 users repeat the scenario for `Duration` |
+| `UserStages: []jotaro.UserStage{{Target: 100, For: 30*time.Second}, {Target: 100, For: time.Minute}, {Target: 0, For: 10*time.Second}}` | closed model with a changing number of users: ramp up, hold, ramp down (starts from `StartUsers`, 0 by default). A user stopped by a lower target finishes its current iteration first |
+| `UserStages: jotaro.RepeatStages(3, jotaro.UserStage{Target: 100, For: 20*time.Second}, jotaro.UserStage{Target: 10, For: 20*time.Second})` | repeat a sequence of stages (waves of load); join with other stages using `append` |
 | `Arrival: jotaro.Rate(50, time.Second)` | open model: start 50 scenarios per second |
 | `Arrival: jotaro.Ramp(0, 100, time.Second, 10*time.Second)` | rate goes from 0 to 100 per second over 10 seconds |
 | `Arrival: jotaro.Stages(jotaro.Stage{Arrival: ..., For: ...}, ...)` | several stages in order (ramp up → hold → ramp down) |
 
 In the open model arrivals keep their pace even when the server slows down, and latency is measured from the scheduled start time (Coordinated Omission correction). Use it to find out how the server behaves under a given request rate; use the closed model for a fixed number of concurrent users.
 
-Other `Plan` fields: `MaxUsers` (concurrency cap in the open model, default 1000; arrivals beyond it are counted as dropped), `Timeout` (per request, default 30s), `Grace` (wait for running iterations after `Duration`, default 30s), `Raw` (an `io.Writer` for raw JSON Lines data).
+Other `Plan` fields: `MaxUsers` (concurrency cap in the open model, default 1000; arrivals beyond it are counted as dropped), `Timeout` (per request, default 30s), `Grace` (wait for running iterations after `Duration`, default 30s), `Raw` (an `io.Writer` for raw JSON Lines data), `Progress` (an `io.Writer` such as `os.Stderr` that gets one progress line per second during the run), `MetricsAddr` (such as `":9090"`; serves live Prometheus metrics at `/metrics` during the run), `AbortOn` (`[]jotaro.AbortRule{{When: "http_5xx_rate>50%", For: 5 * time.Second}}` stops the run early once the condition has held for `For`; `Run` then returns the partial report and an error that satisfies `errors.Is(err, jotaro.ErrAborted)`, so do not treat that error as a failure to build the plan).
 
 `Stages` ends when the stages end; set `Duration` to the sum of every stage's `For`.
 
@@ -133,6 +135,6 @@ See the `jotaro://thresholds` resource for the threshold syntax, and the `jotaro
 1. Every `u.Step` has a distinct, stable name (it is the key in the report and in thresholds).
 2. Every request ends with `Decode`, `ExpectStatus`, or an explicit check.
 3. Data extracted from one step (tokens, IDs) is declared outside the step closure and checked before the next step uses it.
-4. `Plan` sets exactly one of `Users` / `Arrival`, and a positive `Duration`.
+4. `Plan` sets exactly one of `Users` / `UserStages` / `Arrival`, and a positive `Duration`.
 5. Only HTTP can be measured.
 6. Do not point the scenario at a server you do not own or are not allowed to load-test.

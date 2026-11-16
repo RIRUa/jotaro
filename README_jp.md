@@ -91,16 +91,23 @@ rep, err := jotaro.Run(ctx, jotaro.Plan{
 })
 ```
 
-`Users` と `Arrival` はどちらか一方だけを指定します。
+`Users`・`UserStages`・`Arrival` のうちちょうど 1 つを指定します。
 
 | 指定 | 内容 |
 |---|---|
 | `Users: 20` | 20 ユーザーが `Duration` の間シナリオを繰り返す |
+| `UserStages: []jotaro.UserStage{{Target: 100, For: 30*time.Second}, {Target: 100, For: time.Minute}, {Target: 0, For: 10*time.Second}}` | ユーザー数を段階ごとに変える。30 秒で 100 人まで増やし、1 分保ち、10 秒で 0 人まで減らす（最初の段階は `StartUsers` 人から始まる。既定は 0） |
 | `Arrival: jotaro.Rate(50, time.Second)` | 毎秒 50 回シナリオを開始する |
 | `Arrival: jotaro.Ramp(0, 100, time.Second, 10*time.Second)` | 10 秒かけて毎秒 0 回から 100 回へ増やす |
 | `Arrival: jotaro.Stages(...)` | 段階ごとに `Arrival` を切り替える（上げる → 保つ → 下げる、など） |
 
-そのほか、`MaxUsers`（オープンのときの同時実行数の上限。超えた分はドロップとして数える）、`Timeout`（1 リクエストの上限）、`Grace`（`Duration` 後に実行中のイテレーションを待つ時間）、`Raw`（生データの書き出し先）を指定できます。
+`UserStages` で目標が下がると、止まるユーザーは実行中のイテレーションを終えてから待機します（中断はしません）。ユーザーは再開しても `User.ID` とイテレーション番号を引き継ぎます。同時に動いているイテレーション数の推移はレポートの `Series.Concurrency` で確認でき、負荷の形を検証できます。
+
+段階の並びを繰り返したいとき（たとえば波を 3 回）は `jotaro.RepeatStages(3, stage1, stage2, ...)` を使います。並びを 3 回くり返した段階を返し、`append` で他の段階と連結できます。各回は直前の回が終わった Target から始まります。
+
+そのほか、`MaxUsers`（オープンのときの同時実行数の上限。超えた分はドロップとして数える）、`Timeout`（1 リクエストの上限）、`Grace`（`Duration` 後に実行中のイテレーションを待つ時間）、`Raw`（生データの書き出し先）、`Progress`（`os.Stderr` などの `io.Writer`。実行中、1 秒ごとに `12s/60s rps=480 p95=38ms err=0.2%` のような 1 行を書き出す）を指定できます。
+
+サーバーが明らかに壊れたら早めに止めたいときは `AbortOn` を指定します。例: `AbortOn: []jotaro.AbortRule{{When: "http_5xx_rate>50%", For: 5 * time.Second}}`。`When` は閾値と同じ書き方ですが、「止める状態」を表します。1 秒ごとに、ここまでの実行全体に対して判定し、`For` はその状態が途切れず続くべき時間です。実行中のイテレーションは `Grace` まで待たれ、その後 `Run` は途中までのレポートと、`errors.Is(err, jotaro.ErrAborted)` を満たすエラーを一緒に返します。
 
 ### 3. 結果を出す
 
@@ -157,6 +164,7 @@ jotaro check -t 'p95<200ms' -t 'error_rate<1%' -t 'p99{step=login}<100ms' result
 | `error_rate` | 通信エラーと `ExpectStatus` 不一致の割合（`1%` または `0.01`） |
 | `http_4xx_rate` `http_5xx_rate` | HTTP 4xx / 5xx の割合 |
 | `iteration_fail_rate` | 失敗したイテレーションの割合 |
+| `iteration_min` 〜 `iteration_max`、`iteration_active_min` 〜 `iteration_active_max` | シナリオ 1 周ぶんのレイテンシ（Think を含む / 含まない。`{scenario=...}` で絞り込み） |
 | `requests` `rps` `dropped` | リクエスト数 / 毎秒のリクエスト数 / ドロップされた到着の数 |
 
 対象が無い、またはデータが無いときは「満たさなかった」扱いになります。ステップ名の打ち間違いで通ってしまわないようにするためです。詳しくは [`docs/result_jp.md`](docs/result_jp.md) の 5 章を見てください。
@@ -192,7 +200,7 @@ claude mcp add jotaro -- jotaro mcp     # Claude Code の場合。他のクラ�
 ## 注意
 
 - 計測できるのは HTTP のみです
-- `Plan.Raw` を指定しないとき、p50 などは相対誤差 1% 以内の近似値です（記録は届くたびにヒストグラムへ畳むので、実行時間が長くてもメモリは増えません）。件数・最小・最大・平均は正確です。`Plan.Raw` を指定すると全記録をメモリに持ち、パーセンタイルは正確になります
+- `Plan.Raw` を指定しないとき、p50 などは相対誤差 1% 以内の近似値です（記録は届くたびにヒストグラムへ畳むので、実行時間が長くてもメモリは増えません）。件数・最小・最大・平均は正確です。`Plan.Raw` を指定しても記録は届くたびに書き出すだけでメモリは一定です。正確なパーセンタイルが必要なときは、そのファイルを `jotaro report -raw` で集計し直してください
 - 統計的な比較（2 つの結果に有意差があるか）をする機能はありません。`check` は基準を決めて合否を見る方式です
 
 ## ライセンス

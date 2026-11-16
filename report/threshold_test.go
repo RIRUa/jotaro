@@ -233,3 +233,57 @@ func TestChecksPrint(t *testing.T) {
 		}
 	}
 }
+
+func TestParseIterationLatency(t *testing.T) {
+	for _, expr := range []string{"iteration_p95<2s", "iteration_active_max{scenario=checkout}<=3s"} {
+		if _, err := ParseThreshold(expr); err != nil {
+			t.Errorf("%s: %v", expr, err)
+		}
+	}
+	for _, expr := range []string{"iteration_p95{step=a}<1s", "iteration_active_p42<1s", "iteration_<1s", "iteration_p95<5%"} {
+		if _, err := ParseThreshold(expr); err == nil {
+			t.Errorf("%s: want error", expr)
+		}
+	}
+}
+
+func TestCheckIterationLatency(t *testing.T) {
+	ms := func(n int) time.Duration { return time.Duration(n) * time.Millisecond }
+	t0 := time.Now()
+	iter := func(sc string, i int, dur, think time.Duration) record.IterationRecord {
+		return record.IterationRecord{Scenario: sc, UserID: 1, Iteration: i, Start: t0, Duration: dur, Think: think}
+	}
+	rep := BuildReport(nil, nil, []record.IterationRecord{
+		iter("checkout", 0, ms(300), ms(100)),
+		iter("checkout", 1, ms(500), ms(100)),
+		iter("browse", 0, ms(50), 0),
+	}, time.Second)
+
+	tests := []struct {
+		expr   string
+		pass   bool
+		actual time.Duration
+	}{
+		{"iteration_max{scenario=checkout}<=500ms", true, ms(500)},
+		{"iteration_max{scenario=checkout}<500ms", false, ms(500)},
+		{"iteration_active_max{scenario=checkout}<=400ms", true, ms(400)}, // Think is left out
+		{"iteration_min<=50ms", true, ms(50)},                             // whole run merges the scenarios
+		{"iteration_active_min<=50ms", true, ms(50)},
+		{"iteration_max<=500ms", true, ms(500)},
+	}
+	for _, tt := range tests {
+		r := checkOne(t, rep, tt.expr)
+		if r.Pass != tt.pass || time.Duration(r.Actual) != tt.actual {
+			t.Errorf("%s: pass=%v actual=%v, want pass=%v actual=%v (%+v)", tt.expr, r.Pass, time.Duration(r.Actual), tt.pass, tt.actual, r)
+		}
+	}
+	for _, expr := range []string{"iteration_p95{scenario=nothing}<1s"} {
+		if r := checkOne(t, rep, expr); r.Pass || r.Note == "" {
+			t.Errorf("%s: want failing result with a note: %+v", expr, r)
+		}
+	}
+	empty := BuildReport(nil, nil, nil, time.Second)
+	if r := checkOne(t, empty, "iteration_p95<1s"); r.Pass {
+		t.Errorf("no iterations must not pass: %+v", r)
+	}
+}

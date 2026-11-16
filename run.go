@@ -5,9 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math/rand/v2"
 	"net/http"
 	"net/http/cookiejar"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/RIRUa/jotaro/record"
@@ -27,19 +29,36 @@ const (
 
 // Plan describes how load is applied.
 //
-// Specify exactly one of Users (closed model) and Arrival (open model).
+// Specify exactly one of Users, UserStages (closed model) and Arrival (open model).
 //
 //   - Users: a fixed number of users repeat the scenario until Duration has passed.
+//   - UserStages: like Users, but the number of users changes over time (ramp up, hold, ramp down).
 //   - Arrival: scenarios start at a fixed rate, regardless of how long a scenario takes.
 type Plan struct {
-	// Scenario is the flow every virtual user runs.
+	// Scenario is the flow every virtual user runs. Exactly one of Scenario and Scenarios must be set.
 	Scenario *Scenario
+	// Scenarios is a weighted mix of flows, for example 70% browse and 30% checkout. It cannot be set together
+	// with Scenario. Every iteration (closed model) or arrival (open model) picks one scenario at random with
+	// probability Weight divided by the sum of the weights. The report and thresholds already separate the
+	// results by scenario name, so the scenarios of a mix need distinct names.
+	Scenarios []Weighted
 	// BaseURL is prepended to the relative paths of requests (for example "http://localhost:8080").
 	BaseURL string
 
 	// Users is the number of virtual users running at the same time.
 	Users int
-	// Arrival is how scenarios arrive (e.g. Rate(10, time.Second)). It cannot be set together with Users.
+	// UserStages changes the number of users over time in the closed model. It cannot be set together with Users or Arrival.
+	//
+	// Every user keeps its ID (User.ID counts from 0) and its iteration count for the whole run, so a user
+	// that is stopped by a smaller target and started again by a larger one carries on where it left off.
+	// When the target goes down, the users with the highest IDs stop: each one finishes the iteration it is
+	// running (it is not interrupted) and then waits. So the active-user count of the report (Series.Concurrency)
+	// can be above the target for a while. After the last stage the number of users stays at its Target until Duration.
+	UserStages []UserStage
+	// StartUsers is how many users are already running when the first stage of UserStages begins, so that
+	// the load does not have to ramp up from 0. 0 means none. It can only be set together with UserStages.
+	StartUsers int
+	// Arrival is how scenarios arrive (e.g. Rate(10, time.Second)). It cannot be set together with Users or UserStages.
 	Arrival Arrival
 	// MaxUsers is the cap on concurrency with Arrival. 0 means 1000.
 	// Arrivals that come in while the cap is reached are not run and are counted as dropped.
@@ -53,36 +72,150 @@ type Plan struct {
 	// Those that exceed it are aborted and recorded as record.ErrCanceled. 0 means 30 seconds.
 	Grace time.Duration
 
-	// If Raw is not nil, the raw data is written as JSON Lines when Run finishes (record.WriteRaw).
+	// If Raw is not nil, the raw data is written to it as JSON Lines while the run is in progress, one line per
+	// record as it arrives (record.RawWriter), so memory stays constant however many requests there are.
 	// Even if writing fails, the aggregated Report is returned (together with an error).
+	//
+	// The Report that Run returns is aggregated incrementally, as without Raw, so its percentiles are within
+	// 1% relative error. For exact percentiles, read the raw data back (record.ReadRaw, report.FromRaw,
+	// or `jotaro report -raw`).
 	Raw io.Writer
+
+	// If Progress is not nil, one line is written to it every second while the run is in progress,
+	// for example "12s/60s rps=480 p95=38ms err=0.2%" (elapsed/Duration, throughput of the last second,
+	// and p95 and error rate over the run so far). Pass os.Stderr to watch a long run.
+	// The p95 is an approximation within 1% relative error. Nothing is written after Run returns,
+	// and write errors are ignored. It works together with Raw.
+	Progress io.Writer
+
+	// If MetricsAddr is not empty, Run serves the state of the run so far at http://<MetricsAddr>/metrics in the
+	// Prometheus text format (for example ":9090"), so Grafana and similar tools can chart it while the run is in
+	// progress. It has the request, response class and error counts, the throughput and the latency quantiles of the
+	// whole run so far (within 1% relative error). The server stops when Run returns. If the address cannot be
+	// listened on, Run fails before sending any request.
+	MetricsAddr string
+
+	// AbortOn stops the run early when any of its conditions holds, for example
+	// {When: "error_rate>50%", For: 5 * time.Second}. A broken server is then not hit for the whole Duration.
+	// See AbortRule for the syntax and how the conditions are evaluated.
+	//
+	// On abort no new iterations are started and the running ones get Grace, counted from the moment of the abort,
+	// to finish (the rest is cancelled and recorded as record.ErrCanceled), exactly as at the end of Duration.
+	// Run then returns the report of the run up to that point (and writes Plan.Raw) together with an error
+	// that wraps ErrAborted. If Progress is set, a line saying why is written to it.
+	AbortOn []AbortRule
 }
 
-// validate checks that the Plan is runnable: a scenario is set, exactly one of Users and Arrival
+// Weighted is a scenario with its share in Plan.Scenarios.
+type Weighted struct {
+	// Scenario is the flow to run.
+	Scenario *Scenario
+	// Weight is the relative share of this scenario. It must be positive; only the ratio between weights matters.
+	Weight int
+}
+
+// pick returns the scenario for the next iteration or arrival.
+//
+// With Plan.Scenario it is that scenario; with Plan.Scenarios it is chosen at random in proportion to the weights.
+func (p Plan) pick() *Scenario {
+	if p.Scenarios == nil {
+		return p.Scenario
+	}
+	total := 0
+	for _, w := range p.Scenarios {
+		total += w.Weight
+	}
+	n := rand.IntN(total)
+	for _, w := range p.Scenarios {
+		if n < w.Weight {
+			return w.Scenario
+		}
+		n -= w.Weight
+	}
+	return p.Scenarios[len(p.Scenarios)-1].Scenario // unreachable: n < total
+}
+
+// validateScenarios checks that exactly one of Scenario and Scenarios is set and that each scenario is runnable.
+func (p Plan) validateScenarios() error {
+	if p.Scenarios == nil {
+		if p.Scenario == nil || p.Scenario.Fn == nil {
+			return errors.New("jotaro: Plan.Scenario is not set")
+		}
+		return nil
+	}
+	if p.Scenario != nil {
+		return errors.New("jotaro: Plan.Scenario and Plan.Scenarios cannot be set together")
+	}
+	if len(p.Scenarios) == 0 {
+		return errors.New("jotaro: Plan.Scenarios must not be empty")
+	}
+	names := map[string]bool{}
+	for i, w := range p.Scenarios {
+		switch {
+		case w.Scenario == nil || w.Scenario.Fn == nil:
+			return fmt.Errorf("jotaro: Plan.Scenarios[%d].Scenario is not set", i)
+		case w.Weight <= 0:
+			return fmt.Errorf("jotaro: Plan.Scenarios[%d].Weight must be positive", i)
+		case names[w.Scenario.Name]:
+			return fmt.Errorf("jotaro: Plan.Scenarios has two scenarios named %q", w.Scenario.Name)
+		}
+		names[w.Scenario.Name] = true
+	}
+	return nil
+}
+
+// validate checks that the Plan is runnable: a scenario is set, exactly one of Users, UserStages and Arrival
 // is given, and Duration is positive. Run calls it first, so a bad Plan fails before any load is sent.
 func (p Plan) validate() error {
+	if err := p.validateScenarios(); err != nil {
+		return err
+	}
 	switch {
-	case p.Scenario == nil || p.Scenario.Fn == nil:
-		return errors.New("jotaro: Plan.Scenario is not set")
-	case p.Users > 0 && p.Arrival != nil:
-		return errors.New("jotaro: Plan.Users and Plan.Arrival cannot be set together")
-	case p.Users <= 0 && p.Arrival == nil:
-		return errors.New("jotaro: Plan.Users must be at least 1 (or set Plan.Arrival)")
+	case p.modelCount() > 1:
+		return errors.New("jotaro: Plan.Users, Plan.UserStages and Plan.Arrival cannot be set together")
+	case p.StartUsers != 0 && p.UserStages == nil:
+		return errors.New("jotaro: Plan.StartUsers can only be set together with Plan.UserStages")
+	case p.modelCount() == 0:
+		return errors.New("jotaro: Plan.Users must be at least 1 (or set Plan.UserStages or Plan.Arrival)")
 	case p.MaxUsers < 0:
 		return errors.New("jotaro: Plan.MaxUsers must be at least 0")
 	case p.Duration <= 0:
 		return errors.New("jotaro: Plan.Duration must be positive")
 	}
-	if p.Arrival != nil {
+	if _, err := parseAbortRules(p.AbortOn); err != nil {
+		return err
+	}
+	switch {
+	case p.UserStages != nil:
+		return validateUserStages(p.StartUsers, p.UserStages)
+	case p.Arrival != nil:
 		return p.Arrival.validate()
 	}
 	return nil
+}
+
+// modelCount is how many of Users, UserStages and Arrival are set. It should be exactly 1.
+func (p Plan) modelCount() int {
+	n := 0
+	if p.Users > 0 {
+		n++
+	}
+	if p.UserStages != nil {
+		n++
+	}
+	if p.Arrival != nil {
+		n++
+	}
+	return n
 }
 
 // maxConcurrency is the upper limit of iterations that can run at the same time.
 //
 // It sizes the connection pool in Run and the slot channel in runOpen.
 func (p Plan) maxConcurrency() int {
+	if p.UserStages != nil {
+		return maxStageTarget(p.StartUsers, p.UserStages)
+	}
 	if p.Arrival == nil {
 		return p.Users
 	}
@@ -97,11 +230,11 @@ func (p Plan) maxConcurrency() int {
 // Flow of a run:
 //
 //  1. validate the Plan, and clone the default Transport so connections are not shared with other code
-//  2. start the health sampler, then run the closed (Users) or open (Arrival) loop until Duration ends
+//  2. start the health sampler, then run the closed (Users or UserStages) or open (Arrival) loop until Duration ends
 //  3. wait up to Grace for running iterations, then cancel them
-//  4. build the report and write the raw data if Plan.Raw is set. Without Plan.Raw, records are folded into
-//     histograms as they arrive (percentiles within 1% relative error, memory independent of the run length).
-//     With Plan.Raw, every record is kept and the percentiles are exact
+//  4. build the report. Records are folded into histograms as they arrive (percentiles within 1% relative
+//     error, memory independent of the run length). With Plan.Raw each record is also written to it at once,
+//     and the stream is finished (health and final run info) when the run ends
 //
 // When ctx is done, everything stops at once, including running iterations,
 // and the results so far are returned. Report.Elapsed is the real time until all users have stopped.
@@ -125,57 +258,93 @@ func Run(ctx context.Context, p Plan) (*report.Report, error) {
 	// told apart from a request's own timeout (record.ErrTimeout).
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	defer time.AfterFunc(p.Duration+grace, cancel).Stop()
+	graceTimer := time.AfterFunc(p.Duration+grace, cancel)
+	defer graceTimer.Stop()
+	abortRules, _ := parseAbortRules(p.AbortOn) // already checked by validate
 
 	start := time.Now()
-	// Raw data needs every record, so keep them in that case and aggregate exactly at the end.
-	// Otherwise fold each record into histograms as it arrives, so memory does not grow with the run.
-	var (
-		col *record.Collector
-		agg *report.Aggregator
-	)
+	// Every record is folded into an Aggregator as it arrives, so memory does not grow with the run.
+	// The other observers see the same records: the raw data writer (Plan.Raw), which writes each record
+	// to the output at once, and the progress counter (Plan.Progress). AbortOn reads the Aggregator.
+	agg := report.NewAggregator(start)
+	obs := fanout{agg}
+	var rw *record.RawWriter
 	if p.Raw != nil {
-		col = record.NewCollector()
-	} else {
-		agg = report.NewAggregator(start)
+		rw = record.NewRawWriter(p.Raw, p.Arrival != nil, start)
+		obs = append(obs, rw)
+	}
+	var prog *progress
+	if p.Progress != nil {
+		prog = &progress{}
+		obs = append(obs, prog)
+	}
+	var col *record.Collector
+	if len(obs) == 1 {
 		col = record.NewStreamingCollector(agg)
+	} else {
+		col = record.NewStreamingCollector(obs)
+	}
+	var live *report.Aggregator
+	if len(abortRules) > 0 {
+		live = agg
+	}
+	var stopProgress, stopAbort, stopMetrics func()
+	if p.MetricsAddr != "" {
+		var err error
+		stopMetrics, err = startMetricsServer(p.MetricsAddr, func() *report.Report { return agg.Report(time.Since(start)) })
+		if err != nil {
+			return nil, err
+		}
+		defer stopMetrics()
+	}
+	if prog != nil {
+		stopProgress = reportProgress(p.Progress, prog, start, p.Duration)
+	}
+	// abortReason is written by the watcher goroutine and read after stopAbort has waited for it.
+	var abortReason string
+	if live != nil {
+		stopAbort = watchAbort(abortRules, live, col, start, func(reason string) {
+			abortReason = reason
+			stop() // no new iterations; the running ones get Grace from now on
+			graceTimer.Reset(grace)
+		})
 	}
 	r := &runner{p: p, tr: tr, timeout: timeout, col: col, stopCtx: stopCtx, runCtx: runCtx}
 	health := startHealthSampler(report.SeriesInterval)
-	if p.Arrival != nil {
+	switch {
+	case p.Arrival != nil:
 		r.runOpen()
-	} else {
+	case p.UserStages != nil:
+		r.runStaged()
+	default:
 		r.runClosed()
 	}
 	elapsed := time.Since(start)
-	healthPoints := health.stop()
-
-	if agg != nil {
-		rep := agg.Report(elapsed)
-		rep.Open = p.Arrival != nil
-		rep.Dropped = r.col.Dropped()
-		rep.Health = healthPoints
-		return rep, nil
+	if stopAbort != nil {
+		stopAbort()
 	}
-
-	reqs, steps, iters := r.col.Take()
-	raw := &record.Raw{
-		Open:       p.Arrival != nil,
-		Dropped:    r.col.Dropped(),
-		StartedAt:  start,
-		Elapsed:    elapsed,
-		Requests:   reqs,
-		Steps:      steps,
-		Iterations: iters,
-		Health:     healthPoints,
+	if stopProgress != nil {
+		stopProgress()
 	}
-	rep := report.FromRaw(raw)
-	if p.Raw != nil {
-		if err := record.WriteRaw(p.Raw, raw); err != nil {
-			return rep, fmt.Errorf("jotaro: failed to write raw data: %w", err)
+	var abortErr error
+	if abortReason != "" {
+		abortErr = fmt.Errorf("%w: %s", ErrAborted, abortReason)
+		if p.Progress != nil {
+			fmt.Fprintln(p.Progress, "aborted: "+abortReason)
 		}
 	}
-	return rep, nil
+	healthPoints := health.stop()
+
+	rep := agg.Report(elapsed)
+	rep.Open = p.Arrival != nil
+	rep.Dropped = r.col.Dropped()
+	rep.Health = healthPoints
+	if rw != nil {
+		if err := rw.Close(rep.Dropped, elapsed, healthPoints); err != nil {
+			return rep, errors.Join(abortErr, fmt.Errorf("jotaro: failed to write raw data: %w", err))
+		}
+	}
+	return rep, abortErr
 }
 
 // runner is the state during one Run.
@@ -197,13 +366,80 @@ func (r *runner) runClosed() {
 		go func() {
 			defer wg.Done()
 			for iter := 0; r.stopCtx.Err() == nil; iter++ {
-				u, err := newUser(r.runCtx, r.p, id, iter, r.tr, r.timeout, r.col)
+				sc := r.p.pick()
+				u, err := newUser(r.runCtx, r.p, sc, id, iter, r.tr, r.timeout, r.col)
 				if err != nil {
 					return
 				}
-				_ = r.p.Scenario.run(u) // the error is kept in the IterationRecord
+				_ = sc.run(u) // the error is kept in the IterationRecord
 			}
 		}()
+	}
+	wg.Wait()
+}
+
+// runStaged is runClosed with a changing number of users (Plan.UserStages).
+//
+// All users are allocated up front and wait until the active count exceeds their ID. A controller moves the
+// count at the times given by userChanges and wakes the users that just became active. A user that is
+// above the count finishes its current iteration and waits again; it is never interrupted.
+func (r *runner) runStaged() {
+	n := maxStageTarget(r.p.StartUsers, r.p.UserStages)
+	var active atomic.Int64
+	active.Store(int64(r.p.StartUsers))
+	// wake[id] has room for one pending signal, so a wake-up sent just before the user starts waiting is not lost.
+	wake := make([]chan struct{}, n)
+	for i := range wake {
+		wake[i] = make(chan struct{}, 1)
+	}
+
+	var wg sync.WaitGroup
+	for id := range n {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for iter := 0; r.stopCtx.Err() == nil; {
+				if int(active.Load()) <= id {
+					select {
+					case <-wake[id]:
+					case <-r.stopCtx.Done():
+					}
+					continue // check the count and the context again
+				}
+				sc := r.p.pick()
+				u, err := newUser(r.runCtx, r.p, sc, id, iter, r.tr, r.timeout, r.col)
+				if err != nil {
+					return
+				}
+				_ = sc.run(u) // the error is kept in the IterationRecord
+				iter++
+			}
+		}()
+	}
+
+	t0 := time.Now()
+	timer := time.NewTimer(0)
+	defer timer.Stop()
+	<-timer.C
+	prev := r.p.StartUsers
+	for _, ch := range userChanges(r.p.StartUsers, r.p.UserStages) {
+		if wait := time.Until(t0.Add(ch.at)); wait > 0 {
+			timer.Reset(wait)
+			select {
+			case <-timer.C:
+			case <-r.stopCtx.Done():
+				wg.Wait()
+				return
+			}
+		}
+		active.Store(int64(ch.count))
+		for id := prev; id < ch.count; id++ { // only an increase wakes users
+			select {
+			case wake[id] <- struct{}{}:
+			default:
+			}
+		}
+		prev = ch.count
 	}
 	wg.Wait()
 }
@@ -250,18 +486,19 @@ func (r *runner) runOpen() {
 			defer wg.Done()
 			defer func() { <-slots }()
 			// In the open model, each arrival is treated as a separate user.
-			u, err := newUser(r.runCtx, r.p, i, 0, r.tr, r.timeout, r.col)
+			sc := r.p.pick()
+			u, err := newUser(r.runCtx, r.p, sc, i, 0, r.tr, r.timeout, r.col)
 			if err != nil {
 				return
 			}
 			u.scheduled = at
-			_ = r.p.Scenario.run(u) // the error is kept in the IterationRecord
+			_ = sc.run(u) // the error is kept in the IterationRecord
 		}()
 	}
 }
 
 // newUser creates the user for one iteration. The cookie jar is new every time.
-func newUser(ctx context.Context, p Plan, id, iter int, tr http.RoundTripper, timeout time.Duration, col *record.Collector) (*User, error) {
+func newUser(ctx context.Context, p Plan, sc *Scenario, id, iter int, tr http.RoundTripper, timeout time.Duration, col *record.Collector) (*User, error) {
 	jar, err := cookiejar.New(nil)
 	if err != nil {
 		return nil, err
@@ -271,7 +508,7 @@ func newUser(ctx context.Context, p Plan, id, iter int, tr http.RoundTripper, ti
 		Iteration: iter,
 		Client:    &http.Client{Transport: tr, Jar: jar, Timeout: timeout},
 		ctx:       ctx,
-		scenario:  p.Scenario.Name,
+		scenario:  sc.Name,
 		baseURL:   p.BaseURL,
 		col:       col,
 	}, nil

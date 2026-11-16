@@ -42,6 +42,17 @@ func TestLintScenario(t *testing.T) {
 			want: []string{"plan-load-model"},
 		},
 		{
+			name: "valid plan with UserStages",
+			src: head + `var _ = jotaro.Plan{Scenario: nil, UserStages: []jotaro.UserStage{{Target: 5, For: time.Second}}, Duration: time.Second}
+`,
+		},
+		{
+			name: "both Users and UserStages",
+			src: head + `var _ = jotaro.Plan{Scenario: nil, Users: 1, UserStages: []jotaro.UserStage{{Target: 5, For: time.Second}}, Duration: time.Second}
+`,
+			want: []string{"plan-load-model"},
+		},
+		{
 			name: "neither Users nor Arrival",
 			src: head + `var _ = jotaro.Plan{Scenario: nil, Duration: time.Second}
 `,
