@@ -126,7 +126,7 @@ func watchAbort(rules []abortRule, agg *report.Aggregator, col *record.Collector
 			case <-done:
 				return
 			case now := <-t.C:
-				rep := agg.Report(now.Sub(start))
+				rep := agg.Snapshot(now.Sub(start)) // rules never read the time series
 				rep.Dropped = col.Dropped()
 				r, ok := st.step(now, holdingRules(rules, rep))
 				if !ok {
