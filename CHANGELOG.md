@@ -4,6 +4,8 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-11-17
+
 ### Changed
 
 - `record.ReadRaw` now returns an error that wraps the new `record.ErrNotRaw` when its input is not raw data at all: an empty input, or a line without a `type` field such as an aggregated JSON result. Such input used to read as a run without records, so this may affect code that relied on reading an empty input; a stream that holds only the `meta` line still reads as a run without requests. As a result `jotaro export`, `-raw` of `jotaro report` / `merge` / `check` / `compare` and the MCP tools with `raw: true` fail with a message that asks for the output of `Plan.Raw`, instead of printing an empty result or `no data`.
