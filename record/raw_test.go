@@ -85,7 +85,8 @@ func TestReadRawLenient(t *testing.T) {
 
 func TestReadRawErrors(t *testing.T) {
 	cases := map[string]string{
-		"broken JSON":          `{"type":"meta","version":1}` + "\n" + `{"type":"request",`,
+		"broken JSON":          `{"type":"meta","version":1}` + "\n" + `{"type":"request",` + "\n" + `{"type":"step"}` + "\n",
+		"cut first line":       `{"type":"meta","ver`,
 		"version too new":      `{"type":"meta","version":99}`,
 		"meta without version": `{"type":"meta"}`,
 		"wrong type":           `{"type":"request","latency_ns":"x"}`,
@@ -126,5 +127,61 @@ func (failWriter) Write([]byte) (int, error) { return 0, errors.New("disk full")
 func TestWriteRawError(t *testing.T) {
 	if err := WriteRaw(failWriter{}, sampleRaw()); err == nil {
 		t.Error("a write failure did not become an error")
+	}
+}
+
+// A stream cut at any byte inside its last line reads back with everything before it and Truncated set.
+func TestReadRawTruncatedLastLine(t *testing.T) {
+	var full bytes.Buffer
+	if err := WriteRaw(&full, sampleRaw()); err != nil {
+		t.Fatal(err)
+	}
+	want, err := ReadRaw(bytes.NewReader(full.Bytes()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want.Truncated {
+		t.Fatal("a complete stream must not be Truncated")
+	}
+	data := full.Bytes()
+	lastStart := bytes.LastIndexByte(data[:len(data)-1], '\n') + 1 // start of the last line
+	if lastStart == 0 {
+		t.Fatal("sample has a single line")
+	}
+	before, err := ReadRaw(bytes.NewReader(data[:lastStart]))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for cut := lastStart + 1; cut < len(data); cut++ {
+		got, err := ReadRaw(bytes.NewReader(data[:cut]))
+		if err != nil {
+			t.Fatalf("cut at %d of %d: %v", cut, len(data), err)
+		}
+		// The cut at len-1 drops only the newline: the line is complete and not truncated.
+		if complete := cut == len(data)-1; got.Truncated == complete {
+			t.Fatalf("cut at %d of %d: Truncated = %v", cut, len(data), got.Truncated)
+		}
+		if got.Truncated {
+			got.Truncated = false
+			if !reflect.DeepEqual(got, before) {
+				t.Fatalf("cut at %d: got %+v\nwant %+v", cut, got, before)
+			}
+		} else if !reflect.DeepEqual(got, want) {
+			t.Fatalf("cut at %d: got %+v\nwant %+v", cut, got, want)
+		}
+	}
+}
+
+// A line that is broken in the middle of the stream stays an error even if the stream also ends cut.
+func TestReadRawBrokenMiddleLine(t *testing.T) {
+	in := `{"type":"meta","version":1}` + "\n" + `{"type":"request",` + "\n" + `{"type":"step","scen`
+	if _, err := ReadRaw(strings.NewReader(in)); err == nil {
+		t.Error("a broken line before the last one should be an error")
+	}
+	// A broken line that the decoder joins with the lines after it (newlines are whitespace to it)
+	// must not read as a cut last line: the complete step line after it would be lost silently.
+	in = `{"type":"meta","version":1}` + "\n" + `{"type":"request","code":` + "\n" + `{"type":"step"}` + "\n"
+	if raw, err := ReadRaw(strings.NewReader(in)); err == nil {
+		t.Errorf("a broken middle line was accepted: %+v", raw)
 	}
 }

@@ -2,6 +2,7 @@ package record
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -26,6 +27,12 @@ type Raw struct {
 	StartedAt time.Time
 	// Elapsed is the run time. If 0, it is derived from the records (same as BuildReport).
 	Elapsed time.Duration
+
+	// Truncated reports whether the stream ended in the middle of its last line (ReadRaw only; WriteRaw ignores it).
+	// A run that was killed before it could finish leaves such a file. The records before the cut line are all
+	// in Requests, Steps and Iterations, but the final meta and health lines are missing and anything that
+	// was in the cut line is lost, so the data may be slightly incomplete at the end.
+	Truncated bool
 
 	Requests   []Record
 	Steps      []StepRecord
@@ -230,6 +237,10 @@ var ErrNotRaw = errors.New("not raw data")
 // is an error that wraps ErrNotRaw instead of reading as an empty run. An empty input is an error too:
 // WriteRaw and RawWriter always write a meta line first, so a valid stream is never empty.
 // A run that made no requests is still valid, because its stream holds the meta line.
+//
+// A stream whose last line is cut off (the process that wrote it was killed, see RawWriter) is not an error:
+// ReadRaw returns the records before the cut line and sets Raw.Truncated. A broken line anywhere else is an error,
+// and so is a cut in the first line, because nothing can be read from it.
 func ReadRaw(r io.Reader) (*Raw, error) {
 	dec := json.NewDecoder(bufio.NewReader(r))
 	raw := &Raw{}
@@ -240,6 +251,13 @@ func ReadRaw(r io.Reader) (*Raw, error) {
 				return nil, fmt.Errorf("jotaro: read raw: input is empty: %w", ErrNotRaw)
 			}
 			return raw, nil
+		} else if errors.Is(err, io.ErrUnexpectedEOF) && n > 1 && !hasNewline(dec) {
+			// The input ended inside a value that has no newline: the last line was cut. Every line is one
+			// JSON object, so this cannot be a complete line that merely lacks its newline. With a newline
+			// inside, a broken line in the middle swallowed the lines after it (the decoder treats newlines
+			// as whitespace), and that stays an error.
+			raw.Truncated = true
+			return raw, nil
 		} else if err != nil {
 			return nil, fmt.Errorf("jotaro: read raw: record %d: %w", n, err)
 		}
@@ -247,6 +265,13 @@ func ReadRaw(r io.Reader) (*Raw, error) {
 			return nil, fmt.Errorf("jotaro: read raw: record %d: %w", n, err)
 		}
 	}
+}
+
+// hasNewline reports whether the value the decoder failed on contains a newline.
+// After an error, the decoder's buffer starts at that value, so what is left of the input is checked.
+func hasNewline(dec *json.Decoder) bool {
+	rest, _ := io.ReadAll(dec.Buffered())
+	return bytes.IndexByte(bytes.TrimLeft(rest, " \t\r\n"), '\n') >= 0
 }
 
 // addLine decodes one line and appends it to the matching slice of raw.

@@ -183,7 +183,7 @@ jotaro check -raw -t 'p95<200ms' raw.jsonl                    # 直接判定も�
 - `request` は `Record` と同じ内容: `scenario` / `step` / `user_id` / `iteration` / `method` / `url` / `code` / `err` / `scheduled` / `start` / `latency_ns` / `conn` / `dns_ns` / `connect_ns` / `tls_ns` / `ttfb_ns` / `bytes_out` / `bytes_in`。`step` は `StepRecord`、`iteration` は `IterationRecord`、`health` は `HealthPoint` と同じ。
 - `ReadRaw` は知らない `type` の行を読み飛ばす（新しい版が行を足しても、古い読み手が壊れない）。`meta` が無くても読める（実行時間は記録から求める）。
 - 集計済みの JSON（`ReadJSON`）に生データを渡すと、先頭の `meta` 行が `version: 1` の JSON として読めてしまう。`ReadJSON` は JSON の後ろに別のデータが続くとエラーにするので、`-raw` の付け忘れは「生データなら `-raw` を使う」というエラーになる。逆に、集計済みの結果を `-raw` や `export` に渡した場合もエラーになる。
-- `Run` は生データを実行中に少しずつ書く（`record.RawWriter`）。記録は届くたびに書くので、リクエスト数が増えてもメモリは一定。そのため行は到着順（`request` / `step` / `iteration` が混ざる）で、最後に `health` が続く。先頭に `meta` 行（`open`、`started_at`）を書き、最後に最終的な `dropped` と `elapsed_ns` を持つ 2 つ目の `meta` 行を書く。`ReadRaw` は同じ項目では最後の値を採る。途中で落ちたときも読めるファイルが残る（実行時間は記録から求める）。
+- `Run` は生データを実行中に少しずつ書く（`record.RawWriter`）。記録は届くたびに書くので、リクエスト数が増えてもメモリは一定。そのため行は到着順（`request` / `step` / `iteration` が混ざる）で、最後に `health` が続く。先頭に `meta` 行（`open`、`started_at`）を書き、最後に最終的な `dropped` と `elapsed_ns` を持つ 2 つ目の `meta` 行を書く。`ReadRaw` は同じ項目では最後の値を採る。バッファは記録を書いてから最大 1 秒以内にフラッシュするので、ファイルを `tail -f` などで追えるし、途中で落ちても失うのは最大で 1 秒分ほど。途中で落ちたときも読めるファイルが残る。最後の行が途中で切れていても `ReadRaw` はそれより前の記録を返し、`Raw.Truncated` を立てる（実行時間は記録から求める）。このとき `jotaro report` / `merge` / `check` / `compare` の `-raw` と `export` は stderr に警告を出す。末尾以外の壊れた行は従来どおりエラー。
 - 実行中に書くので、中断・キャンセルされた実行でも、そこまでに書いた分が残る。
 - 書き出しに失敗しても、`Run` は集計した `Report` を返す（`error` も同時に返す）。
 
