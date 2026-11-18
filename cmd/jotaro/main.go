@@ -136,7 +136,7 @@ func runExport(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		defer file.Close()
 		in = file
 	}
-	raw, err := readRawData(in)
+	raw, err := readRawData(in, stderr)
 	if err != nil {
 		fmt.Fprintln(stderr, "jotaro:", errMessage(err))
 		return 1
@@ -226,7 +226,7 @@ func runReport(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return 2
 	}
 
-	rep, err := readReport(fs.Arg(0), *raw, stdin)
+	rep, err := readReport(fs.Arg(0), *raw, stdin, stderr)
 	if err != nil {
 		fmt.Fprintln(stderr, "jotaro:", errMessage(err))
 		return 1
@@ -283,7 +283,7 @@ func runMerge(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 
 	reps := make([]*report.Report, 0, fs.NArg())
 	for _, path := range fs.Args() {
-		rep, err := readReport(path, *raw, stdin)
+		rep, err := readReport(path, *raw, stdin, stderr)
 		if err != nil {
 			fmt.Fprintf(stderr, "jotaro: %s: %s\n", path, errMessage(err))
 			return 1
@@ -323,7 +323,7 @@ func runCompare(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 
 	var reps [2]*report.Report
 	for i, path := range fs.Args() {
-		rep, err := readReport(path, *raw, stdin)
+		rep, err := readReport(path, *raw, stdin, stderr)
 		if err != nil {
 			fmt.Fprintf(stderr, "jotaro: %s: %s\n", path, errMessage(err))
 			return 1
@@ -386,7 +386,7 @@ func runCheck(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return 2
 	}
 
-	rep, err := readReport(fs.Arg(0), *raw, stdin)
+	rep, err := readReport(fs.Arg(0), *raw, stdin, stderr)
 	if err != nil {
 		fmt.Fprintln(stderr, "jotaro:", errMessage(err))
 		return 1
@@ -410,16 +410,20 @@ const rawUsage = "read the input as raw JSON Lines data and re-aggregate it"
 
 // readRawData reads raw JSON Lines data. When the input is not raw data at all (an aggregated JSON result,
 // or an empty file), the error says which input is wanted instead, so a mix-up is not silently accepted.
-func readRawData(in io.Reader) (*record.Raw, error) {
+// When the last line is cut off (the run that wrote it was killed), the data is used and a warning goes to stderr.
+func readRawData(in io.Reader, stderr io.Writer) (*record.Raw, error) {
 	raw, err := record.ReadRaw(in)
 	if errors.Is(err, record.ErrNotRaw) {
 		return nil, fmt.Errorf("%s\nthe input is not raw data: pass the output of Plan.Raw. An aggregated JSON result (-format json) is not raw data; report, check, merge and compare read it without -raw", errMessage(err))
+	}
+	if err == nil && raw.Truncated {
+		fmt.Fprintln(stderr, "jotaro: warning: the raw data ends in the middle of a line (the run was probably killed); the incomplete last line is ignored")
 	}
 	return raw, err
 }
 
 // readReport reads a result from path (stdin if "-"). With raw, it aggregates raw data.
-func readReport(path string, raw bool, stdin io.Reader) (*report.Report, error) {
+func readReport(path string, raw bool, stdin io.Reader, stderr io.Writer) (*report.Report, error) {
 	in := stdin
 	if path != "-" {
 		file, err := os.Open(path)
@@ -430,7 +434,7 @@ func readReport(path string, raw bool, stdin io.Reader) (*report.Report, error) 
 		in = file
 	}
 	if raw {
-		r, err := readRawData(in)
+		r, err := readRawData(in, stderr)
 		if err != nil {
 			return nil, err
 		}

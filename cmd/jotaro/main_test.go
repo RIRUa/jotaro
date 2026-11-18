@@ -433,3 +433,36 @@ func TestMergeCompareStdin(t *testing.T) {
 		}
 	}
 }
+
+// Raw data of a killed run (last line cut off) is still reported, with a warning on stderr.
+func TestReportRawTruncated(t *testing.T) {
+	dir := t.TempDir()
+	full := filepath.Join(dir, "raw.jsonl")
+	writeSampleRaw(t, full)
+	data, err := os.ReadFile(full)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cut := filepath.Join(dir, "cut.jsonl")
+	if err := os.WriteFile(cut, append(bytes.TrimRight(data, "\n"), []byte("\n{\"type\":\"request\",\"scen")...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"report", "-raw", "-format", "text", cut}, nil, &stdout, &stderr); code != 0 {
+		t.Fatalf("code = %d, stderr = %s", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "requests:   1 ") {
+		t.Errorf("the records before the cut line are missing:\n%s", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "warning") || !strings.Contains(stderr.String(), "middle of a line") {
+		t.Errorf("no truncation warning: %q", stderr.String())
+	}
+
+	// A complete file prints no warning.
+	stdout.Reset()
+	stderr.Reset()
+	if code := run([]string{"report", "-raw", "-format", "text", full}, nil, &stdout, &stderr); code != 0 || stderr.Len() != 0 {
+		t.Errorf("code = %d, stderr = %q", code, stderr.String())
+	}
+}
