@@ -55,6 +55,10 @@ func (e *executor) do(r *Request) *Response {
 		return &Response{err: r.err}
 	}
 
+	if err := checkRawQuery(r.Spec.Path); err != nil {
+		return &Response{err: err}
+	}
+
 	url := withQuery(e.resolve(r.Spec.Path), r.Spec.Query)
 	rec := e.tag
 	rec.Method = r.Spec.Method
@@ -79,6 +83,11 @@ func (e *executor) do(r *Request) *Response {
 		return &Response{err: err}
 	}
 	httpReq.Header = r.Spec.Header.Clone()
+	// net/http ignores a Host entry in Header; the value that goes out is Request.Host.
+	if host := httpReq.Header.Get("Host"); host != "" {
+		httpReq.Host = host
+	}
+	httpReq.Header.Del("Host")
 
 	resp := &Response{}
 	hr, err := e.client.Do(httpReq)

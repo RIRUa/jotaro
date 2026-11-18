@@ -62,8 +62,8 @@ var checkout = jotaro.NewScenario("checkout", func(ctx context.Context, u *jotar
 - `Step` は計測の単位。結果はステップごとに集計される
 - `Get` / `Post` / `Put` / `Patch` / `Delete` でリクエストを組み立て、`Do()` で送る
 - リクエストには次を足せる（`Do()` の前につなげる）
-  - ヘッダー: `Header(k, v)` / `Headers(map)` / `Bearer(token)` / `Basic(user, pass)`
-  - クエリ: `Query(k, v)` / `Queries(url.Values)`（値はエスケープされる）
+  - ヘッダー: `Header(k, v)` / `Headers(map)` / `Bearer(token)` / `Basic(user, pass)`。`Header("Host", v)`（または `Host(v)`）は送る Host を設定する。`BaseURL` のアドレスに接続したまま仮想ホストやテナントを選ぶために使う。TLS のサーバー名は変わらない
+  - クエリ: `Query(k, v)` / `Queries(url.Values)`（値はエスケープされる）。`Path` に直接書いたクエリはそのまま送られるので、空白や制御文字があると `Do()` はエラーを返して何も送らない（パス部分は `net/http` がエスケープする）
   - ボディ: `JSON(v)` / `Form(url.Values)` / `Body(v)`（`[]byte` / `string` / `io.Reader` はそのまま、`url.Values` はフォーム、それ以外は JSON。`Content-Type` が要るときは `Header` で付ける）
 - `Do()` のあとに `Decode(&v)`（JSON を読む）か、次の `Expect*` のどれかをつなげる
   - `ExpectStatus(code)` / `ExpectStatusIn(codes...)`: ステータスコード

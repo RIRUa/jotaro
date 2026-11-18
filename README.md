@@ -62,8 +62,8 @@ var checkout = jotaro.NewScenario("checkout", func(ctx context.Context, u *jotar
 - `Step` is the unit of measurement. Results are aggregated per step
 - Build a request with `Get` / `Post` / `Put` / `Patch` / `Delete` and send it with `Do()`
 - The following can be chained onto a request before `Do()`
-  - Headers: `Header(k, v)` / `Headers(map)` / `Bearer(token)` / `Basic(user, pass)`
-  - Query: `Query(k, v)` / `Queries(url.Values)` (values are escaped)
+  - Headers: `Header(k, v)` / `Headers(map)` / `Bearer(token)` / `Basic(user, pass)`. `Header("Host", v)` (or `Host(v)`) sets the Host that is sent, to select a virtual host or tenant while connecting to the address in `BaseURL`; it does not change the TLS server name
+  - Query: `Query(k, v)` / `Queries(url.Values)` (values are escaped). A query written into `Path` is sent as is, so a space or control character in it makes `Do()` return an error and send nothing (the path part itself is escaped by `net/http`)
   - Body: `JSON(v)` / `Form(url.Values)` / `Body(v)` (`[]byte` / `string` / `io.Reader` are sent as is, `url.Values` as a form, anything else as JSON. Set `Content-Type` with `Header` when you need it)
 - After `Do()`, chain `Decode(&v)` (read JSON) or one of the `Expect*` checks
   - `ExpectStatus(code)` / `ExpectStatusIn(codes...)`: the status code
