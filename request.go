@@ -94,7 +94,9 @@ func (r *Request) Form(v url.Values) *Request {
 }
 
 // Query adds a query parameter. Repeating a key gives multiple values.
-// Unlike writing it directly into Path, the value is escaped.
+// Unlike writing it directly into Path, the value is escaped. A query written into Path
+// is sent as is: if it contains a space or a control character, Do returns an error and
+// sends nothing. (The path part of Path is escaped by net/http.)
 func (r *Request) Query(key, value string) *Request {
 	if r.Spec.Query == nil {
 		r.Spec.Query = url.Values{}
@@ -122,9 +124,20 @@ func (r *Request) Headers(h map[string]string) *Request {
 }
 
 // Header sets a header.
+//
+// Header("Host", v) sets the Host header that is sent (net/http would otherwise ignore it),
+// so a request can go to an IP address or a load balancer while selecting a virtual host.
+// It does not change the address that is connected to, nor the TLS server name
+// (SNI and certificate verification); that is a separate setting of the TLS configuration.
 func (r *Request) Header(key, value string) *Request {
 	r.Spec.Header.Set(key, value)
 	return r
+}
+
+// Host sets the Host header that is sent. It is the same as Header("Host", host).
+// See Header for what it does not change.
+func (r *Request) Host(host string) *Request {
+	return r.Header("Host", host)
 }
 
 // Bearer sets a Bearer token in the Authorization header.
@@ -135,6 +148,25 @@ func (r *Request) Bearer(token string) *Request {
 // Basic sets Basic authentication in the Authorization header.
 func (r *Request) Basic(user, pass string) *Request {
 	return r.Header("Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte(user+":"+pass)))
+}
+
+// checkRawQuery returns an error when the query written into path (the part after "?", up to
+// a "#") holds a space, a control character or a DEL. net/http escapes the path component itself,
+// but it sends the query as written, so such a byte would go out raw and be rejected by most
+// servers with 400, which looks like a server problem. Nothing is sent instead.
+func checkRawQuery(path string) error {
+	_, q, ok := strings.Cut(path, "?")
+	if !ok {
+		return nil
+	}
+	q, _, _ = strings.Cut(q, "#")
+	for i := 0; i < len(q); i++ {
+		if c := q[i]; c <= ' ' || c == 0x7f {
+			return fmt.Errorf("jotaro: the query in path %q has a byte that is not valid in a request target (%#02x at index %d of the query); "+
+				"add query values with Query, or escape them with url.QueryEscape", path, c, i)
+		}
+	}
+	return nil
 }
 
 // Do sends the request.
