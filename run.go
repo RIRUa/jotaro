@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"math/rand/v2"
+	"net"
 	"net/http"
 	"net/http/cookiejar"
 	"sync"
@@ -225,6 +226,29 @@ func (p Plan) maxConcurrency() int {
 	return defaultMaxUsers
 }
 
+// newTransport returns a private transport for a run. It clones http.DefaultTransport so the run keeps
+// its settings (proxy, dialer and so on) but shares no connections with other code. When
+// http.DefaultTransport has been replaced by something that is not an *http.Transport (a tracing or
+// recording wrapper, for example), it falls back to a fresh transport with the standard library's defaults
+// instead of panicking.
+func newTransport() *http.Transport {
+	if t, ok := http.DefaultTransport.(*http.Transport); ok && t != nil {
+		return t.Clone()
+	}
+	return &http.Transport{
+		Proxy: http.ProxyFromEnvironment,
+		DialContext: (&net.Dialer{
+			Timeout:   30 * time.Second,
+			KeepAlive: 30 * time.Second,
+		}).DialContext,
+		ForceAttemptHTTP2:     true,
+		MaxIdleConns:          100,
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+	}
+}
+
 // Run applies load according to the Plan, then aggregates and returns the result.
 //
 // Flow of a run:
@@ -245,7 +269,7 @@ func Run(ctx context.Context, p Plan) (*report.Report, error) {
 	timeout := cmpOr(p.Timeout, defaultTimeout)
 	grace := cmpOr(p.Grace, defaultGrace)
 
-	tr := http.DefaultTransport.(*http.Transport).Clone()
+	tr := newTransport()
 	tr.MaxIdleConns = p.maxConcurrency() * 2
 	tr.MaxIdleConnsPerHost = p.maxConcurrency()
 	defer tr.CloseIdleConnections()

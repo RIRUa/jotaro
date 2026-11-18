@@ -323,3 +323,42 @@ func TestPlanScenariosMix(t *testing.T) {
 		}
 	}
 }
+
+type wrapTransport struct{}
+
+func (wrapTransport) RoundTrip(*http.Request) (*http.Response, error) {
+	return nil, errors.New("wrapper must not be used by Run")
+}
+
+// A replaced http.DefaultTransport that is not an *http.Transport must not make Run panic,
+// and Run must not use it either: it builds its own transport.
+// It replaces the global http.DefaultTransport, so it must not become t.Parallel.
+func TestRunDefaultTransportNotHTTPTransport(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	// Cleanups run last-in first-out: DefaultTransport is restored before the server closes.
+	t.Cleanup(srv.Close)
+	orig := http.DefaultTransport
+	t.Cleanup(func() { http.DefaultTransport = orig })
+
+	for name, rt := range map[string]http.RoundTripper{
+		"wrapper":   wrapTransport{},
+		"nil":       nil,
+		"typed nil": (*http.Transport)(nil),
+	} {
+		t.Run(name, func(t *testing.T) {
+			http.DefaultTransport = rt
+			sc := NewScenario("s", func(ctx context.Context, u *User) error {
+				return u.Step("get", func(s *Step) error {
+					return s.Get("/").Do().ExpectStatus(200)
+				})
+			})
+			rep, err := Run(context.Background(), Plan{Scenario: sc, BaseURL: srv.URL, Users: 1, Duration: 100 * time.Millisecond})
+			if err != nil {
+				t.Fatalf("Run: %v", err)
+			}
+			if rep.Requests.Count == 0 || len(rep.Requests.Errors) != 0 {
+				t.Errorf("requests=%d errors=%v, want requests>0 and no errors", rep.Requests.Count, rep.Requests.Errors)
+			}
+		})
+	}
+}

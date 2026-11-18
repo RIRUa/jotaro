@@ -12,6 +12,7 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 - `Header("Host", v)` and `Headers` with a `Host` key were silently ignored: the request went out with the host of `BaseURL`, so a test aimed at a virtual host or tenant (a load balancer or a single backend by IP address) measured the default site. The value is now sent as the Host header. It does not change the address that is connected to or the TLS server name. This may affect existing code that set a `Host` header and relied on it being ignored.
 - A query written into `Path` with a space or a control character (for example `s.Get("/search?q=a b")`) was sent as is and rejected by the server with `400`, counted under `4xx`. `Do()` now returns an error that points to `Query` and `url.QueryEscape` and sends nothing (nothing is recorded). The path part of `Path` is not affected: `net/http` already escapes a space or non-ASCII text there. This may affect existing code that sent such a query to a server that accepts it; use `Query` or escape the value.
+- `Run` no longer panics when `http.DefaultTransport` has been replaced by something that is not an `*http.Transport` (a tracing or recording wrapper, for example). It falls back to a fresh transport with the standard library's defaults, so such a wrapper (for example `otelhttp`) does not see jotaro's requests; `Run` has never sent them through `http.DefaultTransport` itself, only through a clone of it. When `http.DefaultTransport` is an `*http.Transport`, it is still cloned as before.
 
 ## [0.1.3] - 2026-11-17
 
