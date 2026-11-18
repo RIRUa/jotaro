@@ -22,13 +22,15 @@ golangci-lint run   # optional locally; CI runs it with the version pinned in .g
 - Add or update tests together with the change. Behaviour of the result format and the threshold syntax is documented in [`docs/result.md`](docs/result.md); update it when you change either.
 - Exported identifiers need a doc comment in English.
 - When you add, remove or update a dependency, run `scripts/gen-third-party-notices.sh` and commit the updated `THIRD_PARTY_NOTICES.md`. Binaries that include a dependency must ship its license text, and the release archives include this file.
+  CI checks that `go mod tidy` and the script leave the tree unchanged (the `generated` job), so a stale `go.mod`, `go.sum` or `THIRD_PARTY_NOTICES.md` fails the pull request.
+- Dependabot does not regenerate `THIRD_PARTY_NOTICES.md`, so the `generated` job usually fails on its pull requests (whenever a module linked into the `jotaro` binary changes version). Check out the branch, run `go mod tidy` and `scripts/gen-third-party-notices.sh`, and push the result before merging.
 - The README, `DESIGN.md` and `docs/result.md` have Japanese counterparts (`*_jp.md`). If you can only update the English version, say so in the pull request and the Japanese one will be brought in line.
 
 ## Pull requests
 
 - Keep one purpose per pull request.
 - Use a short prefix in the title: `feat:` / `fix:` / `docs:` / `chore:` / `ci:`.
-- CI (vet, test with `-race` on Go 1.25 and stable, golangci-lint) must pass.
+- CI (vet, test with `-race` on Go 1.25 and stable, golangci-lint, and the generated-files check) must pass.
 
 ## Releasing (maintainers)
 

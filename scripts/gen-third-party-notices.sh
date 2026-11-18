@@ -5,6 +5,8 @@
 # binaries, so the release archives include this file (see .goreleaser.yaml).
 # Run it again whenever go.mod changes: scripts/gen-third-party-notices.sh
 set -eu
+# Sort and pick license files the same way on every machine, so CI can compare the result.
+export LC_ALL=C
 
 cd "$(dirname "$0")/.."
 out=THIRD_PARTY_NOTICES.md

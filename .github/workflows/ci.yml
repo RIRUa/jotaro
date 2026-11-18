@@ -44,3 +44,19 @@ jobs:
       - uses: golangci/golangci-lint-action@v9
         with:
           version: v2.15.0
+
+  # go.mod / go.sum and THIRD_PARTY_NOTICES.md are maintained by hand (or by Dependabot, which
+  # does not regenerate the notices), so check that they match what the tools produce.
+  generated:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: stable
+      - name: go.mod and go.sum are tidy
+        run: go mod tidy -diff
+      - name: THIRD_PARTY_NOTICES.md is up to date
+        run: |
+          scripts/gen-third-party-notices.sh
+          git diff --exit-code -- THIRD_PARTY_NOTICES.md
