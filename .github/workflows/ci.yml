@@ -8,6 +8,11 @@ on:
 permissions:
   contents: read
 
+# Cancel the outdated run when a pull request is updated. Pushes to main are never cancelled.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   test:
     runs-on: ${{ matrix.os }}
@@ -17,6 +22,10 @@ jobs:
         # The lower bound in go.mod and the latest stable release. CPU time collection differs per OS, so run on all 3 OSes.
         os: [ubuntu-latest, macos-latest, windows-latest]
         go: ['1.25', 'stable']
+        exclude:
+          # macos-latest jobs often stay queued, so run only one macOS job. The lower bound is covered by the other OSes.
+          - os: macos-latest
+            go: '1.25'
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
