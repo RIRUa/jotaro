@@ -1,0 +1,45 @@
+name: close-issues
+
+# GitHub closes the issues named by "Closes #N" only when the pull request is merged into the
+# default branch. Feature pull requests here are merged into a release/vX.Y.Z branch first, so the
+# keyword does nothing at that point. This workflow closes those issues when such a pull request
+# is merged into a release branch.
+#
+# It uses pull_request_target so the token can write to issues for pull requests from forks. That
+# is safe here because it never checks out or runs code from the pull request: it only reads the
+# pull request number and the issues GitHub already linked to it.
+on:
+  pull_request_target:
+    types: [closed]
+    branches: ['release/**']
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: read
+
+jobs:
+  close:
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    steps:
+      - name: Close the linked issues
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+        run: |
+          # Only issues of this repository; a keyword can point at another one.
+          issues=$(gh pr view "$PR_NUMBER" --json closingIssuesReferences \
+            --jq '.closingIssuesReferences[] | select(.url | contains("/" + env.GH_REPO + "/issues/")) | .number')
+          for n in $issues; do
+            state=$(gh issue view "$n" --json state --jq .state)
+            if [ "$state" != "OPEN" ]; then
+              echo "#$n is already $state, skipping"
+              continue
+            fi
+            gh issue close "$n" --reason completed \
+              --comment "Fixed by #$PR_NUMBER, merged into \`$BASE_REF\`. It will ship with the next release."
+            echo "closed #$n"
+          done
