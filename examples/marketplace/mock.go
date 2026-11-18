@@ -549,14 +549,15 @@ func (m *market) getOrder(w http.ResponseWriter, r *http.Request, s *session) {
 
 func (m *market) listOrders(w http.ResponseWriter, r *http.Request, s *session) {
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	// The lock stays held until writeJSON returns: the orders are shared pointers that settle mutates.
 	m.mu.Lock()
+	defer m.mu.Unlock()
 	mine := []*order{}
 	for _, o := range m.orders {
 		if o.owner == s.email {
 			mine = append(mine, o)
 		}
 	}
-	m.mu.Unlock()
 	slices.SortFunc(mine, func(a, b *order) int { return strings.Compare(b.ID, a.ID) })
 	if limit > 0 && len(mine) > limit {
 		mine = mine[:limit]
