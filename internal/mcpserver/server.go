@@ -1,7 +1,7 @@
 // Package mcpserver is the MCP server behind "jotaro mcp". It helps write jotaro scenarios and read saved results.
 //
 // It serves the authoring guide, the threshold syntax and a guide to reading results as resources, and offers tools to check
-// a scenario (syntax, a few jotaro-specific lint rules, type check by compiling), to validate
+// a scenario (syntax, a few jotaro-specific lint rules that match jotaro's types, type check by compiling), to validate
 // threshold expressions, and to summarize a saved result file and judge it against thresholds.
 // It talks to the client over stdio and never runs a scenario: it only checks code and reads result files.
 package mcpserver

@@ -38,24 +38,36 @@ type CheckOutput struct {
 	Note        string `json:"note,omitempty"`
 }
 
-// checkScenario returns the handler of check_scenario. It lints the code and, when it parses, type-checks it
-// by compiling it with go build. Nothing is executed. version is the version of this binary, which picks the
-// jotaro version for the type check when there is no dir (see moduleQuery).
+// checkScenario returns the handler of check_scenario. It lints the code and type-checks it by compiling it with
+// go build. Nothing is executed. version is the version of this binary, which picks the jotaro version for the type
+// check when there is no dir (see moduleQuery).
+//
+// The lint rules match jotaro's types and methods, so they run with type information once the code compiles. Until
+// then, and when the type check cannot run, a syntactic fallback that only reports warnings is used.
 func checkScenario(version string) func(context.Context, *mcp.CallToolRequest, CheckInput) (*mcp.CallToolResult, CheckOutput, error) {
 	return func(ctx context.Context, _ *mcp.CallToolRequest, in CheckInput) (*mcp.CallToolResult, CheckOutput, error) {
-		diags := lintScenario(in.Code)
-		out := CheckOutput{Diagnostics: diags}
-		if hasSource(diags, "syntax") {
-			out.Note = "type check skipped: fix the syntax errors first"
+		fset, file, syntax := parseScenario(in.Code)
+		if file == nil {
+			out := CheckOutput{Diagnostics: syntax, Note: "type check skipped: fix the syntax errors first"}
 			return nil, finish(out), nil
 		}
-		buildDiags, err := buildScenario(ctx, in.Code, in.Dir, version)
+		out := CheckOutput{Diagnostics: lintSyntactic(fset, file)}
+		build, err := buildScenario(ctx, in.Code, in.Dir, version)
 		if err != nil {
 			out.Note = "type check skipped: " + err.Error()
 			return nil, finish(out), nil
 		}
 		out.TypeChecked = true
-		out.Diagnostics = append(out.Diagnostics, buildDiags...)
+		if len(build.diags) > 0 {
+			out.Diagnostics = append(out.Diagnostics, build.diags...)
+			return nil, finish(out), nil
+		}
+		info, err := typeInfo(fset, file, build.exports, build.exportErr)
+		if err != nil {
+			out.Note = "lint ran without type information, so it reports warnings only: " + err.Error()
+			return nil, finish(out), nil
+		}
+		out.Diagnostics = lintTyped(fset, file, info)
 		return nil, finish(out), nil
 	}
 }
@@ -96,15 +108,6 @@ func finish(out CheckOutput) CheckOutput {
 	return out
 }
 
-func hasSource(diags []Diagnostic, source string) bool {
-	for _, d := range diags {
-		if d.Source == source {
-			return true
-		}
-	}
-	return false
-}
-
 // syntaxDiagnostics converts a parser error into diagnostics.
 func syntaxDiagnostics(err error) []Diagnostic {
 	var list scanner.ErrorList
@@ -118,12 +121,23 @@ func syntaxDiagnostics(err error) []Diagnostic {
 	return diags
 }
 
-// buildScenario type-checks code with go build and returns what it reports.
+// buildResult is what buildScenario learned from the go command.
+type buildResult struct {
+	// diags are the compile errors; empty when the code compiles.
+	diags []Diagnostic
+	// exports maps the import path of every package the code depends on to its compiled export data, when the
+	// code compiles. exportErr says why it is missing otherwise.
+	exports   map[string]string
+	exportErr error
+}
+
+// buildScenario type-checks code with go build and returns what it reports. When the code compiles it also
+// lists the export data of its dependencies, which typeInfo needs.
 //
 // With dir, the file is added to that module as a throwaway package through an overlay, so nothing
 // is written into it. Without dir, a temporary module that depends on the jotaro version of this binary
 // (moduleQuery) is used.
-func buildScenario(ctx context.Context, code, dir, version string) ([]Diagnostic, error) {
+func buildScenario(ctx context.Context, code, dir, version string) (*buildResult, error) {
 	if _, err := exec.LookPath("go"); err != nil {
 		return nil, errors.New("the go command is not in PATH")
 	}
@@ -139,6 +153,7 @@ func buildScenario(ctx context.Context, code, dir, version string) ([]Diagnostic
 	}
 
 	var cmd *exec.Cmd
+	var listArgs []string // go list arguments that run in the same place as cmd
 	ctx, cancel := context.WithTimeout(ctx, goTimeout)
 	defer cancel()
 	if dir != "" {
@@ -161,6 +176,7 @@ func buildScenario(ctx context.Context, code, dir, version string) ([]Diagnostic
 		}
 		cmd = exec.CommandContext(ctx, "go", "build", "-o", os.DevNull, "-overlay="+overlayFile, "./zz_jotaro_mcp_check")
 		cmd.Dir = abs
+		listArgs = []string{"list", "-export", "-deps", "-json=ImportPath,Export", "-overlay=" + overlayFile, "./zz_jotaro_mcp_check"}
 	} else {
 		if err := os.Remove(file); err != nil {
 			return nil, err
@@ -182,6 +198,7 @@ func buildScenario(ctx context.Context, code, dir, version string) ([]Diagnostic
 		}
 		cmd = exec.CommandContext(ctx, "go", "build", "-o", os.DevNull, ".")
 		cmd.Dir = modDir
+		listArgs = []string{"list", "-export", "-deps", "-json=ImportPath,Export", "."}
 	}
 
 	var buf bytes.Buffer
@@ -191,14 +208,16 @@ func buildScenario(ctx context.Context, code, dir, version string) ([]Diagnostic
 		return nil, fmt.Errorf("go build timed out after %s", goTimeout)
 	}
 	if err == nil {
-		return nil, nil
+		res := &buildResult{}
+		res.exports, res.exportErr = listExports(ctx, cmd.Dir, listArgs)
+		return res, nil
 	}
 	diags := parseBuildOutput(buf.String())
 	if len(diags) == 0 {
 		// Not a source-level problem (missing module, network, ...), so say so instead of blaming the code.
 		return nil, fmt.Errorf("go build failed: %s", firstLines(buf.String(), 5))
 	}
-	return diags, nil
+	return &buildResult{diags: diags}, nil
 }
 
 // runGo runs a go command in dir and returns its combined output.

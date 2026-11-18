@@ -224,7 +224,7 @@ claude mcp add jotaro -- jotaro mcp     # Claude Code の場合。他のクラ�
 | Resource | `jotaro://thresholds` | しきい値の文法と指標 |
 | Resource | `jotaro://result` | 結果の保存方法と読み方（構造、各数値とエラー種別の意味、最初に確認すること） |
 | Prompt | `write_scenario` | 指定したフローのシナリオを書き、チェックまで行う |
-| Tool | `check_scenario` | シナリオを検査する。Go の構文、jotaro 固有の lint（`Users` / `UserStages` / `Arrival` のうちちょうど 1 つ、レスポンス未検証、Step 名の重複など）、コンパイルによる型チェック。`dir`（jotaro を require している module）を渡すとその jotaro のバージョンで検査し、省略すると、実行中の `jotaro` バイナリと同じバージョンの jotaro（開発ビルドでは最新版）を使う一時 module を作る（ネットワークが必要） |
+| Tool | `check_scenario` | シナリオを検査する。Go の構文、jotaro 固有の lint（`Users` / `UserStages` / `Arrival` のうちちょうど 1 つ、レスポンス未検証、Step 名の重複・データから組み立てた Step 名など）、コンパイルによる型チェック。lint は jotaro の型とメソッドで判定するので、別名の import や変数を経由していても検出し、自前の `Plan` 型や `Do()` メソッドは無視する（コンパイルが通った場合に型情報つきで実行し、それまでは名前ベースの代替が警告だけを返す）。`dir`（jotaro を require している module）を渡すとその jotaro のバージョンで検査し、省略すると、実行中の `jotaro` バイナリと同じバージョンの jotaro（開発ビルドでは最新版）を使う一時 module を作る（ネットワークが必要） |
 | Tool | `validate_threshold` | `p99{step=login}<100ms` のようなしきい値をパースする |
 | Tool | `summarize_result` | 保存した結果ファイルを要約する。スループット、エラー率、ステップごとのレイテンシ、dropped、最も遅かった 1 秒、負荷生成側の CPU 飽和などの警告を返す。ヒストグラムと毎秒の時系列を含む結果ファイルそのものよりずっと小さい |
 | Tool | `check_result` | 保存した結果ファイルをしきい値で判定する（`jotaro check` と同じ）。しきい値ごとの合否と実測値を返す。`raw: true` で生データ（JSON Lines）を読む |

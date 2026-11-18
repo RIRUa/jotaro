@@ -13,7 +13,7 @@ func addTools(s *mcp.Server, version string) {
 	mcp.AddTool(s, &mcp.Tool{
 		Name: "check_scenario",
 		Description: "Check a jotaro scenario file without running it: Go syntax, jotaro-specific lint rules " +
-			"(Plan load model, unchecked responses, duplicate step names) and a type check with go build. " +
+			"(Plan load model, unchecked responses, duplicate or data-built step names; matched by jotaro's types once the code compiles, by name as warnings only until then) and a type check with go build. " +
 			"Pass the whole file (package main). The code is checked as a single file: it cannot refer to other files of the same package, " +
 			"so put the scenario, the Plan and main in one file to check it (split the files afterwards). " +
 			"Fix every error and call again until ok is true.",
