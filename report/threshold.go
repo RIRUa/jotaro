@@ -3,6 +3,7 @@ package report
 import (
 	"fmt"
 	"io"
+	"math"
 	"slices"
 	"strconv"
 	"strings"
@@ -309,9 +310,11 @@ func parseThresholdValue(kind metricKind, s string) (float64, error) {
 	return v, nil
 }
 
-// String returns the threshold in a form that ParseThreshold can read.
+// String returns the threshold in a form that ParseThreshold reads back as the same threshold.
+// Unlike the values shown in reports, the value is exact: it is never rounded and a zero duration
+// is written as "0s".
 func (t Threshold) String() string {
-	return t.label() + t.Op + t.formatValue(t.Value)
+	return t.label() + t.Op + t.exactValue(t.Value)
 }
 
 // label is the metric name with its selector ("p95{step=login}").
@@ -329,19 +332,67 @@ func (t Threshold) label() string {
 	return t.Metric + "{" + strings.Join(sel, ",") + "}"
 }
 
-// formatValue shows v in the unit of the threshold's metric, for example "200ms" or "1.5%".
+// exactValue writes v in the unit of the threshold's metric so that parseThresholdValue reads it back
+// as the same value, for example "200ms", "1.5%" or "1234567". It is used by String; values for
+// people to read go through formatValue.
+func (t Threshold) exactValue(v float64) string {
+	m, ok := lookupMetric(t.Metric)
+	if !ok {
+		return strconv.FormatFloat(v, 'f', -1, 64)
+	}
+	switch m.kind {
+	case kindDuration:
+		// float64(MaxInt64) is 2^63, which is out of range for int64, and converting it is
+		// implementation-defined (it wraps to MinInt64 on amd64). Clamp so it stays a valid Duration.
+		switch {
+		case v >= math.MaxInt64:
+			return time.Duration(math.MaxInt64).String()
+		case v <= math.MinInt64:
+			return time.Duration(math.MinInt64).String()
+		}
+		return time.Duration(v).String()
+	case kindRatio:
+		// A percentage is easier to read ("1%"), but v*100 can pick up a rounding error (0.07*100 is
+		// 7.000000000000001). Try the percentage cleaned to 12 significant digits first, then the exact
+		// one, and keep the first that reads back as exactly v. Otherwise write a plain ratio.
+		for _, digits := range []int{12, 17} {
+			clean, _ := strconv.ParseFloat(strconv.FormatFloat(v*100, 'g', digits, 64), 64)
+			if clean/100 == v {
+				return strconv.FormatFloat(clean, 'f', -1, 64) + "%"
+			}
+		}
+	}
+	return strconv.FormatFloat(v, 'f', -1, 64)
+}
+
+// formatValue shows v in the unit of the threshold's metric for people to read, for example "200ms" or "1.5%".
+// It rounds, and it is not meant to be parsed again (see exactValue).
 func (t Threshold) formatValue(v float64) string {
 	m, ok := lookupMetric(t.Metric)
 	if !ok {
-		return strconv.FormatFloat(v, 'g', -1, 64)
+		return fmtNumber(v)
 	}
 	switch m.kind {
 	case kindDuration:
 		return fmtDur(time.Duration(v))
 	case kindRatio:
-		return strconv.FormatFloat(v*100, 'g', 4, 64) + "%"
+		return fmtNumber(v*100) + "%"
 	}
-	return strconv.FormatFloat(v, 'g', 4, 64)
+	return fmtNumber(v)
+}
+
+// fmtNumber shows a count or a rate with at most two decimals and never in exponent notation
+// ("1234567", "12345.6", "0.5"). A value too small for two decimals keeps three significant digits instead of becoming "0".
+func fmtNumber(v float64) string {
+	s := strconv.FormatFloat(v, 'f', 2, 64)
+	if strings.Contains(s, ".") {
+		s = strings.TrimRight(strings.TrimRight(s, "0"), ".")
+	}
+	if v != 0 && (s == "0" || s == "-0") {
+		small, _ := strconv.ParseFloat(strconv.FormatFloat(v, 'g', 3, 64), 64)
+		return strconv.FormatFloat(small, 'f', -1, 64)
+	}
+	return s
 }
 
 // holds reports whether actual satisfies the threshold (actual Op Value).

@@ -2,6 +2,7 @@ package report
 
 import (
 	"bytes"
+	"math"
 	"strings"
 	"testing"
 	"time"
@@ -75,6 +76,97 @@ func TestThresholdString(t *testing.T) {
 		}
 		if again != th {
 			t.Errorf("%q: changed in round trip: %+v → %+v", in, th, again)
+		}
+	}
+}
+
+// TestThresholdStringRoundTrip checks that String is exact: the values that the display helpers used to round,
+// turn into "-" or write in exponent notation come back as the same threshold.
+func TestThresholdStringRoundTrip(t *testing.T) {
+	for _, tc := range []struct{ in, want string }{
+		{"p95>0s", "p95>0s"},
+		{"p95<1500500us", "p95<1.5005s"},
+		{"p50<1ns", "p50<1ns"},
+		{"max<90m", "max<1h30m0s"},
+		{"max<2562047h47m16.854775807s", "max<2562047h47m16.854775807s"}, // MaxInt64 ns; its float64 is 2^63, out of int64 range
+		{"max>-2562047h47m16.854775808s", "max>-2562047h47m16.854775808s"},
+		{"requests>=1234567", "requests>=1234567"},
+		{"rps>12345.6", "rps>12345.6"},
+		{"dropped<1", "dropped<1"},
+		{"rps>0", "rps>0"},
+		{"error_rate<1%", "error_rate<1%"},
+		{"error_rate<0.07", "error_rate<7%"},
+		{"error_rate<0.0001234%", "error_rate<0.0001234%"},
+		{"http_5xx_rate<0.123456789", "http_5xx_rate<12.3456789%"},
+		{"iteration_fail_rate{scenario=checkout}<=0", "iteration_fail_rate{scenario=checkout}<=0%"},
+	} {
+		th, err := ParseThreshold(tc.in)
+		if err != nil {
+			t.Fatalf("ParseThreshold(%q): %v", tc.in, err)
+		}
+		got := th.String()
+		if got != tc.want {
+			t.Errorf("ParseThreshold(%q).String() = %q, want %q", tc.in, got, tc.want)
+		}
+		again, err := ParseThreshold(got)
+		if err != nil {
+			t.Errorf("%q: String() = %q cannot be parsed: %v", tc.in, got, err)
+			continue
+		}
+		if again != th {
+			t.Errorf("%q: changed in round trip: %+v → %+v", tc.in, th, again)
+		}
+	}
+}
+
+// FuzzThresholdString checks that every threshold that parses is read back as the same one from its String.
+func FuzzThresholdString(f *testing.F) {
+	for _, s := range []string{
+		"p95<200ms", "p95>0s", "p95<1500500us", "error_rate<1%", "error_rate<0.07", "rps>12345.6",
+		"requests>=1234567", "p99{scenario=checkout,step=login}<=1.5s", "iteration_p95{scenario=a}<1h",
+		"http_4xx_rate>=1e-9", "rps>1e300", "dropped<0x10", "error_rate<33.333333333333336%",
+	} {
+		f.Add(s)
+	}
+	f.Fuzz(func(t *testing.T, in string) {
+		th, err := ParseThreshold(in)
+		if err != nil || math.IsNaN(th.Value) {
+			t.Skip() // NaN is never equal to itself
+		}
+		again, err := ParseThreshold(th.String())
+		if err != nil {
+			t.Fatalf("%q: String() = %q cannot be parsed: %v", in, th.String(), err)
+		}
+		if again != th {
+			t.Fatalf("%q: String() = %q changed in round trip: %+v → %+v", in, th.String(), th, again)
+		}
+	})
+}
+
+// TestThresholdFormatValue checks the rounded display used for actual= and the compare table:
+// no exponent notation for counts, and "-" for a zero duration.
+func TestThresholdFormatValue(t *testing.T) {
+	for _, tc := range []struct {
+		metric string
+		v      float64
+		want   string
+	}{
+		{"requests", 1234567, "1234567"},
+		{"rps", 12345.6, "12345.6"},
+		{"rps", 1234.5678, "1234.57"},
+		{"rps", 0.5, "0.5"},
+		{"rps", 0, "0"},
+		{"rps", 0.0004, "0.0004"},
+		{"error_rate", 1.0 / 300000, "0.000333%"},
+		{"error_rate", 0.015, "1.5%"},
+		{"error_rate", 0, "0%"},
+		{"p95", 0, "-"},
+		{"p95", float64(1500500 * time.Microsecond), "1.501s"},
+		{"unknown_metric", 1234567, "1234567"},
+	} {
+		got := Threshold{Metric: tc.metric}.formatValue(tc.v)
+		if got != tc.want {
+			t.Errorf("formatValue(%s, %v) = %q, want %q", tc.metric, tc.v, got, tc.want)
 		}
 	}
 }
