@@ -1,6 +1,7 @@
 package report
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
@@ -48,5 +49,41 @@ func BenchmarkMergeReports(b *testing.B) {
 		if _, err := MergeReports(r1, r2); err != nil {
 			b.Fatal(err)
 		}
+	}
+}
+
+// benchLongReport returns a report of the given number of seconds, with a series point and a health point for every second.
+func benchLongReport(seconds int) *Report {
+	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	reqs := make([]record.Record, 0, seconds*5)
+	for s := 0; s < seconds; s++ {
+		for i := 0; i < 5; i++ {
+			reqs = append(reqs, record.Record{
+				Scenario: "s", Step: "a", Code: 200, Conn: record.ConnReused,
+				Start:   start.Add(time.Duration(s)*time.Second + time.Duration(i)*time.Millisecond),
+				Latency: time.Duration(i+1) * time.Millisecond,
+			})
+		}
+	}
+	rep := BuildReport(reqs, nil, nil, time.Duration(seconds)*time.Second)
+	rep.StartedAt = start
+	for s := 0; s < seconds; s++ {
+		rep.Health = append(rep.Health, record.HealthPoint{Second: s, Goroutines: 10 + s%7, CPU: 0.3})
+	}
+	return rep
+}
+
+// BenchmarkMergeReportsLong merges two reports of the same length. The time per merge must grow in proportion to the length of the run.
+func BenchmarkMergeReportsLong(b *testing.B) {
+	for _, seconds := range []int{600, 3600, 21600} {
+		r1, r2 := benchLongReport(seconds), benchLongReport(seconds)
+		b.Run(fmt.Sprintf("%ds", seconds), func(b *testing.B) {
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				if _, err := MergeReports(r1, r2); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
 	}
 }

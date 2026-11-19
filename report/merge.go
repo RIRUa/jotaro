@@ -83,14 +83,17 @@ func MergeReports(reps ...*Report) (*Report, error) {
 		out.Elapsed = last.Sub(first)
 	}
 	// Time series are overlaid, shifted by the difference in StartedAt. If any report lacks StartedAt, their starts are aligned.
-	for _, r := range reportSeries {
-		offset := 0
+	series := make([][]SeriesPoint, len(reportSeries))
+	health := make([][]record.HealthPoint, len(reportSeries))
+	offsets := make([]int, len(reportSeries))
+	for i, r := range reportSeries {
+		series[i], health[i] = r.Series, r.Health
 		if allStarted {
-			offset = int((r.StartedAt.Sub(first) + SeriesInterval/2) / SeriesInterval)
+			offsets[i] = int((r.StartedAt.Sub(first) + SeriesInterval/2) / SeriesInterval)
 		}
-		out.Series = mergeSeries(out.Series, r.Series, offset)
-		out.Health = mergeHealth(out.Health, r.Health, offset)
 	}
+	out.Series = mergeSeries(series, offsets)
+	out.Health = mergeHealth(health, offsets)
 	for _, sc := range scenarios {
 		out.Scenarios = append(out.Scenarios, *sc)
 	}
