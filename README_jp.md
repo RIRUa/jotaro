@@ -203,6 +203,8 @@ jotaro export -format csv -o series.csv raw.jsonl        # 毎秒の件数とパ
 | `iteration_min` 〜 `iteration_max`、`iteration_active_min` 〜 `iteration_active_max` | シナリオ 1 周ぶんのレイテンシ（Think を含む / 含まない。`{scenario=...}` で絞り込み） |
 | `requests` `rps` `dropped` | リクエスト数 / 毎秒のリクエスト数 / ドロップされた到着の数 |
 
+カンマ、釣り合わない波括弧、`<` `>`、前後の空白を含むステップ名・シナリオ名は、Go の二重引用符付き文字列で書きます: `p95{step="list, then order"}<1s`（`\"` と `\\` はエスケープ）。
+
 対象が無い、またはデータが無いときは「満たさなかった」扱いになります。ステップ名の打ち間違いで通ってしまわないようにするためです。詳しくは [`docs/result_jp.md`](docs/result_jp.md) の 5 章を見てください。
 
 しきい値を選ぶときに知っておきたいことが 2 つあります。
