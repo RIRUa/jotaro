@@ -41,7 +41,9 @@ Releases are cut by merging a `release/vX.Y.Z` branch into `main`.
 3. Open a pull request to `main` with the `ci:`/`chore:` prefix and wait for CI to pass.
 4. Merge it. [`release.yml`](.github/workflows/release.yml) then tags the merge commit `vX.Y.Z`, builds the binaries with GoReleaser and publishes a GitHub Release. The release notes are the `[X.Y.Z]` section of `CHANGELOG.md`; the workflow fails if that section is missing or empty, or if the tag already exists on another commit.
 
-If publishing fails after the tag was pushed, fix the cause and run the `release` workflow from the Actions tab (`workflow_dispatch` on `main`) with the same version. It reuses the existing tag.
+If publishing fails after the tag was pushed, fix the cause and run the `release` workflow from the Actions tab (`workflow_dispatch` on `main`) with the same version. It reuses the existing tag. The same run attaches build provenance attestations (`actions/attest-build-provenance`) to the archives and `checksums.txt`. If only that last step failed, the assets are already uploaded and a plain re-run fails earlier, because GoReleaser does not replace assets that exist (`release.replace_existing_artifacts` is not set). Delete the assets of that GitHub Release (or the release itself, keeping the tag) first, then run the workflow again with the same version.
+
+The GoReleaser version and the `govulncheck` version are pinned in the workflows, and every action is pinned to a commit SHA with its version in a trailing comment (Dependabot keeps those up to date). When you bump GoReleaser or govulncheck by hand, change the version in `release.yml` / `vulncheck.yml`.
 
 ## License
 
