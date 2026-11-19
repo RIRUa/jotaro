@@ -129,7 +129,7 @@ func TestMergeSeriesConns(t *testing.T) {
 	a := []SeriesPoint{{Second: 0, NewConns: 1, ReusedConns: 2}, {Second: 1, NewConns: 3}}
 	b := []SeriesPoint{{Second: 0, NewConns: 4, ReusedConns: 5}}
 
-	got := mergeSeries(a, b, 1) // shift b by 1 second → overlaps a's second 1
+	got := mergeSeries([][]SeriesPoint{a, b}, []int{0, 1}) // shift b by 1 second → overlaps a's second 1
 	if len(got) != 2 {
 		t.Fatalf("len = %d, want 2: %+v", len(got), got)
 	}
@@ -172,7 +172,7 @@ func TestMergeSeriesConnPhases(t *testing.T) {
 	pt := func(sec int, d time.Duration) SeriesPoint {
 		return SeriesPoint{Second: sec, DNS: newLatency([]time.Duration{d}), Connect: newLatency([]time.Duration{2 * d}), TLS: newLatency([]time.Duration{3 * d})}
 	}
-	got := mergeSeries([]SeriesPoint{pt(0, 10*ms)}, []SeriesPoint{pt(0, 30*ms)}, 0)
+	got := mergeSeries([][]SeriesPoint{{pt(0, 10*ms)}, {pt(0, 30*ms)}}, []int{0, 0})
 
 	if len(got) != 1 {
 		t.Fatalf("len = %d: %+v", len(got), got)

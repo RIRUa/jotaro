@@ -127,32 +127,24 @@ func buildSeries(origin time.Time, reqs []record.Record, iters []record.Iteratio
 	return pts
 }
 
-// mergeSeries adds b, shifted by offset seconds, into a.
+// mergeSeries adds the series in parts into one, each shifted by the matching offset in seconds.
 // Counts are summed, and concurrency is summed on the assumption that the runs overlapped (an upper bound).
-func mergeSeries(a, b []SeriesPoint, offset int) []SeriesPoint {
-	out := slices.Clone(a)
-	for _, p := range b {
-		sec := p.Second + offset
-		i := slices.IndexFunc(out, func(q SeriesPoint) bool { return q.Second == sec })
-		if i < 0 {
-			p.Second = sec
-			out = append(out, p)
-			continue
-		}
-		q := &out[i]
-		q.Requests += p.Requests
-		q.Errors += p.Errors
-		q.HTTP5xx += p.HTTP5xx
-		q.NewConns += p.NewConns
-		q.ReusedConns += p.ReusedConns
-		q.Latency = mergeLatency(q.Latency, p.Latency)
-		q.DNS = mergeLatency(q.DNS, p.DNS)
-		q.Connect = mergeLatency(q.Connect, p.Connect)
-		q.TLS = mergeLatency(q.TLS, p.TLS)
-		q.Concurrency += p.Concurrency
-	}
-	slices.SortFunc(out, func(x, y SeriesPoint) int { return x.Second - y.Second })
-	return out
+// Points of the same second are combined in the order of parts. The result is ordered by Second, and nil when there are no points.
+func mergeSeries(parts [][]SeriesPoint, offsets []int) []SeriesPoint {
+	return mergeBySecond(parts, offsets,
+		func(p SeriesPoint) int { return p.Second }, func(p *SeriesPoint, s int) { p.Second = s },
+		func(q *SeriesPoint, p SeriesPoint) {
+			q.Requests += p.Requests
+			q.Errors += p.Errors
+			q.HTTP5xx += p.HTTP5xx
+			q.NewConns += p.NewConns
+			q.ReusedConns += p.ReusedConns
+			q.Latency = mergeLatency(q.Latency, p.Latency)
+			q.DNS = mergeLatency(q.DNS, p.DNS)
+			q.Connect = mergeLatency(q.Connect, p.Connect)
+			q.TLS = mergeLatency(q.TLS, p.TLS)
+			q.Concurrency += p.Concurrency
+		})
 }
 
 // iterationEnds returns the end of each iteration as an offset from origin, in the order of iters.

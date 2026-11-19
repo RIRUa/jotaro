@@ -2,28 +2,19 @@ package report
 
 import (
 	"fmt"
-	"slices"
 
 	"github.com/RIRUa/jotaro/record"
 )
 
-// mergeHealth adds b, shifted by offset seconds, into a.
+// mergeHealth adds the points in parts into one, each shifted by the matching offset in seconds.
 // Goroutine counts are summed and CPU takes the maximum (with several load generators, the most saturated one matters).
-func mergeHealth(a, b []record.HealthPoint, offset int) []record.HealthPoint {
-	out := slices.Clone(a)
-	for _, p := range b {
-		sec := p.Second + offset
-		i := slices.IndexFunc(out, func(q record.HealthPoint) bool { return q.Second == sec })
-		if i < 0 {
-			p.Second = sec
-			out = append(out, p)
-			continue
-		}
-		out[i].Goroutines += p.Goroutines
-		out[i].CPU = max(out[i].CPU, p.CPU)
-	}
-	slices.SortFunc(out, func(x, y record.HealthPoint) int { return x.Second - y.Second })
-	return out
+func mergeHealth(parts [][]record.HealthPoint, offsets []int) []record.HealthPoint {
+	return mergeBySecond(parts, offsets,
+		func(p record.HealthPoint) int { return p.Second }, func(p *record.HealthPoint, s int) { p.Second = s },
+		func(q *record.HealthPoint, p record.HealthPoint) {
+			q.Goroutines += p.Goroutines
+			q.CPU = max(q.CPU, p.CPU)
+		})
 }
 
 // healthCPUWarn is the CPU usage at or above which the load generator is suspected to be saturated.
