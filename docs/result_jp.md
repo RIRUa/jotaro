@@ -76,11 +76,12 @@ Report
 | `tls` | TLS の失敗 |
 | `canceled` | `Grace` 超過などによる中断 |
 | `expect_mismatch` | `Expect*`（`ExpectStatus`、`ExpectJSON` など）の不一致。ステップとイテレーションにだけ現れる |
+| `panic` | シナリオ関数が panic した（テストコードのバグで、対象の性質ではない）。ステップとイテレーションにだけ現れる |
 | `other` | 上記以外 |
 
 HTTP 4xx/5xx は `ErrKind` ではなくステータス（`Status`）として記録される。
 
-どこに記録されるか: 通信レベルの種類（`timeout`、`connection_refused`、`dns`、`tls`、`canceled`、`other`）はリクエストに記録され、エラーがステップやイテレーションから返されたときは、それらにも記録される。`expect_mismatch` は、応答が届いたあとの `Expect*` の呼び出しで決まるので、リクエストには**記録されない**。ステップの `Errors`（シナリオがそのエラーを返したときはイテレーションの `Errors`）に現れ、ステップを失敗（`Failed`）にする。`error_rate`（5 章）に映らないのはこのため。
+どこに記録されるか: 通信レベルの種類（`timeout`、`connection_refused`、`dns`、`tls`、`canceled`、`other`）はリクエストに記録され、エラーがステップやイテレーションから返されたときは、それらにも記録される。`panic` は、実行中だったステップとイテレーションに記録される。ステップは panic までの時間つきで失敗（`Failed`）として一覧に載り、panic 前に送ったリクエストもそのステップに残り、実行は他のユーザーで続く。実行中の最初の panic は、実行が終わったあとにスタックつきで一度だけ `Plan.Progress`（`Progress` が nil のときは標準エラー）に書かれ、以降のものは数えるだけ。`expect_mismatch` は、応答が届いたあとの `Expect*` の呼び出しで決まるので、リクエストには**記録されない**。ステップの `Errors`（シナリオがそのエラーを返したときはイテレーションの `Errors`）に現れ、ステップを失敗（`Failed`）にする。`error_rate`（5 章）に映らないのはこのため。
 
 ### 補足
 

@@ -33,6 +33,7 @@ type User struct {
 
 // Step runs one section of the scenario and records its duration and outcome.
 // The error returned by fn is returned as is, so the caller decides whether to continue or stop.
+// If fn panics, the step is recorded as failed with the error kind "panic" and the panic continues.
 func (u *User) Step(name string, fn func(s *Step) error) error {
 	s := &Step{
 		name: name,
@@ -52,16 +53,27 @@ func (u *User) Step(name string, fn func(s *Step) error) error {
 	}
 
 	start := time.Now()
-	err := fn(s)
-	u.col.AddStep(record.StepRecord{
+	rec := record.StepRecord{
 		Scenario:  u.scenario,
 		Step:      name,
 		UserID:    u.ID,
 		Iteration: u.Iteration,
 		Start:     start,
-		Duration:  time.Since(start),
-		Err:       classify(err),
-	})
+	}
+	// If fn panics, the step is still recorded (failed with record.ErrPanic, with the time up to the panic)
+	// and the panic is raised again, so Scenario.run handles the iteration as before.
+	defer func() {
+		if p := recover(); p != nil {
+			rec.Duration = time.Since(start)
+			rec.Err = record.ErrPanic
+			u.col.AddStep(rec)
+			panic(p)
+		}
+	}()
+	err := fn(s)
+	rec.Duration = time.Since(start)
+	rec.Err = classify(err)
+	u.col.AddStep(rec)
 	return err
 }
 

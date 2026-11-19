@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -360,5 +361,81 @@ func TestRunDefaultTransportNotHTTPTransport(t *testing.T) {
 				t.Errorf("requests=%d errors=%v, want requests>0 and no errors", rep.Requests.Count, rep.Requests.Errors)
 			}
 		})
+	}
+}
+
+// A step that panics must stay in the report as failed, the run must go on for the other users, and the
+// first panic must be written once, with its stack, to Plan.Progress. Users with an odd ID panic after
+// sending a request in step "b"; the others finish normally.
+func TestRunPanicInStep(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{}`))
+	}))
+	defer srv.Close()
+
+	sc := NewScenario("s", func(ctx context.Context, u *User) error {
+		if err := u.Step("a", func(s *Step) error {
+			return s.Get("/a").Do().ExpectStatus(200)
+		}); err != nil {
+			return err
+		}
+		return u.Step("b", func(s *Step) error {
+			s.Get("/b").Do()
+			if u.ID%2 == 1 {
+				writeToMap(nil) // panics
+			}
+			return nil
+		})
+	})
+	var progress syncBuffer
+	rep, err := Run(context.Background(), Plan{
+		Scenario: sc, BaseURL: srv.URL, Users: 4, Duration: 300 * time.Millisecond, Progress: &progress,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	s := rep.Scenarios[0]
+	if s.Iterations.Count == 0 || s.Iterations.Failed == 0 || s.Iterations.Failed == s.Iterations.Count {
+		t.Fatalf("iterations = %+v, want some failed and some not", s.Iterations)
+	}
+	if s.Iterations.Errors[record.ErrPanic] != s.Iterations.Failed {
+		t.Errorf("iteration errors = %v, want every failure to be %q", s.Iterations.Errors, record.ErrPanic)
+	}
+	var a, b *report.StepStats
+	for i := range s.Steps {
+		switch s.Steps[i].Name {
+		case "a":
+			a = &s.Steps[i]
+		case "b":
+			b = &s.Steps[i]
+		}
+	}
+	if a == nil || b == nil {
+		t.Fatalf("steps = %+v, want a and b", s.Steps)
+	}
+	if b.Count == 0 || b.Count > a.Count { // iterations cut by the end of the run may skip b
+		t.Errorf("b.Count = %d, a.Count = %d", b.Count, a.Count)
+	}
+	if b.Failed != s.Iterations.Failed || b.Errors[record.ErrPanic] != b.Failed {
+		t.Errorf("b = %+v, want Failed == %d, all of kind panic", *b, s.Iterations.Failed)
+	}
+	if a.Failed != 0 {
+		t.Errorf("a.Failed = %d", a.Failed)
+	}
+	// Every request of b was counted before its step panicked, and the step table adds up to the run total.
+	if b.Requests.Count != b.Count {
+		t.Errorf("b requests = %d, b.Count = %d", b.Requests.Count, b.Count)
+	}
+	if a.Requests.Count+b.Requests.Count != rep.Requests.Count {
+		t.Errorf("steps requests %d + %d != total %d", a.Requests.Count, b.Requests.Count, rep.Requests.Count)
+	}
+
+	out := progress.String()
+	if n := strings.Count(out, "panic: scenario"); n != 1 {
+		t.Errorf("progress has %d panic reports, want 1:\n%s", n, out)
+	}
+	if !strings.Contains(out, "assignment to entry in nil map") || !strings.Contains(out, "TestRunPanicInStep.func") {
+		t.Errorf("progress lacks the panic value or its stack:\n%s", out)
 	}
 }

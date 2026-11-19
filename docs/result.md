@@ -76,11 +76,12 @@ Report
 | `tls` | TLS failure |
 | `canceled` | Aborted, e.g. because `Grace` was exceeded |
 | `expect_mismatch` | An `Expect*` check (`ExpectStatus`, `ExpectJSON`, ...) did not match. Only steps and iterations have it |
+| `panic` | The scenario function panicked (a bug in the test code, never a property of the target). Only steps and iterations have it |
 | `other` | Anything else |
 
 HTTP 4xx/5xx are recorded as a status (`Status`), not as an `ErrKind`.
 
-Where each kind is recorded: the transport-level kinds (`timeout`, `connection_refused`, `dns`, `tls`, `canceled`, `other`) are recorded on the request, and also on the step and the iteration when the error is returned from them. `expect_mismatch` is decided by the `Expect*` call after the response has arrived, so it is **not** recorded on the request: it appears in `Errors` of the step (and of the iteration, when the scenario returns the error), and it fails the step (`Failed`). That is why `error_rate` (chapter 5) does not see it.
+Where each kind is recorded: the transport-level kinds (`timeout`, `connection_refused`, `dns`, `tls`, `canceled`, `other`) are recorded on the request, and also on the step and the iteration when the error is returned from them. `panic` is recorded on the step that was running and on the iteration: the step is listed as failed (`Failed`) with the time up to the panic, requests sent before the panic stay under it, and the run goes on with the other users. The first panic of a run is written once, with its stack, to `Plan.Progress` (or to standard error when `Progress` is nil) after the run; later ones are only counted. `expect_mismatch` is decided by the `Expect*` call after the response has arrived, so it is **not** recorded on the request: it appears in `Errors` of the step (and of the iteration, when the scenario returns the error), and it fails the step (`Failed`). That is why `error_rate` (chapter 5) does not see it.
 
 ### Notes
 

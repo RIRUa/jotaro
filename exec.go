@@ -180,6 +180,7 @@ func span(from, to time.Time) time.Duration {
 // classify sorts a communication error into a record.ErrKind.
 func classify(err error) record.ErrKind {
 	var (
+		pan     *panicError
 		expect  *ExpectError
 		dnsErr  *net.DNSError
 		certErr *tls.CertificateVerificationError
@@ -191,6 +192,8 @@ func classify(err error) record.ErrKind {
 	switch {
 	case err == nil:
 		return record.ErrNone
+	case errors.As(err, &pan):
+		return record.ErrPanic
 	case errors.As(err, &expect):
 		return record.ErrExpect
 	case errors.Is(err, context.Canceled):
