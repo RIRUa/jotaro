@@ -57,6 +57,7 @@ In the JSON every duration is an integer in nanoseconds (the field name ends in 
 | `dns` | the host name could not be resolved |
 | `tls` | the handshake or certificate verification failed |
 | `canceled` | the run ended while the request was in flight (for example `Plan.Grace` ran out) |
+| `panic` | the scenario function panicked: a bug in the test code, not the target. Only steps and iterations have it; the first panic is printed with its stack to `Plan.Progress` or stderr |
 | `expect_mismatch` | the response arrived but an `Expect*` check did not match. It is counted in a step's (and, when the scenario returns it, an iteration's) errors and in step `failed`; it does not appear in the request `errors` |
 | `other` | anything else |
 

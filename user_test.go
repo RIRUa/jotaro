@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"net/http/cookiejar"
 	"net/http/httptest"
+	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -147,8 +149,57 @@ func TestPanicBecomesIterationFailure(t *testing.T) {
 		t.Fatal("a panic should come back as an error")
 	}
 	_, _, iters := col.Snapshot()
-	if len(iters) != 1 || iters[0].Err != record.ErrOther {
+	if len(iters) != 1 || iters[0].Err != record.ErrPanic {
 		t.Fatalf("iters = %+v", iters)
+	}
+}
+
+// A step that panics after sending a request is recorded as failed (kind panic), the panic value and
+// stack are in the iteration's error, and the request recorded before the panic is still there.
+// writeToMap panics with a runtime error. The nil map comes in as an argument so that static analysis
+// (staticcheck SA5000) does not flag the tests that rely on the panic.
+func writeToMap(m map[string]int) { m["x"] = 1 }
+
+func TestPanicInStepIsRecorded(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{}`))
+	}))
+	defer srv.Close()
+
+	col := record.NewCollector()
+	u := testUser(t, srv.URL, 4, 2, col)
+	sc := NewScenario("checkout", func(ctx context.Context, u *User) error {
+		return u.Step("a", func(s *Step) error {
+			s.Get("/").Do()
+			writeToMap(nil) // panics
+			return nil
+		})
+	})
+	err := sc.run(u)
+	var pe *panicError
+	if !errors.As(err, &pe) {
+		t.Fatalf("err = %v, want a *panicError", err)
+	}
+	if _, ok := pe.value.(runtime.Error); !ok {
+		t.Errorf("panic value = %#v, want the runtime error", pe.value)
+	}
+	if !strings.Contains(string(pe.stack), "TestPanicInStepIsRecorded.func") {
+		t.Errorf("stack does not show where the panic happened:\n%s", pe.stack)
+	}
+
+	reqs, steps, iters := col.Snapshot()
+	if len(reqs) != 1 {
+		t.Fatalf("requests = %d, want 1", len(reqs))
+	}
+	if len(steps) != 1 {
+		t.Fatalf("steps = %+v, want one record", steps)
+	}
+	st := steps[0]
+	if st.Step != "a" || st.Err != record.ErrPanic || st.UserID != 4 || st.Iteration != 2 || st.Duration <= 0 || st.Start.IsZero() {
+		t.Errorf("step = %+v", st)
+	}
+	if len(iters) != 1 || iters[0].Err != record.ErrPanic {
+		t.Errorf("iters = %+v", iters)
 	}
 }
 

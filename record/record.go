@@ -17,6 +17,7 @@ const (
 	ErrTLS         ErrKind = "tls"                // the handshake or certificate verification failed
 	ErrCanceled    ErrKind = "canceled"           // the run was stopped while the request was in flight
 	ErrExpect      ErrKind = "expect_mismatch"    // the response arrived but an Expect* check failed
+	ErrPanic       ErrKind = "panic"              // the scenario function panicked (a bug in the test code, never the target)
 	ErrOther       ErrKind = "other"              // any failure that fits none of the above
 )
 

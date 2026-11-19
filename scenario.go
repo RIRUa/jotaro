@@ -3,6 +3,7 @@ package jotaro
 import (
 	"context"
 	"fmt"
+	"runtime/debug"
 	"time"
 
 	"github.com/RIRUa/jotaro/record"
@@ -21,6 +22,14 @@ func NewScenario(name string, fn func(ctx context.Context, u *User) error) *Scen
 	return &Scenario{Name: name, Fn: fn}
 }
 
+// panicError is the error of an iteration whose scenario function panicked.
+type panicError struct {
+	value any
+	stack []byte
+}
+
+func (e *panicError) Error() string { return fmt.Sprintf("jotaro: scenario panicked: %v", e.value) }
+
 // run runs the scenario once and leaves a record.IterationRecord.
 // If Fn panics, the iteration is treated as failed and the whole run keeps going.
 func (sc *Scenario) run(u *User) (err error) {
@@ -28,7 +37,7 @@ func (sc *Scenario) run(u *User) (err error) {
 	u.col.StartIteration(start)
 	defer func() {
 		if p := recover(); p != nil {
-			err = fmt.Errorf("jotaro: scenario panicked: %v", p)
+			err = &panicError{value: p, stack: debug.Stack()}
 		}
 		u.col.AddIteration(record.IterationRecord{
 			Scenario:  sc.Name,

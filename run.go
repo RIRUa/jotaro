@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/cookiejar"
+	"os"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -356,6 +357,7 @@ func Run(ctx context.Context, p Plan) (*report.Report, error) {
 	if stopProgress != nil {
 		stopProgress()
 	}
+	r.reportPanic()
 	var abortErr error
 	if abortReason != "" {
 		abortErr = fmt.Errorf("%w: %s", ErrAborted, abortReason)
@@ -386,6 +388,37 @@ type runner struct {
 
 	stopCtx context.Context
 	runCtx  context.Context
+
+	// firstPanic is the first panic of a scenario in the run (see runScenario), set once.
+	panicOnce  sync.Once
+	firstPanic string
+}
+
+// runScenario runs the scenario once. The error is kept in the IterationRecord, so only a panic is
+// noted here: the first one of the run is kept, with its stack, and Run writes it once after the run
+// (see reportPanic). A panic is a bug in the test code, and without this a broken scenario would look
+// like a failing server.
+func (r *runner) runScenario(sc *Scenario, u *User) {
+	var pe *panicError
+	if err := sc.run(u); errors.As(err, &pe) {
+		r.panicOnce.Do(func() {
+			r.firstPanic = fmt.Sprintf("panic: scenario %q panicked (first panic of the run; the others are counted as the error kind \"panic\"): %v\n%s", sc.Name, pe.value, pe.stack)
+		})
+	}
+}
+
+// reportPanic writes the first panic of the run to Plan.Progress, or to os.Stderr when there is none.
+// It is called after the workers have finished and the progress line has stopped, so the writer is not
+// used concurrently.
+func (r *runner) reportPanic() {
+	if r.firstPanic == "" {
+		return
+	}
+	var w io.Writer = os.Stderr
+	if r.p.Progress != nil {
+		w = r.p.Progress
+	}
+	fmt.Fprint(w, r.firstPanic)
 }
 
 // runClosed has Users users repeat the scenario until Duration has passed.
@@ -401,7 +434,7 @@ func (r *runner) runClosed() {
 				if err != nil {
 					return
 				}
-				_ = sc.run(u) // the error is kept in the IterationRecord
+				r.runScenario(sc, u) // the error is kept in the IterationRecord
 			}
 		}()
 	}
@@ -441,7 +474,7 @@ func (r *runner) runStaged() {
 				if err != nil {
 					return
 				}
-				_ = sc.run(u) // the error is kept in the IterationRecord
+				r.runScenario(sc, u) // the error is kept in the IterationRecord
 				iter++
 			}
 		}()
@@ -522,7 +555,7 @@ func (r *runner) runOpen() {
 				return
 			}
 			u.scheduled = at
-			_ = sc.run(u) // the error is kept in the IterationRecord
+			r.runScenario(sc, u) // the error is kept in the IterationRecord
 		}()
 	}
 }
