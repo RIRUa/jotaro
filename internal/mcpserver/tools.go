@@ -37,7 +37,8 @@ func addTools(s *mcp.Server, version string) {
 	mcp.AddTool(s, &mcp.Tool{
 		Name: "summarize_result",
 		Description: "Summarize a saved jotaro result file: throughput, error rate, latency percentiles per step, dropped arrivals, " +
-			"and warnings such as a saturated load generator. Use this instead of reading the file, which is large " +
+			"and warnings that say why not to trust a number: a saturated load generator, dropped arrivals, too few requests for p95/p99, " +
+			"failures that error_rate does not show, many 4xx responses (rate limiting), late arrivals (corrected latency far above latency), and a run that degraded. Use this instead of reading the file, which is large " +
 			"(histograms and a per-second series). Only reads the file; no load is generated.",
 		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true},
 	}, summarizeResult)

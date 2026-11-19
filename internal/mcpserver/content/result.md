@@ -75,6 +75,23 @@ Check these in order. The first two decide whether the other numbers can be trus
 6. **Connections.** `dns` / `connect` / `tls` with many observations means connections are not being reused, and their setup time is part of `latency`.
 7. **Over time.** The worst second in `summarize_result`, or the charts of the HTML report, show whether the run degraded as it went on (growing latency) or was slow only at one point.
 
+### Warnings of `summarize_result`
+
+`summarize_result` does this arithmetic for you and returns `warnings`, reasons not to trust the numbers, each naming the figures it is based on. Say them to the user before any number. The list is empty when none applies; an empty list is not proof that the result is good. The conditions are deliberately conservative:
+
+| Warning | When it appears |
+|---|---|
+| no requests | no request was recorded |
+| dropped arrivals | `dropped > 0` |
+| load generator CPU | the CPU of the load generator reached 90% or more |
+| too few requests | the run, or a step, has fewer than 100 requests (p99 is then the slowest request) or fewer than 20 (p95 as well) |
+| failures `error_rate` does not show | a step has more failed runs than request errors (a failed `Expect*` check, or an error the scenario returned), or a scenario has failed iterations while no request failed. Judge `iteration_fail_rate` |
+| many 4xx | a step that has failed runs has 10% or more 4xx responses, and at least 10 of them. A step without failed runs is not reported, so a deliberate negative check (`ExpectStatus(404)`, a wrong password answered with `401`) stays quiet; an unchecked step (no `Expect*`) is not covered either. The status classes are all that is kept, so a rate limiter (`429`) cannot be told from a missing token (`401`) or a wrong path (`404`): look at the scenario and at the target's rate limit |
+| arrivals started late | open model: `corrected` p95 is at least twice `latency` p95 and at least 10 ms more. `corrected` counts from the scheduled start of the iteration's first request, so time the scenario spends before it (`Think`, other work) shows up as lateness too |
+| degraded during the run | the run is 30 s or longer, the load is steady (requests per second in the open model, concurrency in the closed model, within 25% between the first and the last third), and the median per-second p95 of the last third is at least twice the first third's (and 10 ms more), or the share of failed requests (errors and 5xx) rose by 5 percentage points with at least 10 failures in the last third. A deliberate ramp is not reported |
+
+The conditions that are not computed yet (a run cut short, timeouts at the limit, connection churn, a very short run) still have to be read from the numbers as in the list above.
+
 ## Limits
 
 - Only HTTP is measured. Requests sent through `u.Client` are not recorded.

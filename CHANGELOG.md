@@ -8,6 +8,7 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 - `Request.Host(host)`, the same as `Header("Host", host)`.
 - Quoted values in threshold selectors: `p95{step="list, then order"}<1s`. The value is a Go double-quoted string; inside the quotes a comma, braces, `=`, `<`, `>` and spaces at the ends are literal, and `\"` and `\\` are escapes. It works wherever a threshold is parsed (`ParseThreshold`, `AbortOn`, `jotaro check`, the MCP tools).
+- `jotaro mcp`: `summarize_result` returns more of the warnings a reviewer would raise in `warnings`: too few requests for p95/p99 (fewer than 100 or 20, for the run or a step), steps or iterations that failed while `error_rate` shows nothing, many 4xx responses (a rate limiter or a rejected scenario), late arrivals in the open model (`corrected` p95 at least twice `latency` p95), and a run whose latency or failures rose between the first and the last third under a steady load. The `jotaro://result` resource lists the conditions.
 
 ### Fixed
 

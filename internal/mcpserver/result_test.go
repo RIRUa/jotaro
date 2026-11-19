@@ -47,6 +47,25 @@ func sampleRaw() *record.Raw {
 	return raw
 }
 
+// healthyRaw is a closed-model run of 60 s with one user starting an iteration every 200 ms: two steps, 300
+// iterations, 600 requests, all 200 and 20 ms, nothing failed. Nothing about it may be reported.
+func healthyRaw() *record.Raw {
+	start := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	raw := &record.Raw{StartedAt: start, Elapsed: 60 * time.Second}
+	for i := range 300 {
+		at := start.Add(time.Duration(i) * 200 * time.Millisecond)
+		for _, step := range []string{"browse", "buy"} {
+			raw.Requests = append(raw.Requests, record.Record{
+				Scenario: "shop", Step: step, Iteration: i, Method: "GET", URL: "/" + step,
+				Code: 200, Scheduled: at, Start: at, Latency: 20 * time.Millisecond, TTFB: 10 * time.Millisecond,
+			})
+			raw.Steps = append(raw.Steps, record.StepRecord{Scenario: "shop", Step: step, Iteration: i, Start: at, Duration: 20 * time.Millisecond})
+		}
+		raw.Iterations = append(raw.Iterations, record.IterationRecord{Scenario: "shop", Iteration: i, Start: at, Duration: 40 * time.Millisecond})
+	}
+	return raw
+}
+
 // writeResult saves the sample as a JSON result and as raw data, and returns both paths.
 func writeResult(t *testing.T, raw *record.Raw) (jsonPath, rawPath string) {
 	t.Helper()
@@ -207,20 +226,38 @@ func TestSummarizeResult(t *testing.T) {
 			if lg := out.LoadGenerator; lg == nil || lg.MaxCPU == nil || *lg.MaxCPU != 0.95 || lg.MaxGoroutines != 60 {
 				t.Errorf("unexpected load generator summary %+v", lg)
 			}
-			if len(out.Warnings) != 2 || !strings.Contains(out.Warnings[0], "dropped") || !strings.Contains(out.Warnings[1], "CPU") {
-				t.Errorf("want warnings about dropped arrivals and CPU, got %q", out.Warnings)
+			// The sample is also tiny (20 requests) and its "order" step failed a check that error_rate does not show.
+			if len(out.Warnings) != 4 || !strings.Contains(out.Warnings[0], "dropped") || !strings.Contains(out.Warnings[1], "CPU") ||
+				!strings.Contains(out.Warnings[2], "only 20 requests") || !strings.Contains(out.Warnings[3], "checkout/order failed 2 of 10 runs") {
+				t.Errorf("want warnings about dropped arrivals, CPU, few samples and failed checks, got %q", out.Warnings)
 			}
 		})
 	}
 
-	t.Run("closed model without warnings", func(t *testing.T) {
+	t.Run("closed model has no warning about arrivals or the generator", func(t *testing.T) {
 		raw := sampleRaw()
 		raw.Open, raw.Dropped = false, 0
 		jsonPath, _ := writeResult(t, raw)
 		var out SummaryOutput
 		callTool(t, cs, "summarize_result", map[string]any{"path": jsonPath}, &out)
-		if out.Model != "closed" || out.Requests.Corrected != nil || out.LoadGenerator != nil || len(out.Warnings) != 0 {
+		if out.Model != "closed" || out.Requests.Corrected != nil || out.LoadGenerator != nil || len(out.Warnings) != 2 ||
+			!strings.Contains(out.Warnings[0], "only 20 requests") || !strings.Contains(out.Warnings[1], "failed 2 of 10 runs") {
 			t.Errorf("unexpected summary %+v", out)
+		}
+	})
+
+	// A healthy run read from raw data, as the tool does, must not get any warning: this is the guard against noise.
+	t.Run("healthy run without warnings", func(t *testing.T) {
+		jsonPath, rawPath := writeResult(t, healthyRaw())
+		for name, args := range map[string]map[string]any{
+			"json": {"path": jsonPath},
+			"raw":  {"path": rawPath, "raw": true},
+		} {
+			var out SummaryOutput
+			callTool(t, cs, "summarize_result", args, &out)
+			if out.Requests.Count != 600 || len(out.Warnings) != 0 {
+				t.Errorf("%s: want 600 requests and no warnings, got %d and %q", name, out.Requests.Count, out.Warnings)
+			}
 		}
 	})
 
