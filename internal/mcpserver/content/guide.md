@@ -136,7 +136,7 @@ var accounts = jotaro.NewFeeder([]map[string]string{
 creds, ok := accounts.Next() // ok is false when empty or when Once has run out
 ```
 
-`jotaro.LoadCSV(r io.Reader)` reads a CSV (first line is the header) into `[]map[string]string`.
+`jotaro.LoadCSV(r io.Reader)` reads a CSV (first line is the header) into `[]map[string]string`. A leading UTF-8 BOM is skipped. A column with an empty name (a trailing comma in the header) is ignored. A repeated column name in the header is an error (a map cannot hold both). A file with a header and no rows gives an empty `Feeder`, so `Next` returns false.
 
 ## Choosing the load: Plan
 
