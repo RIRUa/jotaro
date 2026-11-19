@@ -163,6 +163,9 @@ func summarize(rep *report.Report) SummaryOutput {
 		out.Warnings = append(out.Warnings, fmt.Sprintf(
 			"load generator CPU reached %.0f%%: measured latencies may be worse than the target's actual behavior; lower the load or use more load generators", *lg.MaxCPU*100))
 	}
+	for _, w := range reviewWarnings(rep) {
+		out.Warnings = append(out.Warnings, w.Message)
+	}
 	return out
 }
 
