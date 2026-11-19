@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 )
 
 // Threshold is a condition that the result must meet. It is used in CI to fail the build when things get slower.
@@ -34,6 +36,12 @@ import (
 // DNS failure and so on). A failed Expect* check is not counted as a request error: it fails the step with
 // expect_mismatch, which is listed in the step's errors, and it reaches iteration_fail_rate when the scenario
 // returns that error. An HTTP error status is counted by http_4xx_rate / http_5xx_rate.
+//
+// A step or scenario name that contains a comma, a quote, an unbalanced brace, < or > (or spaces at its ends) is written
+// as a Go double-quoted string: p95{step="list, then order"}<1s. Inside the quotes everything is literal, and \" and \\ are
+// escapes. An unquoted name is read as before: up to the next comma, with the spaces around it trimmed. A name written
+// as a complete quoted string is always the unquoted text, so to select a step whose own name includes quote characters,
+// quote it: p95{step="\"quoted\""}<1s. Threshold.String quotes a name whenever it needs to.
 //
 // {step=...} (optionally together with scenario=...) looks at latency, ratios and requests per step.
 // iteration_fail_rate and the scenario latencies are looked at per scenario with {scenario=...}. rps and dropped are overall only.
@@ -194,23 +202,12 @@ func ParseThreshold(s string) (Threshold, error) {
 		return Threshold{}, fmt.Errorf("jotaro: threshold %q: %s", s, fmt.Sprintf(format, a...))
 	}
 
-	// The operator is the first < or > outside {...}.
-	depth, at := 0, -1
-scan:
-	for i, c := range s {
-		switch c {
-		case '{':
-			depth++
-		case '}':
-			depth--
-		case '<', '>':
-			if depth == 0 {
-				at = i
-				break scan
-			}
-		}
-	}
+	// The operator is the first < or > outside {...} and outside quoted selector values.
+	at := findOperator(s)
 	if at < 0 {
+		if strings.ContainsAny(s, "<>") {
+			return fail("no operator (<, <=, >, >=) outside {...}; quote a step or scenario name that contains an unbalanced brace, <, > or a comma: step=\"...\"")
+		}
 		return fail("no operator (<, <=, >, >=)")
 	}
 	left := strings.TrimSpace(s[:at])
@@ -232,19 +229,18 @@ scan:
 		if !ok {
 			return fail("not closed with }")
 		}
-		for _, kv := range strings.Split(sel, ",") {
-			k, v, ok := strings.Cut(kv, "=")
-			k, v = strings.TrimSpace(k), strings.TrimSpace(v)
-			if !ok || v == "" {
-				return fail("a filter must be written as key=value: %q", kv)
-			}
-			switch k {
+		filters, err := parseSelector(sel)
+		if err != nil {
+			return fail("%v", err)
+		}
+		for _, f := range filters {
+			switch f.key {
 			case "scenario":
-				t.Scenario = v
+				t.Scenario = f.value
 			case "step":
-				t.Step = v
+				t.Step = f.value
 			default:
-				return fail("filter key %q is not allowed (scenario, step)", k)
+				return fail("filter key %q is not allowed (scenario, step)", f.key)
 			}
 		}
 	}
@@ -274,6 +270,130 @@ scan:
 	}
 	t.Value = v
 	return t, nil
+}
+
+// selectorFilter is one key=value of a {...} selector.
+type selectorFilter struct{ key, value string }
+
+// readQuoted reads a quoted selector value at the start of s, which must begin with `"`. A quoted value is a
+// Go double-quoted string literal (`"list, then order"`, `"say \"hi\""`) that ends the value: after optional spaces
+// comes `,` (another filter), the `}` that closes the selector (followed by the operator), or the end of s.
+// It returns the unquoted text and the length of the literal in s.
+// Anything else (an unterminated quote, a bad escape, text after the closing quote) is not a quoted value,
+// and the caller reads the text as an unquoted name, as before quoting existed.
+func readQuoted(s string) (val string, n int, ok bool) {
+	lit, err := strconv.QuotedPrefix(s)
+	if err != nil || lit[0] != '"' {
+		return "", 0, false
+	}
+	rest := strings.TrimLeftFunc(s[len(lit):], unicode.IsSpace)
+	if after, closed := strings.CutPrefix(rest, "}"); closed {
+		rest = strings.TrimLeftFunc(after, unicode.IsSpace)
+		if rest != "" && rest[0] != '<' && rest[0] != '>' {
+			return "", 0, false
+		}
+	} else if rest != "" && rest[0] != ',' {
+		return "", 0, false
+	}
+	val, err = strconv.Unquote(lit)
+	if err != nil {
+		return "", 0, false
+	}
+	return val, len(lit), true
+}
+
+// findOperator returns the index of the first < or > in s that is outside {...} and outside a quoted value
+// of the selector, or -1. Braces are counted by depth, so a nested {id} in a name is fine, and the text of
+// a quoted value is skipped as a whole.
+func findOperator(s string) int {
+	depth := 0
+	keySeen := false    // the = of the current filter has been seen (only filters of the first {...} are read)
+	valueStart := false // only spaces since that =, so a " here opens a quoted value
+	skipTo := 0
+	for i, c := range s {
+		if i < skipTo {
+			continue
+		}
+		if valueStart && c == '"' {
+			if _, n, ok := readQuoted(s[i:]); ok {
+				skipTo = i + n
+				valueStart = false
+				continue
+			}
+		}
+		switch {
+		case unicode.IsSpace(c):
+			// Spaces between = and the value keep valueStart.
+		case c == '{':
+			depth++
+			valueStart = false
+		case c == '}':
+			depth--
+			valueStart = false
+		case c == ',':
+			if depth >= 1 {
+				keySeen = false
+			}
+			valueStart = false
+		case c == '=':
+			valueStart = depth >= 1 && !keySeen
+			if depth >= 1 {
+				keySeen = true
+			}
+		case c == '<' || c == '>':
+			if depth == 0 {
+				return i
+			}
+			valueStart = false
+		default:
+			valueStart = false
+		}
+	}
+	return -1
+}
+
+// parseSelector splits the inside of {...} into key=value filters, separated by commas.
+// A value is either quoted (see readQuoted), in which case it is taken literally, spaces and all,
+// or the text up to the next comma with the spaces around it trimmed.
+func parseSelector(sel string) ([]selectorFilter, error) {
+	var out []selectorFilter
+	rest := sel
+	for {
+		eq := strings.IndexAny(rest, "=,")
+		if eq < 0 || rest[eq] != '=' {
+			frag, _, _ := strings.Cut(rest, ",")
+			return nil, fmt.Errorf("a filter must be written as key=value: %q", frag)
+		}
+		key := strings.TrimSpace(rest[:eq])
+		rest = strings.TrimLeftFunc(rest[eq+1:], unicode.IsSpace)
+
+		var value string
+		var more, quoted bool
+		if strings.HasPrefix(rest, `"`) {
+			if v, n, ok := readQuoted(rest); ok {
+				after := strings.TrimLeftFunc(rest[n:], unicode.IsSpace)
+				if after == "" || after[0] == ',' {
+					if v == "" {
+						return nil, fmt.Errorf("the name of %s is empty (\"\")", key)
+					}
+					value, quoted = v, true
+					rest, more = strings.CutPrefix(after, ",")
+				}
+			}
+		}
+		if !quoted {
+			var raw string
+			raw, rest, more = strings.Cut(rest, ",")
+			value = strings.TrimSpace(raw)
+			if value == "" {
+				return nil, fmt.Errorf("a filter must be written as key=value: %q", key+"="+raw)
+			}
+		}
+		out = append(out, selectorFilter{key, value})
+		if !more {
+			return out, nil
+		}
+	}
 }
 
 // parseThresholdValue parses the right-hand side of a threshold in the unit of kind
@@ -317,19 +437,57 @@ func (t Threshold) String() string {
 	return t.label() + t.Op + t.exactValue(t.Value)
 }
 
-// label is the metric name with its selector ("p95{step=login}").
+// label is the metric name with its selector ("p95{step=login}"). A name that the parser would not read
+// back as it is (a comma, a quote, an unbalanced brace, spaces at the ends, an unprintable character)
+// is written as a quoted Go string.
 func (t Threshold) label() string {
 	var sel []string
 	if t.Scenario != "" {
-		sel = append(sel, "scenario="+t.Scenario)
+		sel = append(sel, "scenario="+selectorName(t.Scenario))
 	}
 	if t.Step != "" {
-		sel = append(sel, "step="+t.Step)
+		sel = append(sel, "step="+selectorName(t.Step))
 	}
 	if len(sel) == 0 {
 		return t.Metric
 	}
 	return t.Metric + "{" + strings.Join(sel, ",") + "}"
+}
+
+// selectorName writes a scenario or step name as a selector value: as is when ParseThreshold reads it back
+// unchanged, otherwise quoted.
+func selectorName(name string) string {
+	if needsQuote(name) {
+		return strconv.Quote(name)
+	}
+	return name
+}
+
+// needsQuote reports whether name cannot be written unquoted in a selector: it has a comma or a quote,
+// leading or trailing spaces, a character that is not printable (so it would be invisible or break the line),
+// or a brace, < or > that is not inside a balanced {...} pair.
+func needsQuote(name string) bool {
+	if name != strings.TrimSpace(name) || !utf8.ValidString(name) {
+		return true
+	}
+	depth := 0
+	for _, c := range name {
+		switch {
+		case c == ',' || c == '"':
+			return true
+		case c != ' ' && !strconv.IsPrint(c):
+			return true
+		case c == '{':
+			depth++
+		case c == '}':
+			if depth--; depth < 0 {
+				return true
+			}
+		case (c == '<' || c == '>') && depth == 0:
+			return true
+		}
+	}
+	return depth != 0
 }
 
 // exactValue writes v in the unit of the threshold's metric so that parseThresholdValue reads it back

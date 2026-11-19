@@ -433,6 +433,18 @@ Exit code 1 if any threshold is not met. If a threshold is malformed or the file
 | `requests` | Number of requests | Number | `{step=...}` |
 | `rps` `dropped` | Requests per second / number of dropped arrivals | Number | Overall only |
 
+#### Names with special characters
+
+An unquoted name in `{...}` runs to the next comma, with the spaces around it trimmed, and braces must be balanced. To select a step or scenario whose name contains a comma, an unbalanced `{` or `}`, `<` or `>` outside braces, or spaces at either end, write the name as a Go double-quoted string:
+
+```
+p95{step="list, then order"}<1s
+p95{scenario="checkout, mobile",step=" padded "}<1s
+p95{step="say \"hi\""}<1s
+```
+
+Inside the quotes everything is literal, and `\"` and `\\` are escapes (the other Go escapes such as `\n` and `\u00e9` work too). Unquoted names are read as before, so existing thresholds do not change, with one exception: a value that is a complete quoted string, such as `step="login"`, now means the unquoted name (`login`) instead of a name that includes the quote characters. To select a step whose name really includes quotes, quote it: `step="\"login\""`. A quote that does not form a complete string (`step="abc`, `step="a"b`, or one with an invalid escape such as `step="C:\users"`) is an ordinary character, quotes included. Remember that `\t`, `\n` and similar are escapes, so write a backslash as `\\` inside quotes. An empty name (`step=""`) is an error. `Threshold.String()`, `jotaro check` output, the `AbortOn` messages and the MCP `canonical` text quote a name whenever it needs it, so they can be pasted back.
+
 ### Decisions
 
 - When `{step=...}` matches same-named steps in several scenarios, each is checked as a separate result (add `scenario=` to narrow it to one).

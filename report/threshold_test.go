@@ -37,6 +37,80 @@ func TestParseThreshold(t *testing.T) {
 	}
 }
 
+// TestParseThresholdQuoted checks quoted selector values: inside the quotes a comma, braces, =, < and > and
+// spaces at the ends are literal, and \" and \\ are escapes.
+func TestParseThresholdQuoted(t *testing.T) {
+	p95 := float64(time.Second)
+	tests := []struct {
+		in   string
+		want Threshold
+	}{
+		{`p95{step="list, then order"}<1s`, Threshold{Metric: "p95", Step: "list, then order", Op: "<", Value: p95}},
+		{`p95{step=" padded "}<1s`, Threshold{Metric: "p95", Step: " padded ", Op: "<", Value: p95}},
+		{`p95{step="a}b"}<1s`, Threshold{Metric: "p95", Step: "a}b", Op: "<", Value: p95}},
+		{`p95{step="a{b"}<1s`, Threshold{Metric: "p95", Step: "a{b", Op: "<", Value: p95}},
+		{`p95{step="a<b>c=d"}<1s`, Threshold{Metric: "p95", Step: "a<b>c=d", Op: "<", Value: p95}},
+		{`p95{step="say \"hi\" \\ bye"}<1s`, Threshold{Metric: "p95", Step: `say "hi" \ bye`, Op: "<", Value: p95}},
+		{`p95{step="line\nbreak"}<1s`, Threshold{Metric: "p95", Step: "line\nbreak", Op: "<", Value: p95}},
+		{`p95{ scenario = "a, b" , step = "c, d" }<1s`, Threshold{Metric: "p95", Scenario: "a, b", Step: "c, d", Op: "<", Value: p95}},
+		{`p95{scenario=a,step="c, d"}<1s`, Threshold{Metric: "p95", Scenario: "a", Step: "c, d", Op: "<", Value: p95}},
+		{`iteration_p95{scenario="checkout, mobile"}<1s`, Threshold{Metric: "iteration_p95", Scenario: "checkout, mobile", Op: "<", Value: p95}},
+		{`p95{step="a"}>=1s`, Threshold{Metric: "p95", Step: "a", Op: ">=", Value: p95}},
+		// A quote that does not make the whole value a quoted string is an ordinary character, as before.
+		{`p95{step=a"b}<1s`, Threshold{Metric: "p95", Step: `a"b`, Op: "<", Value: p95}},
+		{`p95{step="abc}<1s`, Threshold{Metric: "p95", Step: `"abc`, Op: "<", Value: p95}},
+		{`p95{step="a"b}<1s`, Threshold{Metric: "p95", Step: `"a"b`, Op: "<", Value: p95}},
+		{`p95{step="a" "b"}<1s`, Threshold{Metric: "p95", Step: `"a" "b"`, Op: "<", Value: p95}},
+		{`p95{step=GET /users/{id}}<1s`, Threshold{Metric: "p95", Step: "GET /users/{id}", Op: "<", Value: p95}},
+		// To select a name that itself starts and ends with quotes, quote it.
+		{`p95{step="\"quoted\""}<1s`, Threshold{Metric: "p95", Step: `"quoted"`, Op: "<", Value: p95}},
+		// A quoted value is the unquoted name: step="quoted" is quoted, not the name including quotes.
+		{`p95{step="quoted"}<1s`, Threshold{Metric: "p95", Step: "quoted", Op: "<", Value: p95}},
+	}
+	for _, tt := range tests {
+		got, err := ParseThreshold(tt.in)
+		if err != nil {
+			t.Errorf("ParseThreshold(%q): %v", tt.in, err)
+			continue
+		}
+		if got != tt.want {
+			t.Errorf("ParseThreshold(%q) = %+v, want %+v", tt.in, got, tt.want)
+		}
+	}
+}
+
+func TestParseThresholdQuotedErrors(t *testing.T) {
+	for _, in := range []string{
+		`p95{step=""}<1s`,                      // an empty name selects nothing
+		`p95{step="a",}<1s`,                    // trailing comma
+		`p95{step="a, b}<1s`,                   // an unterminated quote is not a quoted value: the comma splits it
+		`p95{step=list, then order}<1s`,        // an unquoted comma still separates filters
+		`p95{step="a"x,scenario}<1s`,           // second filter without a value
+		`p95{"step"="a"}<1s`,                   // keys are not quoted
+		`p95{step="a\q, b"}<1s`,                // bad escape: not a quoted value, so the comma splits it
+		`p95{scenario="a, b"}<1s`,              // scenario alone is still not enough for a request metric
+		`rps{step="a, b"}>10`,                  // global metrics cannot be filtered
+		`iteration_fail_rate{step="a"}<1`,      // step cannot be used
+		`p95{step="a<1s`,                       // never closed
+		`p95{step=a}b}<1s`, `p95{step=a{b}<1s`, // unbalanced braces in an unquoted name
+	} {
+		if _, err := ParseThreshold(in); err == nil {
+			t.Errorf("ParseThreshold(%q) should fail", in)
+		}
+	}
+}
+
+// TestParseThresholdNoOperatorHint checks that an operator hidden in an unquoted name is not reported as
+// "no operator" without a hint.
+func TestParseThresholdNoOperatorHint(t *testing.T) {
+	for _, in := range []string{`p95{step=a}b}<1s`, `p95{step=a{b}<1s`} {
+		_, err := ParseThreshold(in)
+		if err == nil || !strings.Contains(err.Error(), "quote") {
+			t.Errorf("ParseThreshold(%q) error = %v, want a hint to quote the name", in, err)
+		}
+	}
+}
+
 func TestParseThresholdErrors(t *testing.T) {
 	for _, in := range []string{
 		"",
@@ -119,12 +193,110 @@ func TestThresholdStringRoundTrip(t *testing.T) {
 	}
 }
 
+// quotedNames are step and scenario names that are awkward in a selector.
+var quotedNames = []string{
+	"list, then order", "add to cart, 2 items", " padded ", "a}b", "a{b", "{", "}", "}{", "a}{b", "a<b", "a>b", "a<b>c",
+	`"quoted"`, `say "hi"`, `\`, `a\"b`, "a=b", "=", "a,b=c", "x\ny", "tab\there", "\x00", "bad\xffutf8", "日本語, 名前",
+	"GET /users/{id}", "GET /users/{id}, then {x}", "{a=\"}\"}", `a"`, `"a`, "  ", "\u00a0nbsp",
+}
+
+// TestThresholdStringQuotesNames checks that String quotes a step or scenario name when the parser would
+// not read it back as it is, leaves ordinary names alone, and that ParseThreshold reads every name back.
+func TestThresholdStringQuotesNames(t *testing.T) {
+	for _, tc := range []struct {
+		th   Threshold
+		want string
+	}{
+		{Threshold{Metric: "p95", Step: "login", Op: "<", Value: 1e9}, "p95{step=login}<1s"},
+		{Threshold{Metric: "p95", Step: "GET /users/{id}", Op: "<", Value: 1e9}, "p95{step=GET /users/{id}}<1s"},
+		{Threshold{Metric: "p95", Step: "a b", Op: "<", Value: 1e9}, "p95{step=a b}<1s"},
+		{Threshold{Metric: "p95", Step: "list, then order", Op: "<", Value: 1e9}, `p95{step="list, then order"}<1s`},
+		{Threshold{Metric: "p95", Step: " padded ", Op: "<", Value: 1e9}, `p95{step=" padded "}<1s`},
+		{Threshold{Metric: "p95", Step: "a}b", Op: "<", Value: 1e9}, `p95{step="a}b"}<1s`},
+		{Threshold{Metric: "p95", Step: `"quoted"`, Op: "<", Value: 1e9}, `p95{step="\"quoted\""}<1s`},
+		{Threshold{Metric: "p95", Scenario: "a, b", Step: "c", Op: "<", Value: 1e9}, `p95{scenario="a, b",step=c}<1s`},
+		{Threshold{Metric: "iteration_p95", Scenario: "x,y", Op: ">", Value: 1e9}, `iteration_p95{scenario="x,y"}>1s`},
+	} {
+		got := tc.th.String()
+		if got != tc.want {
+			t.Errorf("%+v.String() = %q, want %q", tc.th, got, tc.want)
+		}
+		if back, err := ParseThreshold(got); err != nil || back != tc.th {
+			t.Errorf("ParseThreshold(%q) = %+v, %v, want %+v", got, back, err, tc.th)
+		}
+	}
+
+	for _, name := range quotedNames {
+		for _, th := range []Threshold{
+			{Metric: "p95", Step: name, Op: "<", Value: 1e9},
+			{Metric: "p95", Scenario: name, Step: name, Op: ">=", Value: 1e9},
+			{Metric: "p95", Scenario: "s", Step: name, Op: "<", Value: 1e9},
+			{Metric: "p95", Scenario: name, Step: "s", Op: "<", Value: 1e9},
+			{Metric: "iteration_fail_rate", Scenario: name, Op: "<=", Value: 0.05},
+		} {
+			got, err := ParseThreshold(th.String())
+			if err != nil {
+				t.Errorf("%+v: String() = %q cannot be parsed: %v", th, th.String(), err)
+				continue
+			}
+			if got != th {
+				t.Errorf("%+v: String() = %q changed in round trip: %+v", th, th.String(), got)
+			}
+		}
+	}
+}
+
+// TestThresholdQuotedSelectsStep checks that a quoted name selects the step end to end.
+func TestThresholdQuotedSelectsStep(t *testing.T) {
+	name := "list, then order"
+	rep := &Report{Scenarios: []ScenarioReport{{Name: "main", Steps: []StepStats{{Name: name, Requests: RequestStats{
+		Count: 1, Latency: Latency{Count: 1, P95: 50 * time.Millisecond},
+	}}}}}}
+	th, err := ParseThreshold(`p95{step="list, then order"}<100ms`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	checks := rep.Check(th)
+	if len(checks) != 1 || !checks[0].Pass || checks[0].Target != "main/"+name {
+		t.Fatalf("Check = %+v, want one passing result for main/%s", checks, name)
+	}
+	var buf bytes.Buffer
+	checks.Print(&buf)
+	if !strings.Contains(buf.String(), `p95{step="list, then order"}<100ms`) {
+		t.Errorf("Print should show a threshold that can be pasted back:\n%s", buf.String())
+	}
+}
+
+// FuzzThresholdName checks that String writes any scenario and step name in a form ParseThreshold reads back.
+func FuzzThresholdName(f *testing.F) {
+	for _, n := range quotedNames {
+		f.Add(n, n)
+	}
+	f.Add("login", "checkout")
+	f.Fuzz(func(t *testing.T, scenario, step string) {
+		th := Threshold{Metric: "p95", Scenario: scenario, Step: step, Op: "<", Value: 1e9}
+		if step == "" {
+			th = Threshold{Metric: "iteration_p95", Scenario: scenario, Op: "<", Value: 1e9}
+		}
+		got, err := ParseThreshold(th.String())
+		if err != nil {
+			t.Fatalf("%+v: String() = %q cannot be parsed: %v", th, th.String(), err)
+		}
+		if got != th {
+			t.Fatalf("%+v: String() = %q changed in round trip: %+v", th, th.String(), got)
+		}
+	})
+}
+
 // FuzzThresholdString checks that every threshold that parses is read back as the same one from its String.
 func FuzzThresholdString(f *testing.F) {
 	for _, s := range []string{
 		"p95<200ms", "p95>0s", "p95<1500500us", "error_rate<1%", "error_rate<0.07", "rps>12345.6",
 		"requests>=1234567", "p99{scenario=checkout,step=login}<=1.5s", "iteration_p95{scenario=a}<1h",
 		"http_4xx_rate>=1e-9", "rps>1e300", "dropped<0x10", "error_rate<33.333333333333336%",
+		`p95{step="list, then order"}<1s`, `p95{step=" padded "}<1s`, `p95{step="a}b"}<1s`, `p95{step="a<b>c"}<1s`,
+		`p95{scenario="a, b",step="say \"hi\""}<1s`, `p95{step="quoted"}<1s`, `p95{step="a"b}<1s`, `p95{step="abc}<1s`,
+		`iteration_p95{scenario="x\ny"}<1s`, `p95{step=GET /users/{id}}<1s`,
 	} {
 		f.Add(s)
 	}

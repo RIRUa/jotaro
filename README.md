@@ -203,6 +203,8 @@ jotaro export -format csv -o series.csv raw.jsonl        # per-second counts and
 | `iteration_min` … `iteration_max`, `iteration_active_min` … `iteration_active_max` | Latency of a whole scenario iteration, with / without Think time (filter with `{scenario=...}`) |
 | `requests` `rps` `dropped` | Number of requests / requests per second / number of dropped arrivals |
 
+A step or scenario name that contains a comma, an unbalanced brace, `<` / `>` or spaces at its ends is written as a Go double-quoted string: `p95{step="list, then order"}<1s` (`\"` and `\\` are escapes).
+
 When the target or the data is missing, the threshold counts as not met, so that a mistyped step name cannot pass silently. See chapter 5 of [`docs/result.md`](docs/result.md) for details.
 
 Two things to know when you choose thresholds:
