@@ -98,3 +98,26 @@ func TestDocsMatchErrorRate(t *testing.T) {
 		t.Error("thresholds.md does not tell to pair corrected_* with dropped<1")
 	}
 }
+
+// TestResultGuideSeparatesDroppedFromCorrectedGap pins that the checklist does not read a corrected-versus-latency gap as
+// a target that could not keep up: in the open model that shows as dropped arrivals, never as delayed ones (#190).
+func TestResultGuideSeparatesDroppedFromCorrectedGap(t *testing.T) {
+	b, err := content.ReadFile("content/result.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var item string
+	for _, line := range strings.Split(string(b), "\n") {
+		if strings.HasPrefix(line, "5. **Open model:") {
+			item = line
+		}
+	}
+	if item == "" {
+		t.Fatal("result.md has no checklist item 5 about the open model")
+	}
+	for _, want := range []string{"never delayed", "`dropped > 0`", "not from a slow target"} {
+		if !strings.Contains(item, want) {
+			t.Errorf("checklist item 5 does not say %q", want)
+		}
+	}
+}
