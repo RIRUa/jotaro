@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/RIRUa/jotaro/record"
 	"github.com/RIRUa/jotaro/report"
 )
 
@@ -98,6 +99,16 @@ func requestErrors(q report.RequestStats) int {
 	return n
 }
 
+// formatErrorKinds lists failure kinds as "expect_mismatch=90 timeout=3", sorted by name, or "" when there are none.
+func formatErrorKinds(m map[record.ErrKind]int) string {
+	parts := make([]string, 0, len(m))
+	for k, n := range m {
+		parts = append(parts, fmt.Sprintf("%s=%d", k, n))
+	}
+	slices.Sort(parts)
+	return strings.Join(parts, " ")
+}
+
 // fewSamplesWarning reports a run, or the steps of a run, with too few requests for p95 or p99.
 // When the whole run is too small every step is, so only the run is named.
 func fewSamplesWarning(rep *report.Report) *warning {
@@ -141,7 +152,11 @@ func failedChecksWarning(rep *report.Report) *warning {
 			// Step failures that a transport error accounts for are in the error rate already.
 			if hidden := st.Failed - requestErrors(st.Requests); hidden > 0 {
 				flagged = true
-				parts = append(parts, fmt.Sprintf("step %s failed %d of %d runs, at least %d of them with no request error", stepTarget(sc, st), st.Failed, st.Count, hidden))
+				part := fmt.Sprintf("step %s failed %d of %d runs, at least %d of them with no request error", stepTarget(sc, st), st.Failed, st.Count, hidden)
+				if kinds := formatErrorKinds(st.Errors); kinds != "" {
+					part += " (" + kinds + ")"
+				}
+				parts = append(parts, part)
 			}
 		}
 		// A scenario can return its own error without any failed step.

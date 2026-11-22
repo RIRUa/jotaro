@@ -61,15 +61,15 @@ func (r *Report) Print(w io.Writer) {
 
 		fmt.Fprintln(w, "\nsteps (duration):")
 		tw = tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(tw, "step\tcount\tfail\tmin\tmean\tp50\tp90\tp95\tp99\tmax")
+		fmt.Fprintln(tw, "step\tcount\tfail\tfailures\tmin\tmean\tp50\tp90\tp95\tp99\tmax")
 		for _, s := range sc.Steps {
-			fmt.Fprintf(tw, "%s\t%d\t%d\t%s\n", s.Name, s.Count, s.Failed, latencyCells(s.Duration))
+			fmt.Fprintf(tw, "%s\t%d\t%d\t%s\t%s\n", s.Name, s.Count, s.Failed, fmtErrors(s.Errors), latencyCells(s.Duration))
 		}
 		tw.Flush()
 
 		fmt.Fprintln(w, "\nsteps (requests):")
 		tw = tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(tw, "step\treqs\tstatus\terrors\tp50\tp95\tp99\tttfb p50\tttfb p95")
+		fmt.Fprintln(tw, "step\treqs\tstatus\tnet errors\tp50\tp95\tp99\tttfb p50\tttfb p95")
 		for _, s := range sc.Steps {
 			q := s.Requests
 			fmt.Fprintf(tw, "%s\t%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",

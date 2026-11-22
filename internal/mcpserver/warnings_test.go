@@ -121,6 +121,14 @@ func TestReviewWarnings(t *testing.T) {
 			mutate: func(r *report.Report) { r.Scenarios[0].Steps[1].Failed = 90 },
 			want:   []string{warnFailedChecks}, in: "step shop/buy failed 90 of 300 runs, at least 90 of them with no request error",
 		},
+		"failed step names its kinds": {
+			mutate: func(r *report.Report) {
+				st := &r.Scenarios[0].Steps[1]
+				st.Failed = 90
+				st.Errors = map[record.ErrKind]int{record.ErrExpect: 85, record.ErrPanic: 5}
+			},
+			want: []string{warnFailedChecks}, in: "at least 90 of them with no request error (expect_mismatch=85 panic=5)",
+		},
 		"failed step explained by timeouts": {
 			mutate: func(r *report.Report) {
 				st := &r.Scenarios[0].Steps[1]

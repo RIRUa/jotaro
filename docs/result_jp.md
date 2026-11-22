@@ -37,7 +37,7 @@ Report
 ├─ Scenarios[] ScenarioReport
 │  ├─ Name
 │  ├─ Iterations  IterationStats（Active = Think 除く / Total = Think 含む）
-│  └─ Steps[]     StepStats（最初に実行された順）
+│  └─ Steps[]     StepStats（最初に実行された順）: Count、Failed、Duration、Errors（ステップが失敗した理由。`ErrKind` ごと）
 │     └─ Requests RequestStats
 ├─ Series[]    SeriesPoint: StartedAt からの 1 秒ごとの集計（「レポートの結合」を参照）
 └─ Health[]    record.HealthPoint: 負荷生成側の 1 秒ごとの健全性（`Run` で実行したときだけ）
@@ -62,7 +62,7 @@ Report
 | `NewConns` / `ReusedConns` | 接続を新しく張った / 再利用したリクエストの数 |
 | `Corrected` | 予定開始時刻からの時間（Coordinated Omission 補正後）。クローズドモデル（`Users` / `UserStages`）では `Latency` と同じ |
 | `Status` | `"2xx"` などステータスクラスごとの件数 |
-| `Errors` | 通信レベルのエラーの内訳（`ErrKind` ごと）。`Expect*` の失敗は入らない |
+| `Errors` | 通信レベルのエラーの内訳（`ErrKind` ごと）。`Expect*` の失敗は入らない（ステップの `Errors` に入る） |
 | `BytesIn` / `BytesOut` | ボディのバイト数（ヘッダーは含まない） |
 
 ### `ErrKind`（失敗の種類）
@@ -82,6 +82,10 @@ Report
 HTTP 4xx/5xx は `ErrKind` ではなくステータス（`Status`）として記録される。
 
 どこに記録されるか: 通信レベルの種類（`timeout`、`connection_refused`、`dns`、`tls`、`canceled`、`other`）はリクエストに記録され、エラーがステップやイテレーションから返されたときは、それらにも記録される。`panic` は、実行中だったステップとイテレーションに記録される。ステップは panic までの時間つきで失敗（`Failed`）として一覧に載り、panic 前に送ったリクエストもそのステップに残り、実行は他のユーザーで続く。実行中の最初の panic は、実行が終わったあとにスタックつきで一度だけ `Plan.Progress`（`Progress` が nil のときは標準エラー）に書かれ、以降のものは数えるだけ。`expect_mismatch` は、応答が届いたあとの `Expect*` の呼び出しで決まるので、リクエストには**記録されない**。ステップの `Errors`（シナリオがそのエラーを返したときはイテレーションの `Errors`）に現れ、ステップを失敗（`Failed`）にする。`error_rate`（5 章）に映らないのはこのため。
+
+ステップの `Errors` は、失敗した実行 1 回につき `ErrKind` 1 つの理由で、合計は `Failed` と一致する。
+
+理由の表示先: テキストレポートは「steps (duration)」の `failures` 列（`expect_mismatch=500`）に、HTML レポートはステップの表の同じ列に出す。「steps (requests)」の `errors` 列は、リクエストの通信レベルのエラーだけを数えるので、どちらも `net errors` という名前にしてある。チェックが失敗したステップは、`fail` が 0 より大きく、`failures` に `expect_mismatch` が出て、`net errors` は `-` になる。`jotaro mcp` の `summarize_result` は同じ内訳を各ステップの `errors` として返し、`failed_checks` 警告には種類を添える。失敗のないステップの `failures` は `-`。
 
 ### 補足
 
@@ -125,7 +129,7 @@ if err := rep.WriteHTML(f); err != nil {
 - `html/template` で生成するので、シナリオ名やステップ名は自動でエスケープされる。
 - CSS は埋め込み、JS・グラフのライブラリ・外部リソースは使わない（グラフはインラインの SVG）。ライト／ダークは OS の設定に従う。
 - ページは `<html lang="en">` を宣言する（表示は英語）。開始時刻（UTC）をヘッダーと `<title>` に出すので、複数のレポートを見分けられる。開始時刻が不明なときは、どちらにも出さない。
-- 内容: サマリー（負荷のモデル `closed` / `open` を含む）、ステータス・エラーの内訳、レイテンシ（p50〜max の棒）、`corrected`（オープンモデル、つまり `Arrival` のときのみ）、TTFB、シナリオ別のイテレーション時間とステップ別の表。レポートに時系列があるときは、続けて 1 秒ごとのタイムラインとして、インラインの SVG 折れ線グラフを出す: リクエスト数・エラー・5xx、レイテンシ p50 / p95 / p99、同時実行数、接続、DNS / connect / TLS の時間、負荷生成側のゴルーチン数と CPU。
+- 内容: サマリー（負荷のモデル `closed` / `open` を含む）、ステータス・エラーの内訳、レイテンシ（p50〜max の棒）、`corrected`（オープンモデル、つまり `Arrival` のときのみ）、TTFB、シナリオ別のイテレーション時間とステップ別の表（`failures` 列に各ステップの失敗理由）。レポートに時系列があるときは、続けて 1 秒ごとのタイムラインとして、インラインの SVG 折れ線グラフを出す: リクエスト数・エラー・5xx、レイテンシ p50 / p95 / p99、同時実行数、接続、DNS / connect / TLS の時間、負荷生成側のゴルーチン数と CPU。
 - 表示用の値は `Print` と同じ書式（`fmtDur`）。ナノ秒の無損失な値は JSON を使う。
 - サンプル: `go run ./examples/checkout -format html -o report.html`（`-rate 30` で `Rate` モデル）。
 
