@@ -49,7 +49,7 @@ Report
 |---|---|
 | `Count` | 件数 |
 | `Min` / `Mean` / `Max` | 最小 / 平均 / 最大 |
-| `P50` `P90` `P95` `P99` | パーセンタイル（nearest-rank 法） |
+| `P50` `P90` `P95` `P99` | パーセンタイル。`BuildReport` / `FromRaw` は正確（nearest-rank 法。実際に観測された値）。`Run` と `MergeReports` は近似（相対誤差 1% 以内で `[Min, Max]` に収める。観測された値とは限らない）。下の「補足」を参照 |
 
 ### `RequestStats`
 
@@ -79,7 +79,7 @@ Report
 | `panic` | シナリオ関数が panic した（テストコードのバグで、対象の性質ではない）。ステップとイテレーションにだけ現れる |
 | `other` | 上記以外 |
 
-HTTP 4xx/5xx は `ErrKind` ではなくステータス（`Status`）として記録される。
+HTTP 4xx/5xx は `ErrKind` ではなくステータス（`Status`）として記録される。両方を持つリクエストもある。ステータス行を受け取ったあとでボディの読み取りに失敗した場合（タイムアウトなど）、記録は `Code` と `ErrKind` の両方を持つ。
 
 どこに記録されるか: 通信レベルの種類（`timeout`、`connection_refused`、`dns`、`tls`、`canceled`、`other`）はリクエストに記録され、エラーがステップやイテレーションから返されたときは、それらにも記録される。`panic` は、実行中だったステップとイテレーションに記録される。ステップは panic までの時間つきで失敗（`Failed`）として一覧に載り、panic 前に送ったリクエストもそのステップに残り、実行は他のユーザーで続く。実行中の最初の panic は、実行が終わったあとにスタックつきで一度だけ `Plan.Progress`（`Progress` が nil のときは標準エラー）に書かれ、以降のものは数えるだけ。`expect_mismatch` は、応答が届いたあとの `Expect*` の呼び出しで決まるので、リクエストには**記録されない**。ステップの `Errors`（シナリオがそのエラーを返したときはイテレーションの `Errors`）に現れ、ステップを失敗（`Failed`）にする。`error_rate`（5 章）に映らないのはこのため。
 
@@ -156,7 +156,7 @@ jotaro merge -format html -o report.html a.json b.json
 - **ヒストグラム**: 各 `latency` に対数バケット（DDSketch 方式、相対誤差 1%）を持たせた（JSON の `buckets`: バケット番号 → 件数）。バケットは足し算で結合できるので、何台分でも順序に関係なく同じ結果になる。全記録から作ったレポート（`BuildReport`、`FromRaw`）の `P50`〜`P99` は nearest-rank の正確な値。逐次集計したもの（`Run`。`Plan.Raw` の有無は問わない）と、結合したものは近似になる。
 - **サイズ**: バケットの数は分布の広がりで決まる（件数には比例しない）。10 万件・裾の重い分布で 1 つの `latency` あたり数百バケット。
 - **接続の内訳 (`requests` と各ステップの `requests`、version 3)**: `dns` / `connect`（TCP）/ `tls` は、その区間が実際に起きたリクエストだけのレイテンシ分布（`buckets` つき）。接続を再利用したリクエストや、http の TLS は含まない。`conn_new` / `conn_reused` は接続を新しく張った / 再利用したリクエストの数で、再利用率は `conn_reused / (conn_new + conn_reused)`。接続を得る前に失敗したリクエストはどちらにも数えない。version 1・2 の JSON には無い（0・空として読める）。
-- **時系列 (`series`、version 3)**: `started_at` からの 1 秒ごとの配列。要素は `second` / `requests` / `errors`（通信エラー。HTTP 4xx/5xx は含まない）/ `http_5xx`（HTTP 5xx の数。`errors` とは重ならない。無ければ 0）/ `latency`（`buckets` つき）/ `conn_new` / `conn_reused`（その秒に開始したリクエストのうち、接続を新しく張った / 再利用した数）/ `dns` / `connect` / `tls`（その区間が起きたリクエストだけの分布。`buckets` つき。`requests` の同名のフィールドと同じ範囲）/ `concurrency`（その秒の実行中イテレーション数の最大）。`started_at` が無いと空。結合では `started_at` の差だけ秒をずらして足し、`concurrency` は合計（上限の見積り）。version 1・2 の JSON には無い。`conn_new` 以降は version 3 に後から足した項目で、無い JSON は 0・空として読む（互換を壊さないので版は上げていない）。
+- **時系列 (`series`、version 3)**: `started_at` からの 1 秒ごとの配列。要素は `second` / `requests` / `errors`（通信エラー。HTTP 4xx/5xx は含まない）/ `http_5xx`（HTTP 5xx の数。ステータスが 5xx で、そのあとボディの読み取りに失敗したリクエストは `errors` にも数えられるので、重なることがある。無ければ 0）/ `latency`（`buckets` つき）/ `conn_new` / `conn_reused`（その秒に開始したリクエストのうち、接続を新しく張った / 再利用した数）/ `dns` / `connect` / `tls`（その区間が起きたリクエストだけの分布。`buckets` つき。`requests` の同名のフィールドと同じ範囲）/ `concurrency`（その秒の実行中イテレーション数の最大）。`started_at` が無いと空。結合では `started_at` の差だけ秒をずらして足し、`concurrency` は合計（上限の見積り）。version 1・2 の JSON には無い。`conn_new` 以降は version 3 に後から足した項目で、無い JSON は 0・空として読む（互換を壊さないので版は上げていない）。
 - **負荷生成側の健全性 (`health`、version 3)**: `jotaro.Run` を動かしているプロセスの、`started_at` からの 1 秒ごとの配列。要素は `second` / `goroutines`（その秒の終わりのゴルーチン数）/ `cpu`（その秒に使った CPU 時間の割合。GOMAXPROCS 個の CPU 全体に対して 0〜1。取得できない環境では -1）。`BuildReport` だけで作った結果や、古い JSON には無い（空）。結合では秒をずらして重ね、`goroutines` は合計、`cpu` は最大（負荷生成側が複数あるときは、一番詰まっているものを見る）。
   - CPU は `getrusage`（Unix 系）の CPU 時間から求める。Windows など取得できない環境では -1 で、グラフや平均には含めない。`runtime/metrics` の `/cpu/classes/*` は GC のたびにしか更新されないため使っていない。
   - 負荷をかける対象を同じプロセスで動かしている（`examples/checkout` など）と、その分も含む。

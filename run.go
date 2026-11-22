@@ -273,9 +273,9 @@ func newTransport() *http.Transport {
 //  1. validate the Plan, and clone the default Transport so connections are not shared with other code
 //  2. start the health sampler, then run the closed (Users or UserStages) or open (Arrival) loop until Duration ends
 //  3. wait up to Grace for running iterations, then cancel them
-//  4. build the report. Records are folded into histograms as they arrive (percentiles within 1% relative
-//     error, memory independent of the run length). With Plan.Raw each record is also written to it at once,
-//     and the stream is finished (health and final run info) when the run ends
+//  4. build the report. Records are folded into histograms as they arrive (percentiles are approximate, within 1%
+//     relative error, see report.Latency; memory independent of the run length). With Plan.Raw each record is
+//     also written to it at once, and the stream is finished (health and final run info) when the run ends
 //
 // When ctx is done, everything stops at once, including running iterations,
 // and the results so far are returned. Report.Elapsed is the real time until all users have stopped.

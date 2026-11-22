@@ -38,8 +38,11 @@ type Record struct {
 
 	Method string
 	URL    string
-	Code   int     // 0 means no response (network error)
-	Err    ErrKind // kind of network error. HTTP 4xx/5xx are expressed by Code
+	// Code is the HTTP status code. It is 0 when no response was received (Err is then set).
+	// It can be non-zero together with a non-empty Err: the status line arrived but reading the body failed (see #149).
+	Code int
+	// Err is the kind of network error. HTTP 4xx/5xx alone are expressed by Code, not by Err.
+	Err ErrKind
 
 	// Scheduled is the scheduled start time. In the closed model it equals Start.
 	// In the open model, only the first request of an iteration gets the scheduled arrival time.
