@@ -105,9 +105,15 @@ func (e *executor) do(r *Request) *Response {
 	}
 	tr := &tracer{start: rec.Start}
 
+	// An empty body is passed as nil, which net/http treats the same as an empty reader (it sends the
+	// same headers) without the reader.
+	var body io.Reader
+	if len(r.Spec.Body) > 0 {
+		body = bytes.NewReader(r.Spec.Body)
+	}
 	httpReq, err := http.NewRequestWithContext(
 		httptrace.WithClientTrace(e.ctx, tr.clientTrace()),
-		r.Spec.Method, url, bytes.NewReader(r.Spec.Body),
+		r.Spec.Method, url, body,
 	)
 	if err != nil {
 		return &Response{err: err}
@@ -125,7 +131,7 @@ func (e *executor) do(r *Request) *Response {
 		resp.Code = hr.StatusCode
 		resp.Header = hr.Header
 		rec.Code = hr.StatusCode
-		resp.Body, err = io.ReadAll(hr.Body)
+		resp.Body, err = readBody(hr.Body, hr.ContentLength)
 		hr.Body.Close()
 	}
 	rec.Latency = time.Since(rec.Start)
@@ -142,6 +148,37 @@ func (e *executor) do(r *Request) *Response {
 		e.sink(rec)
 	}
 	return resp
+}
+
+// maxPresize caps the buffer that is allocated up front from a declared Content-Length, so that a target that
+// declares a huge length and sends nothing cannot make the generator allocate it. Longer bodies grow as usual.
+const maxPresize = 1 << 20
+
+// readBody reads r to the end like io.ReadAll, but allocates the buffer once when the length is declared
+// (size > 0), instead of starting at 512 bytes and growing. The result is never nil, as with io.ReadAll,
+// and an empty body costs no allocation.
+func readBody(r io.Reader, size int64) ([]byte, error) {
+	if r == http.NoBody {
+		return []byte{}, nil
+	}
+	if size <= 0 || size > maxPresize {
+		return io.ReadAll(r)
+	}
+	// One byte more than declared, so that the read that finds EOF does not grow the buffer.
+	buf := make([]byte, 0, size+1)
+	for {
+		n, err := r.Read(buf[len(buf):cap(buf)])
+		buf = buf[:len(buf)+n]
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				err = nil
+			}
+			return buf, err
+		}
+		if len(buf) == cap(buf) {
+			buf = append(buf, 0)[:len(buf)] // the declaration was too small: grow
+		}
+	}
 }
 
 // tracer derives the duration of each phase from httptrace events.

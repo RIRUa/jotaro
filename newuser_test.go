@@ -2,10 +2,15 @@ package jotaro
 
 import (
 	"context"
+	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/iotest"
 	"time"
 
 	"github.com/RIRUa/jotaro/record"
@@ -162,6 +167,88 @@ func TestTraceFieldsArePopulated(t *testing.T) {
 	for i, r := range reqs {
 		if r.TTFB < 0 || r.TTFB > r.Latency {
 			t.Errorf("request %d: TTFB = %v, Latency = %v", i, r.TTFB, r.Latency)
+		}
+	}
+}
+
+// TestReadBody pins that the pre-sized read returns what io.ReadAll would, whatever the declared length.
+func TestReadBody(t *testing.T) {
+	body := strings.Repeat("x", 1000)
+	cases := []struct {
+		name string
+		r    io.Reader
+		size int64
+		want string
+	}{
+		{"exact", strings.NewReader(body), 1000, body},
+		{"declared too small", strings.NewReader(body), 10, body},
+		{"declared too large", strings.NewReader(body), 5000, body},
+		{"unknown", strings.NewReader(body), -1, body},
+		{"over the cap", strings.NewReader(body), maxPresize + 1, body},
+		{"empty with a declaration", strings.NewReader(""), 12, ""},
+		{"no body", http.NoBody, 12, ""},
+		{"one byte reads", iotest.OneByteReader(strings.NewReader(body)), 1000, body},
+		{"zero", strings.NewReader(""), 0, ""},
+	}
+	for _, c := range cases {
+		got, err := readBody(c.r, c.size)
+		if err != nil {
+			t.Errorf("%s: %v", c.name, err)
+		}
+		if got == nil || string(got) != c.want {
+			t.Errorf("%s: got %q (nil: %v), want %q", c.name, got, got == nil, c.want)
+		}
+	}
+
+	boom := errors.New("boom")
+	got, err := readBody(io.MultiReader(strings.NewReader("ab"), iotest.ErrReader(boom)), 10)
+	if !errors.Is(err, boom) || string(got) != "ab" {
+		t.Errorf("read error: got %q, %v", got, err)
+	}
+}
+
+// TestEmptyBodyRequests pins what goes out for a request without a body, with and without a method that
+// usually has one.
+func TestEmptyBodyRequests(t *testing.T) {
+	type seen struct {
+		method string
+		cl     int64
+		body   string
+	}
+	var (
+		mu  sync.Mutex
+		got []seen
+	)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		got = append(got, seen{r.Method, r.ContentLength, string(b)})
+		mu.Unlock()
+	}))
+	defer srv.Close()
+	col := record.NewCollector()
+	sc := NewScenario("s", func(_ context.Context, u *User) error { return nil })
+	u := newUser(context.Background(), Plan{BaseURL: srv.URL}, sc, 0, 0, http.DefaultTransport, time.Second, col)
+	err := u.Step("e", func(s *Step) error {
+		for _, r := range []*Request{s.Get("/"), s.Post("/"), s.Post("/").Body("hi")} {
+			if err := r.Do().Err(); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	want := []seen{{"GET", 0, ""}, {"POST", 0, ""}, {"POST", 2, "hi"}}
+	if len(got) != len(want) {
+		t.Fatalf("got %v", got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("request %d: got %v, want %v", i, got[i], want[i])
 		}
 	}
 }
