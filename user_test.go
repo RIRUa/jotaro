@@ -105,38 +105,43 @@ func TestStepErrorIsReturnedAndRecorded(t *testing.T) {
 }
 
 func TestThinkExcludedFromActive(t *testing.T) {
-	col := record.NewCollector()
-	u := testUser(t, "http://unused", 0, 0, col)
-	sc := NewScenario("s", func(ctx context.Context, u *User) error {
-		u.Think(80 * time.Millisecond)
-		return nil
-	})
-	sc.run(u)
+	inBubble(t, func(t *testing.T) {
+		col := record.NewCollector()
+		u := testUser(t, "http://unused", 0, 0, col)
+		sc := NewScenario("s", func(ctx context.Context, u *User) error {
+			u.Think(80 * time.Millisecond)
+			time.Sleep(10 * time.Millisecond) // work that is not thinking
+			return nil
+		})
+		sc.run(u)
 
-	_, _, iters := col.Snapshot()
-	it := iters[0]
-	if it.Think < 80*time.Millisecond {
-		t.Fatalf("Think = %v", it.Think)
-	}
-	if it.Duration < it.Think || it.Active() >= 40*time.Millisecond {
-		t.Fatalf("Duration=%v Think=%v Active=%v", it.Duration, it.Think, it.Active())
-	}
+		_, _, iters := col.Snapshot()
+		it := iters[0]
+		if it.Think != 80*time.Millisecond || it.Duration != 90*time.Millisecond || it.Active() != 10*time.Millisecond {
+			t.Fatalf("Duration=%v Think=%v Active=%v, want 90ms, 80ms and 10ms", it.Duration, it.Think, it.Active())
+		}
+	})
 }
 
 func TestThinkReturnsOnCancel(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	u := testUser(t, "http://unused", 0, 0, record.NewCollector())
-	u.ctx = ctx
-	go func() {
-		time.Sleep(30 * time.Millisecond)
-		cancel()
-	}()
+	inBubble(t, func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		u := testUser(t, "http://unused", 0, 0, record.NewCollector())
+		u.ctx = ctx
+		go func() {
+			time.Sleep(30 * time.Millisecond)
+			cancel()
+		}()
 
-	start := time.Now()
-	u.Think(5 * time.Second)
-	if time.Since(start) > time.Second {
-		t.Fatal("did not return on ctx cancellation")
-	}
+		start := time.Now()
+		u.Think(5 * time.Second)
+		if got := time.Since(start); got != 30*time.Millisecond {
+			t.Fatalf("Think returned after %v, want 30ms (when the context was cancelled)", got)
+		}
+		if u.think != 30*time.Millisecond {
+			t.Errorf("think = %v, want the 30ms that were waited", u.think)
+		}
+	})
 }
 
 func TestPanicBecomesIterationFailure(t *testing.T) {
@@ -161,49 +166,58 @@ func TestPanicBecomesIterationFailure(t *testing.T) {
 func writeToMap(m map[string]int) { m["x"] = 1 }
 
 func TestPanicInStepIsRecorded(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte(`{}`))
-	}))
-	defer srv.Close()
-
-	col := record.NewCollector()
-	u := testUser(t, srv.URL, 4, 2, col)
-	sc := NewScenario("checkout", func(ctx context.Context, u *User) error {
-		return u.Step("a", func(s *Step) error {
-			s.Get("/").Do()
-			writeToMap(nil) // panics
-			return nil
+	// A fake clock and an in-memory server: the request takes exactly 7ms and the step takes exactly that long
+	// (the panic comes right after it), on every OS. A real clock cannot assert this: Windows' coarse
+	// monotonic clock measured a step this short as 0.
+	inBubble(t, func(t *testing.T) {
+		const latency = 7 * time.Millisecond
+		col := record.NewCollector()
+		u := testUser(t, "http://stub.test", 4, 2, col)
+		u.Client.Transport = fakeServerAfter(latency)
+		sc := NewScenario("checkout", func(ctx context.Context, u *User) error {
+			return u.Step("a", func(s *Step) error {
+				s.Get("/").Do()
+				writeToMap(nil) // panics
+				return nil
+			})
 		})
-	})
-	err := sc.run(u)
-	var pe *panicError
-	if !errors.As(err, &pe) {
-		t.Fatalf("err = %v, want a *panicError", err)
-	}
-	if _, ok := pe.value.(runtime.Error); !ok {
-		t.Errorf("panic value = %#v, want the runtime error", pe.value)
-	}
-	if !strings.Contains(string(pe.stack), "TestPanicInStepIsRecorded.func") {
-		t.Errorf("stack does not show where the panic happened:\n%s", pe.stack)
-	}
+		begin := time.Now()
+		err := sc.run(u)
+		var pe *panicError
+		if !errors.As(err, &pe) {
+			t.Fatalf("err = %v, want a *panicError", err)
+		}
+		if _, ok := pe.value.(runtime.Error); !ok {
+			t.Errorf("panic value = %#v, want the runtime error", pe.value)
+		}
+		if !strings.Contains(string(pe.stack), "TestPanicInStepIsRecorded.func") {
+			t.Errorf("stack does not show where the panic happened:\n%s", pe.stack)
+		}
 
-	reqs, steps, iters := col.Snapshot()
-	if len(reqs) != 1 {
-		t.Fatalf("requests = %d, want 1", len(reqs))
-	}
-	if len(steps) != 1 {
-		t.Fatalf("steps = %+v, want one record", steps)
-	}
-	st := steps[0]
-	// A step this short (one local request, then a panic) can legitimately be
-	// measured as 0 on a coarse monotonic clock (Windows: 0.5-15.6 ms), so only
-	// a negative Duration is invalid.
-	if st.Step != "a" || st.Err != record.ErrPanic || st.UserID != 4 || st.Iteration != 2 || st.Duration < 0 || st.Start.IsZero() {
-		t.Errorf("step = %+v", st)
-	}
-	if len(iters) != 1 || iters[0].Err != record.ErrPanic {
-		t.Errorf("iters = %+v", iters)
-	}
+		reqs, steps, iters := col.Snapshot()
+		if len(reqs) != 1 {
+			t.Fatalf("requests = %d, want 1", len(reqs))
+		}
+		if len(steps) != 1 {
+			t.Fatalf("steps = %+v, want one record", steps)
+		}
+		st := steps[0]
+		if st.Step != "a" || st.Err != record.ErrPanic || st.UserID != 4 || st.Iteration != 2 {
+			t.Errorf("step = %+v", st)
+		}
+		if !st.Start.Equal(begin) {
+			t.Errorf("step Start = %v, want %v", st.Start, begin)
+		}
+		if st.Duration != latency {
+			t.Errorf("step Duration = %v, want exactly the %v the request took", st.Duration, latency)
+		}
+		if reqs[0].Latency != latency {
+			t.Errorf("request Latency = %v, want %v", reqs[0].Latency, latency)
+		}
+		if len(iters) != 1 || iters[0].Err != record.ErrPanic {
+			t.Errorf("iters = %+v", iters)
+		}
+	})
 }
 
 func TestCookiesAreKeptWithinUserOnly(t *testing.T) {

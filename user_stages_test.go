@@ -157,46 +157,55 @@ func TestRunUserStages(t *testing.T) {
 
 // TestRunUserStagesParkedUsersResume checks that a user stopped by a lower target runs again,
 // with the same ID and the next iteration number, when the target rises again.
+//
+// It runs on a fake clock with an iteration of 3ms, a length that never ties with a stage boundary, so the
+// number of iterations of every user is exact and does not depend on the speed of the machine.
 func TestRunUserStagesParkedUsersResume(t *testing.T) {
-	var (
-		mu    sync.Mutex
-		iters = map[int][]int{}
-	)
-	sc := NewScenario("s", func(ctx context.Context, u *User) error {
+	inBubble(t, func(t *testing.T) {
+		var (
+			mu    sync.Mutex
+			iters = map[int][]int{}
+		)
+		sc := NewScenario("s", func(ctx context.Context, u *User) error {
+			mu.Lock()
+			iters[u.ID] = append(iters[u.ID], u.Iteration)
+			mu.Unlock()
+			time.Sleep(3 * time.Millisecond)
+			return nil
+		})
+		_, err := Run(context.Background(), Plan{
+			Scenario: sc,
+			UserStages: []UserStage{
+				{Target: 2, For: 10 * time.Millisecond},  // user 0 starts at 5ms, user 1 at 10ms
+				{Target: 2, For: 100 * time.Millisecond}, // hold until 110ms
+				{Target: 1, For: 10 * time.Millisecond},  // user 1 is parked at 120ms
+				{Target: 1, For: 100 * time.Millisecond}, // hold until 220ms
+				{Target: 2, For: 10 * time.Millisecond},  // user 1 resumes at 230ms
+				{Target: 2, For: 100 * time.Millisecond}, // hold until 330ms
+			},
+			Duration: 330 * time.Millisecond,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
 		mu.Lock()
-		iters[u.ID] = append(iters[u.ID], u.Iteration)
-		mu.Unlock()
-		time.Sleep(2 * time.Millisecond)
-		return nil
-	})
-	_, err := Run(context.Background(), Plan{
-		Scenario: sc,
-		UserStages: []UserStage{
-			{Target: 2, For: 10 * time.Millisecond},
-			{Target: 2, For: 100 * time.Millisecond},
-			{Target: 1, For: 10 * time.Millisecond},
-			{Target: 1, For: 100 * time.Millisecond},
-			{Target: 2, For: 10 * time.Millisecond},
-			{Target: 2, For: 100 * time.Millisecond},
-		},
-		Duration: 330 * time.Millisecond,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	mu.Lock()
-	defer mu.Unlock()
-	for id, seq := range iters {
-		for i, it := range seq {
-			if it != i {
-				t.Fatalf("user %d iterations = %v, want 0, 1, 2, ...", id, seq)
+		defer mu.Unlock()
+		for id, seq := range iters {
+			for i, it := range seq {
+				if it != i {
+					t.Fatalf("user %d iterations = %v, want 0, 1, 2, ...", id, seq)
+				}
 			}
 		}
-	}
-	// User 1 ran before the drop and after the rise, so it ran more than during the first hold alone.
-	if len(iters[1]) < 30 {
-		t.Errorf("user 1 ran %d iterations; it should have resumed after the target rose again", len(iters[1]))
-	}
+		// User 0 starts an iteration every 3ms from 5ms to 329ms: 109. User 1 starts one every 3ms from 10ms
+		// to 118ms (37), is parked at 120ms, and again from 230ms to 329ms (34), carrying on from iteration 37.
+		if got := len(iters[0]); got != 109 {
+			t.Errorf("user 0 ran %d iterations, want 109", got)
+		}
+		if got := len(iters[1]); got != 71 {
+			t.Errorf("user 1 ran %d iterations, want 71 (37 before the drop and 34 after the rise)", got)
+		}
+	})
 }
 
 // TestRunUserStagesFinishesIteration checks that scaling down does not interrupt a running iteration.
