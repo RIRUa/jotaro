@@ -174,7 +174,7 @@ func mergeLatency(a, b Latency) Latency {
 	}
 	wa, wb := float64(a.Count), float64(b.Count)
 	avg := func(x, y time.Duration) time.Duration {
-		return time.Duration(math.Round((float64(x)*wa + float64(y)*wb) / (wa + wb)))
+		return durationFromFloat(math.Round((float64(x)*wa + float64(y)*wb) / (wa + wb)))
 	}
 	out := Latency{
 		Count: a.Count + b.Count,

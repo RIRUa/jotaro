@@ -2,6 +2,7 @@ package report
 
 import (
 	"bytes"
+	"math"
 	"math/rand/v2"
 	"reflect"
 	"strings"
@@ -200,5 +201,50 @@ func TestMergeConnStats(t *testing.T) {
 	q := got.Requests
 	if q.NewConns != 3 || q.ReusedConns != 3 || q.Connect.Count != 3 {
 		t.Errorf("merged: %+v", q)
+	}
+}
+
+// TestDurationFromFloatClamps checks that floats that do not fit in a Duration are clamped, whatever the architecture
+// (the plain conversion wraps to math.MinInt64 on amd64).
+func TestDurationFromFloatClamps(t *testing.T) {
+	for _, tc := range []struct {
+		in   float64
+		want time.Duration
+	}{
+		{0, 0},
+		{1500, 1500},
+		{-1500, -1500},
+		{float64(math.MaxInt64), math.MaxInt64}, // 2^63
+		{1e30, math.MaxInt64},
+		{math.Inf(1), math.MaxInt64},
+		{float64(math.MinInt64), math.MinInt64},
+		{-1e30, math.MinInt64},
+		{math.Inf(-1), math.MinInt64},
+		{math.NaN(), 0},
+	} {
+		if got := durationFromFloat(tc.in); got != tc.want {
+			t.Errorf("durationFromFloat(%v) = %d, want %d", tc.in, got, tc.want)
+		}
+	}
+}
+
+// TestFormatValueHugeDuration checks that a measured value that does not fit in a Duration is shown as the largest
+// Duration, not as a negative one.
+func TestFormatValueHugeDuration(t *testing.T) {
+	got := Threshold{Metric: "p95"}.formatValue(float64(math.MaxInt64))
+	if strings.HasPrefix(got, "-") {
+		t.Errorf("formatValue(2^63) = %q, want a positive duration", got)
+	}
+}
+
+// TestMergeLatencyHugeMean checks that the mean of two reports that both hold the largest Duration stays that
+// large (the float average is 2^63, which must not wrap to a negative mean), also for percentiles that are
+// averaged because the reports have no histogram.
+func TestMergeLatencyHugeMean(t *testing.T) {
+	l := Latency{Count: 2, Min: math.MaxInt64, Mean: math.MaxInt64, P50: math.MaxInt64, P90: math.MaxInt64,
+		P95: math.MaxInt64, P99: math.MaxInt64, Max: math.MaxInt64}
+	got := mergeLatency(l, l)
+	if got.Mean != math.MaxInt64 || got.P50 != math.MaxInt64 || got.P99 != math.MaxInt64 {
+		t.Errorf("merged = %+v, want every value the largest Duration", got)
 	}
 }

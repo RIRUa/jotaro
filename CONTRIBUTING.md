@@ -15,10 +15,12 @@ Requires Go 1.25 or later (the lowest version in `go.mod`).
 go vet ./...
 go test -race ./...
 go test -run='^$' -bench=. -benchmem ./...   # benchmarks (not run in CI; timings on shared runners are noisy)
+go test -run='^$' -fuzz=FuzzReadJSON -fuzztime=30s ./report   # fuzz one target (not run in CI; plain go test only runs the seed corpus)
 golangci-lint run   # optional locally; CI runs it with the version pinned in .github/workflows/ci.yml
 ```
 
 - Format with `gofmt`.
+- Parsers of external input have fuzz targets: `FuzzParseThreshold` and `FuzzReadJSON` (`./report`), `FuzzReadRaw` (`./record`), `FuzzResponseJSON`, `FuzzLoadCSV`, `FuzzStagesAt` and `FuzzUserChanges` (the root package), `FuzzPercentile` (`./internal/histogram`). Run one with `-fuzz=<name>` as above. If the fuzzer finds a crasher, commit the file it writes under the package's `testdata/fuzz/<name>/` together with the fix.
 - Add or update tests together with the change. Behaviour of the result format and the threshold syntax is documented in [`docs/result.md`](docs/result.md); update it when you change either.
 - Exported identifiers need a doc comment in English.
 - When you add, remove or update a dependency, run `scripts/gen-third-party-notices.sh` and commit the updated `THIRD_PARTY_NOTICES.md`. Binaries that include a dependency must ship its license text, and the release archives include this file.

@@ -500,15 +500,7 @@ func (t Threshold) exactValue(v float64) string {
 	}
 	switch m.kind {
 	case kindDuration:
-		// float64(MaxInt64) is 2^63, which is out of range for int64, and converting it is
-		// implementation-defined (it wraps to MinInt64 on amd64). Clamp so it stays a valid Duration.
-		switch {
-		case v >= math.MaxInt64:
-			return time.Duration(math.MaxInt64).String()
-		case v <= math.MinInt64:
-			return time.Duration(math.MinInt64).String()
-		}
-		return time.Duration(v).String()
+		return durationFromFloat(v).String()
 	case kindRatio:
 		// A percentage is easier to read ("1%"), but v*100 can pick up a rounding error (0.07*100 is
 		// 7.000000000000001). Try the percentage cleaned to 12 significant digits first, then the exact
@@ -523,6 +515,22 @@ func (t Threshold) exactValue(v float64) string {
 	return strconv.FormatFloat(v, 'f', -1, 64)
 }
 
+// durationFromFloat converts v nanoseconds to a Duration. Converting a float that does not fit in int64 is
+// implementation-defined (float64(math.MaxInt64) is 2^63, and it wraps to math.MinInt64 on amd64), so a value
+// out of range, such as the mean of two huge latencies or a value from a damaged result file, is clamped to the
+// largest or smallest Duration, and NaN becomes 0.
+func durationFromFloat(v float64) time.Duration {
+	switch {
+	case math.IsNaN(v):
+		return 0
+	case v >= math.MaxInt64:
+		return time.Duration(math.MaxInt64)
+	case v <= math.MinInt64:
+		return time.Duration(math.MinInt64)
+	}
+	return time.Duration(v)
+}
+
 // formatValue shows v in the unit of the threshold's metric for people to read, for example "200ms" or "1.5%".
 // It rounds, and it is not meant to be parsed again (see exactValue).
 func (t Threshold) formatValue(v float64) string {
@@ -532,7 +540,7 @@ func (t Threshold) formatValue(v float64) string {
 	}
 	switch m.kind {
 	case kindDuration:
-		return fmtDur(time.Duration(v))
+		return fmtDur(durationFromFloat(v))
 	case kindRatio:
 		return fmtNumber(v*100) + "%"
 	}
