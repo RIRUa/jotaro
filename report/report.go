@@ -18,7 +18,19 @@ import (
 
 // Latency is a distribution of durations.
 //
-// Percentiles use the nearest-rank method, so each one is an actually observed value.
+// Count, Min, Max and Mean are always exact. Whether P50 to P99 are exact depends on how the Report was built:
+//
+//   - BuildReport and FromRaw see every record. They use the nearest-rank method, so each percentile
+//     is an actually observed value.
+//   - Run aggregates with an Aggregator (with or without Plan.Raw), and MergeReports adds histograms.
+//     There each percentile is the representative value of a histogram bucket, within 1% relative error of the true value
+//     and clamped to [Min, Max]. It is generally not an observed value. (MergeReports has a less precise
+//     fallback for reports without a histogram, and leaves a Latency unchanged when the others are empty;
+//     see MergeReports.)
+//
+// A Report read from JSON keeps the kind of percentiles it was written with.
+// For exact percentiles of a run, write Plan.Raw and aggregate it again with FromRaw.
+//
 // A Latency with Count 0 has every other field at 0.
 type Latency struct {
 	// Count is the number of observations.
@@ -83,6 +95,7 @@ type RequestStats struct {
 	Connect Latency
 	TLS     Latency
 	// NewConns / ReusedConns are the number of requests that opened a new connection and that reused one.
+	// They follow httptrace.GotConnInfo.Reused, so they are approximate over TLS (see #111).
 	NewConns    int
 	ReusedConns int
 	// Corrected is the time since the scheduled start (after Coordinated Omission correction).
@@ -161,7 +174,11 @@ func perSecond(n int, elapsed time.Duration) float64 {
 	return float64(n) / elapsed.Seconds()
 }
 
-// FromRaw aggregates raw data. The result is the same as the Report returned by Run.
+// FromRaw aggregates raw data.
+//
+// Counts, errors and the time series match the Report that Run returned for the same run, but the
+// percentiles do not: FromRaw sees every record, so its percentiles are exact, while Run's are approximate
+// (see Latency). The two differ by up to 1%.
 func FromRaw(raw *record.Raw) *Report {
 	rep := BuildReport(raw.Requests, raw.Steps, raw.Iterations, raw.Elapsed)
 	rep.Open = raw.Open

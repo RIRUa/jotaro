@@ -49,6 +49,9 @@ func (r *Response) Err() error {
 }
 
 // Decode reads the body into v as JSON.
+// It does so whatever the status code, including 4xx and 5xx, so it can succeed on an error response (see #129);
+// check the status first (for example with ExpectStatus) when that matters.
+// It returns the network error, if any, without decoding.
 func (r *Response) Decode(v any) error {
 	if r.err != nil {
 		return r.err

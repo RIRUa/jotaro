@@ -20,8 +20,10 @@ import (
 //     Concurrency is summed assuming everything ran at the same time (an upper-bound estimate).
 //   - Scenarios and steps are matched by name, in the order they first appear.
 //   - Min / Max / Mean are exact. P50 to P99 are recomputed by adding the histograms,
-//     so they are approximations within 1% relative error. If reports without a histogram
-//     (such as version 1 JSON) are mixed in, a count-weighted average is used (with a larger error).
+//     so, when two or more non-empty distributions are merged, they are approximations within 1% relative error
+//     even if every input was exact (see Latency). A distribution that is merged with an empty one is kept as is.
+//     If reports without a histogram (such as version 1 JSON) are mixed in,
+//     a count-weighted average is used (with a larger error).
 //
 // Reports whose Open differs cannot be mixed, so an error is returned.
 func MergeReports(reps ...*Report) (*Report, error) {
