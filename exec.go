@@ -209,6 +209,12 @@ func span(from, to time.Time) time.Duration {
 
 // classify sorts a communication error into a record.ErrKind.
 func classify(err error) record.ErrKind {
+	// This check comes first on purpose. The variables below are targets of errors.As, so they are
+	// moved to the heap when the function is entered, and a success (the common case: classify runs for
+	// every step and iteration) would pay eight allocations for nothing.
+	if err == nil {
+		return record.ErrNone
+	}
 	var (
 		pan     *panicError
 		expect  *ExpectError
@@ -220,8 +226,6 @@ func classify(err error) record.ErrKind {
 		netErr  net.Error
 	)
 	switch {
-	case err == nil:
-		return record.ErrNone
 	case errors.As(err, &pan):
 		return record.ErrPanic
 	case errors.As(err, &expect):
