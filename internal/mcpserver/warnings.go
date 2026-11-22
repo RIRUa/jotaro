@@ -217,7 +217,7 @@ func lateArrivalsWarning(rep *report.Report) *warning {
 		return nil
 	}
 	return &warning{warnLateArrivals, fmt.Sprintf(
-		"arrivals started late: corrected p95 is %s against a latency p95 of %s: the target or the load generator could not keep the arrival rate, so the latency alone understates what users would have waited. Judge it by corrected_p95, and check dropped; time the scenario spends before its first request (Think, other work) is counted as lateness too",
+		"arrivals started late: corrected p95 is %s against a latency p95 of %s: the iterations started later than scheduled, so the latency alone understates what users would have waited. A slow target shows as dropped, not here: this comes from the load generator (a saturated CPU, a late dispatcher) or from time the scenario spends before its first request (Think, other work), which is counted as lateness too. Judge it by corrected_p95, and check dropped and the CPU of the load generator",
 		fmtMs(cor), fmtMs(lat))}
 }
 
