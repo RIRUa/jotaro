@@ -11,8 +11,8 @@ import (
 	"github.com/RIRUa/jotaro/record"
 )
 
-// progressInterval is how often a progress line is written. It is a variable so tests can shorten it.
-var progressInterval = time.Second
+// progressInterval is how often a progress line is written.
+const progressInterval = time.Second
 
 // progress is a light-weight record.Observer that tracks just enough to print a progress line:
 // the number of requests, the number of transport-level errors, the number of 5xx responses, the number of

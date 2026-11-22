@@ -9,8 +9,8 @@ import (
 	"github.com/RIRUa/jotaro/report"
 )
 
-// abortInterval is how often Plan.AbortOn is evaluated. It is a variable so tests can shorten it.
-var abortInterval = time.Second
+// abortInterval is how often Plan.AbortOn is evaluated.
+const abortInterval = time.Second
 
 // ErrAborted is wrapped by the error Run returns when Plan.AbortOn stopped the run early.
 // The report returned together with it covers the run up to the abort. Test for it with errors.Is.
