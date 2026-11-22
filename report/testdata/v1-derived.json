@@ -1,0 +1,248 @@
+{
+  "version": 1,
+  "open": false,
+  "dropped": 0,
+  "elapsed_ns": 324382875,
+  "rps": 73.98664309883806,
+  "requests": {
+    "count": 24,
+    "latency": {
+      "count": 24,
+      "min_ns": 64000,
+      "mean_ns": 194015,
+      "p50_ns": 125541,
+      "p90_ns": 295166,
+      "p95_ns": 860167,
+      "p99_ns": 906541,
+      "max_ns": 906541
+    },
+    "ttfb": {
+      "count": 24,
+      "min_ns": 59542,
+      "mean_ns": 180539,
+      "p50_ns": 111291,
+      "p90_ns": 291000,
+      "p95_ns": 832750,
+      "p99_ns": 874375,
+      "max_ns": 874375
+    },
+    "corrected": {
+      "count": 24,
+      "min_ns": 64000,
+      "mean_ns": 194015,
+      "p50_ns": 125541,
+      "p90_ns": 295166,
+      "p95_ns": 860167,
+      "p99_ns": 906541,
+      "max_ns": 906541
+    },
+    "status": {
+      "2xx": 16,
+      "5xx": 8
+    },
+    "errors": {},
+    "bytes_in": 192,
+    "bytes_out": 80
+  },
+  "scenarios": [
+    {
+      "name": "browse",
+      "iterations": {
+        "count": 8,
+        "failed": 8,
+        "active": {
+          "count": 8,
+          "min_ns": 306958,
+          "mean_ns": 642265,
+          "p50_ns": 395542,
+          "p90_ns": 1436208,
+          "p95_ns": 1436208,
+          "p99_ns": 1436208,
+          "max_ns": 1436208
+        },
+        "total": {
+          "count": 8,
+          "min_ns": 80519209,
+          "mean_ns": 81070239,
+          "p50_ns": 80640042,
+          "p90_ns": 82503125,
+          "p95_ns": 82503125,
+          "p99_ns": 82503125,
+          "max_ns": 82503125
+        },
+        "errors": {
+          "expect_mismatch": 8
+        }
+      },
+      "steps": [
+        {
+          "name": "list",
+          "count": 8,
+          "failed": 0,
+          "duration": {
+            "count": 8,
+            "min_ns": 64292,
+            "mean_ns": 298703,
+            "p50_ns": 86125,
+            "p90_ns": 908000,
+            "p95_ns": 908000,
+            "p99_ns": 908000,
+            "max_ns": 908000
+          },
+          "errors": {},
+          "requests": {
+            "count": 8,
+            "latency": {
+              "count": 8,
+              "min_ns": 64000,
+              "mean_ns": 293411,
+              "p50_ns": 85833,
+              "p90_ns": 906541,
+              "p95_ns": 906541,
+              "p99_ns": 906541,
+              "max_ns": 906541
+            },
+            "ttfb": {
+              "count": 8,
+              "min_ns": 59542,
+              "mean_ns": 273713,
+              "p50_ns": 77583,
+              "p90_ns": 874375,
+              "p95_ns": 874375,
+              "p99_ns": 874375,
+              "max_ns": 874375
+            },
+            "corrected": {
+              "count": 8,
+              "min_ns": 64000,
+              "mean_ns": 293411,
+              "p50_ns": 85833,
+              "p90_ns": 906541,
+              "p95_ns": 906541,
+              "p99_ns": 906541,
+              "max_ns": 906541
+            },
+            "status": {
+              "2xx": 8
+            },
+            "errors": {},
+            "bytes_in": 152,
+            "bytes_out": 0
+          }
+        },
+        {
+          "name": "order",
+          "count": 8,
+          "failed": 0,
+          "duration": {
+            "count": 8,
+            "min_ns": 76000,
+            "mean_ns": 135135,
+            "p50_ns": 83084,
+            "p90_ns": 343875,
+            "p95_ns": 343875,
+            "p99_ns": 343875,
+            "max_ns": 343875
+          },
+          "errors": {},
+          "requests": {
+            "count": 8,
+            "latency": {
+              "count": 8,
+              "min_ns": 68750,
+              "mean_ns": 97452,
+              "p50_ns": 80041,
+              "p90_ns": 157541,
+              "p95_ns": 157541,
+              "p99_ns": 157541,
+              "max_ns": 157541
+            },
+            "ttfb": {
+              "count": 8,
+              "min_ns": 64833,
+              "mean_ns": 89395,
+              "p50_ns": 73791,
+              "p90_ns": 147583,
+              "p95_ns": 147583,
+              "p99_ns": 147583,
+              "max_ns": 147583
+            },
+            "corrected": {
+              "count": 8,
+              "min_ns": 68750,
+              "mean_ns": 97452,
+              "p50_ns": 80041,
+              "p90_ns": 157541,
+              "p95_ns": 157541,
+              "p99_ns": 157541,
+              "max_ns": 157541
+            },
+            "status": {
+              "2xx": 8
+            },
+            "errors": {},
+            "bytes_in": 0,
+            "bytes_out": 80
+          }
+        },
+        {
+          "name": "health",
+          "count": 8,
+          "failed": 8,
+          "duration": {
+            "count": 8,
+            "min_ns": 133791,
+            "mean_ns": 193786,
+            "p50_ns": 163458,
+            "p90_ns": 297500,
+            "p95_ns": 297500,
+            "p99_ns": 297500,
+            "max_ns": 297500
+          },
+          "errors": {
+            "expect_mismatch": 8
+          },
+          "requests": {
+            "count": 8,
+            "latency": {
+              "count": 8,
+              "min_ns": 131167,
+              "mean_ns": 191182,
+              "p50_ns": 160834,
+              "p90_ns": 295166,
+              "p95_ns": 295166,
+              "p99_ns": 295166,
+              "max_ns": 295166
+            },
+            "ttfb": {
+              "count": 8,
+              "min_ns": 115542,
+              "mean_ns": 178510,
+              "p50_ns": 153334,
+              "p90_ns": 291000,
+              "p95_ns": 291000,
+              "p99_ns": 291000,
+              "max_ns": 291000
+            },
+            "corrected": {
+              "count": 8,
+              "min_ns": 131167,
+              "mean_ns": 191182,
+              "p50_ns": 160834,
+              "p90_ns": 295166,
+              "p95_ns": 295166,
+              "p99_ns": 295166,
+              "max_ns": 295166
+            },
+            "status": {
+              "5xx": 8
+            },
+            "errors": {},
+            "bytes_in": 40,
+            "bytes_out": 0
+          }
+        }
+      ]
+    }
+  ]
+}

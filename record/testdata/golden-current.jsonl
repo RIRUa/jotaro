@@ -1,0 +1,8 @@
+{"type":"meta","version":1,"open":true,"dropped":3,"started_at":"2026-01-02T03:04:05Z","elapsed_ns":2500000000}
+{"type":"request","scenario":"shop","step":"login","user_id":1,"iteration":0,"method":"POST","url":"http://x/login","code":200,"scheduled":"2026-01-02T03:04:05Z","start":"2026-01-02T03:04:05.002Z","latency_ns":40000000,"conn":"new","dns_ns":3000000,"connect_ns":5000000,"tls_ns":9000000,"ttfb_ns":30000000,"bytes_out":20,"bytes_in":100}
+{"type":"request","scenario":"shop","step":"order","user_id":2,"iteration":1,"method":"POST","url":"http://x/orders","err":"timeout","start":"2026-01-02T03:04:06.3Z","latency_ns":1500000000,"conn":"reused","bytes_out":30}
+{"type":"step","scenario":"shop","step":"login","user_id":1,"iteration":0,"start":"2026-01-02T03:04:05Z","duration_ns":45000000}
+{"type":"step","scenario":"shop","step":"order","user_id":2,"iteration":1,"start":"2026-01-02T03:04:06.3Z","duration_ns":1500000000,"err":"timeout"}
+{"type":"iteration","scenario":"shop","user_id":2,"iteration":1,"start":"2026-01-02T03:04:06.2Z","duration_ns":1700000000,"think_ns":100000000,"err":"expect_mismatch"}
+{"type":"health","second":0,"goroutines":12,"cpu":0.25}
+{"type":"health","second":1,"goroutines":31,"cpu":-1}
