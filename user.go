@@ -35,26 +35,33 @@ type User struct {
 	scheduled schedSlot
 }
 
+// stepBlock is a Step and its executor, allocated together.
+type stepBlock struct {
+	step Step
+	exec executor
+}
+
 // Step runs one section of the scenario and records its duration and outcome.
 // The error returned by fn is returned as is, so the caller decides whether to continue or stop.
 // If fn panics, the step is recorded as failed with the error kind "panic" and the panic continues.
 func (u *User) Step(name string, fn func(s *Step) error) error {
-	s := &Step{
-		name: name,
-		exec: &executor{
-			ctx:     u.ctx,
-			client:  u.Client,
-			baseURL: u.baseURL,
-			tag: record.Record{
-				Scenario:  u.scenario,
-				Step:      name,
-				UserID:    u.ID,
-				Iteration: u.Iteration,
-			},
-			sched: &u.scheduled,
-			sink:  u.col.AddRequest,
+	// The step and its executor are allocated together.
+	blk := &stepBlock{}
+	blk.exec = executor{
+		ctx:     u.ctx,
+		client:  u.Client,
+		baseURL: u.baseURL,
+		tag: record.Record{
+			Scenario:  u.scenario,
+			Step:      name,
+			UserID:    u.ID,
+			Iteration: u.Iteration,
 		},
+		sched: &u.scheduled,
+		col:   u.col,
 	}
+	blk.step = Step{name: name, exec: &blk.exec}
+	s := &blk.step
 
 	start := time.Now()
 	rec := record.StepRecord{

@@ -17,7 +17,7 @@ A Go library for load-testing HTTP servers with scenarios (a flow such as login 
 - Measures per-step latency (p50 / p90 / p95 / p99 / max), error breakdown, throughput, TTFB, DNS / TCP / TLS time, and connection reuse rate
 - Also records a per-second time series and the health of the load generator itself (CPU, goroutine count)
 
-For the design rationale see [`DESIGN.md`](DESIGN.md); for the result format and the threshold spec see [`docs/result.md`](docs/result.md).
+For the design rationale see [`DESIGN.md`](DESIGN.md); for the result format and the threshold spec see [`docs/result.md`](docs/result.md); for what one generator can drive and how that is measured see [`docs/performance.md`](docs/performance.md).
 
 > **Status: v0.x.** We do not change the API without a reason, and we aim to keep existing code working, in the spirit of the [Go 1 compatibility promise](https://go.dev/doc/go1compat). The exception is fixing an existing bug, which can change behavior that code relied on. Such changes are listed in [`CHANGELOG.md`](CHANGELOG.md).
 

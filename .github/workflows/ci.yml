@@ -34,6 +34,10 @@ jobs:
         with:
           go-version: ${{ matrix.go }}
       - run: go vet ./...
+      # The allocation-count guard skips itself under -race (the race detector changes the counts), so it
+      # runs here without it, in every cell.
+      - name: go test (allocation guard, without -race)
+        run: go test -run '^TestIterationAllocations$' -count=1 .
       - run: go test -race ./...
         if: ${{ !(matrix.os == 'ubuntu-latest' && matrix.go == 'stable') }}
       # One cell also records statement coverage and shows it in the job summary, so a pull request

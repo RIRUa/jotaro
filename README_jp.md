@@ -17,7 +17,7 @@
 - ステップ単位のレイテンシ（p50 / p90 / p95 / p99 / max）、エラーの内訳、スループット、TTFB、DNS / TCP / TLS 時間、接続の再利用率を計測する
 - 1 秒ごとの時系列と、負荷生成側の健全性（CPU・ゴルーチン数）も記録する
 
-設計の考え方は [`DESIGN_jp.md`](DESIGN_jp.md)、結果の形式としきい値の仕様は [`docs/result_jp.md`](docs/result_jp.md) にあります。
+設計の考え方は [`DESIGN_jp.md`](DESIGN_jp.md)、結果の形式としきい値の仕様は [`docs/result_jp.md`](docs/result_jp.md)、ジェネレーター 1 台で出せる負荷とその測り方は [`docs/performance_jp.md`](docs/performance_jp.md) にあります。
 
 > **状態: v0.x。** むやみに API を変えず、[Go 1 の互換性の約束](https://go.dev/doc/go1compat)のように、既存のコードが動き続けることを大事にします。例外は既存のバグの修正で、これまでの動作に頼っていたコードに影響が出ることがあります。そうした変更は [`CHANGELOG.md`](CHANGELOG.md)（英語）にまとめます。
 

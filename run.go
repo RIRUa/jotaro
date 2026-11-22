@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/cookiejar"
+	"net/url"
 	"os"
 	"sync"
 	"sync/atomic"
@@ -450,10 +451,7 @@ func (r *runner) runClosed() {
 			defer wg.Done()
 			for iter := 0; r.stopCtx.Err() == nil; iter++ {
 				sc := r.p.pick()
-				u, err := newUser(r.runCtx, r.p, sc, id, iter, r.tr, r.timeout, r.col)
-				if err != nil {
-					return
-				}
+				u := newUser(r.runCtx, r.p, sc, id, iter, r.tr, r.timeout, r.col)
 				r.runScenario(sc, u) // the error is kept in the IterationRecord
 			}
 		}()
@@ -490,10 +488,7 @@ func (r *runner) runStaged() {
 					continue // check the count and the context again
 				}
 				sc := r.p.pick()
-				u, err := newUser(r.runCtx, r.p, sc, id, iter, r.tr, r.timeout, r.col)
-				if err != nil {
-					return
-				}
+				u := newUser(r.runCtx, r.p, sc, id, iter, r.tr, r.timeout, r.col)
 				r.runScenario(sc, u) // the error is kept in the IterationRecord
 				iter++
 			}
@@ -570,31 +565,67 @@ func (r *runner) runOpen() {
 			defer func() { <-slots }()
 			// In the open model, each arrival is treated as a separate user.
 			sc := r.p.pick()
-			u, err := newUser(r.runCtx, r.p, sc, i, 0, r.tr, r.timeout, r.col)
-			if err != nil {
-				return
-			}
+			u := newUser(r.runCtx, r.p, sc, i, 0, r.tr, r.timeout, r.col)
 			u.scheduled.set(at)
 			r.runScenario(sc, u) // the error is kept in the IterationRecord
 		}()
 	}
 }
 
+// userBlock holds everything newUser creates, so that one allocation serves the user, its client and its
+// cookie jar instead of one each.
+type userBlock struct {
+	user   User
+	client http.Client
+	jar    lazyJar
+}
+
 // newUser creates the user for one iteration. The cookie jar is new every time.
-func newUser(ctx context.Context, p Plan, sc *Scenario, id, iter int, tr http.RoundTripper, timeout time.Duration, col *record.Collector) (*User, error) {
-	jar, err := cookiejar.New(nil)
-	if err != nil {
-		return nil, err
-	}
-	return &User{
+func newUser(ctx context.Context, p Plan, sc *Scenario, id, iter int, tr http.RoundTripper, timeout time.Duration, col *record.Collector) *User {
+	b := &userBlock{}
+	b.client = http.Client{Transport: tr, Jar: &b.jar, Timeout: timeout}
+	b.user = User{
 		ID:        id,
 		Iteration: iter,
-		Client:    &http.Client{Transport: tr, Jar: jar, Timeout: timeout},
+		Client:    &b.client,
 		ctx:       ctx,
 		scenario:  sc.Name,
 		baseURL:   p.BaseURL,
 		col:       col,
-	}, nil
+	}
+	return &b.user
+}
+
+// lazyJar is a cookie jar that is created on the first Set-Cookie. Most requests of a load test never
+// receive a cookie, and cookiejar.New allocates a jar and its map, so an iteration that sees no cookie
+// does not pay for them. Until then it holds nothing and Cookies returns nil, as an empty jar does.
+// It is safe for concurrent use, as http.CookieJar requires.
+type lazyJar struct {
+	jar atomic.Pointer[cookiejar.Jar]
+}
+
+func (j *lazyJar) Cookies(u *url.URL) []*http.Cookie {
+	if jar := j.jar.Load(); jar != nil {
+		return jar.Cookies(u)
+	}
+	return nil
+}
+
+func (j *lazyJar) SetCookies(u *url.URL, cookies []*http.Cookie) {
+	if len(cookies) == 0 {
+		return
+	}
+	jar := j.jar.Load()
+	if jar == nil {
+		// cookiejar.New only returns an error for invalid options, and there are none.
+		fresh, _ := cookiejar.New(nil)
+		if j.jar.CompareAndSwap(nil, fresh) {
+			jar = fresh
+		} else {
+			jar = j.jar.Load()
+		}
+	}
+	jar.SetCookies(u, cookies)
 }
 
 // cmpOr returns d, or fallback when d is 0. It is like cmp.Or, but only for durations.
