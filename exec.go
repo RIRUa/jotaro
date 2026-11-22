@@ -148,12 +148,16 @@ type tracer struct {
 	tlsStart, tlsEnd time.Time
 	firstByte        time.Time
 	conn             record.ConnKind
+
+	// trace is the set of hooks handed to net/http. It lives in the tracer, so one allocation serves both.
+	trace httptrace.ClientTrace
 }
 
 // clientTrace returns the hooks to attach to the request context.
 // Start events keep the first call only; done events keep the last.
+// The returned value belongs to the tracer, and a second call rebuilds it in place, so call it once per tracer.
 func (t *tracer) clientTrace() *httptrace.ClientTrace {
-	return &httptrace.ClientTrace{
+	t.trace = httptrace.ClientTrace{
 		DNSStart: func(httptrace.DNSStartInfo) { t.set(&t.dnsStart, false) },
 		DNSDone:  func(httptrace.DNSDoneInfo) { t.set(&t.dnsEnd, true) },
 		// When connecting to several addresses in turn, measure from the first start to the last completion.
@@ -174,6 +178,7 @@ func (t *tracer) clientTrace() *httptrace.ClientTrace {
 		},
 		GotFirstResponseByte: func() { t.set(&t.firstByte, true) },
 	}
+	return &t.trace
 }
 
 // set records only the first call when overwrite is false.
