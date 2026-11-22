@@ -110,3 +110,9 @@ First public release.
 - `jotaro mcp`: an MCP server (stdio) that helps write scenarios. It serves the authoring guide and the threshold syntax as resources, a `write_scenario` prompt, and the tools `check_scenario` (syntax, jotaro-specific lint, type check; nothing is executed) and `validate_threshold`.
 - `THIRD_PARTY_NOTICES.md` (license texts of the bundled modules) is included in the release archives.
 - Runs on Go 1.25 or later; CI on Linux, macOS and Windows.
+
+[Unreleased]: https://github.com/RIRUa/jotaro/compare/v0.1.3...HEAD
+[0.1.3]: https://github.com/RIRUa/jotaro/compare/v0.1.2...v0.1.3
+[0.1.2]: https://github.com/RIRUa/jotaro/compare/v0.1.1...v0.1.2
+[0.1.1]: https://github.com/RIRUa/jotaro/compare/v0.1.0...v0.1.1
+[0.1.0]: https://github.com/RIRUa/jotaro/releases/tag/v0.1.0

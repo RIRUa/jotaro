@@ -670,7 +670,7 @@ func TestUnknownCommandSuggestion(t *testing.T) {
 		"mrege":   `did you mean "merge"?`,
 		"compar":  `did you mean "compare"?`,
 		"exprot":  `did you mean "export"?`,
-		"versoin": `did you mean "version"?`,
+		"versoin": `did you mean "version"?`, //nolint:misspell // deliberate typo: the test feeds a misspelled command
 	} {
 		code, stdout, stderr := runCLI(t, "", in)
 		if code != 2 || stdout != "" || !strings.Contains(stderr, `unknown command "`+in+`"; `+want) {

@@ -4,6 +4,8 @@
 
 [![CI](https://github.com/RIRUa/jotaro/actions/workflows/ci.yml/badge.svg)](https://github.com/RIRUa/jotaro/actions/workflows/ci.yml)
 [![Go Reference](https://pkg.go.dev/badge/github.com/RIRUa/jotaro.svg)](https://pkg.go.dev/github.com/RIRUa/jotaro)
+[![Release](https://img.shields.io/github/v/release/RIRUa/jotaro)](https://github.com/RIRUa/jotaro/releases/latest)
+[![Go version](https://img.shields.io/github/go-mod/go-version/RIRUa/jotaro)](go.mod)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 A Go library for load-testing HTTP servers with scenarios (a flow such as login → list → order). Results can be written to the console, JSON or HTML, and the CLI can check them against thresholds.

@@ -1,9 +1,26 @@
 version: "2"
 
 linters:
-  # Use the defaults as is (errcheck / govet / ineffassign / staticcheck / unused).
+  # The standard set (errcheck / govet / ineffassign / staticcheck / unused) plus a few linters
+  # with a good signal for this code base. Add more gradually, fixing what they report first.
   default: standard
+  enable:
+    - bodyclose
+    - copyloopvar
+    - errorlint
+    - gocritic
+    - misspell
+    - revive
+    - unparam
+    - usetesting
   settings:
+    revive:
+      # Only the exported-comment rule (CONTRIBUTING: exported identifiers need a doc comment).
+      # revive's other default rules (unused-parameter, redefines-builtin-id, ...) are too noisy for
+      # test helpers and examples.
+      enable-all-rules: false
+      rules:
+        - name: exported
     errcheck:
       # By design, errors from write targets (io.Writer) are ignored. Close on the read side is idiomatically ignored too.
       exclude-functions:
@@ -23,7 +40,13 @@ linters:
       - path: ^examples/
         linters:
           - errcheck
+      # The examples are small programs where log.Fatal after a defer is fine.
+      - path: ^examples/
+        linters:
+          - gocritic
+        text: exitAfterDefer
 
 formatters:
   enable:
     - gofmt
+    - goimports

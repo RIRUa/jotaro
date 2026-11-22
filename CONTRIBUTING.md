@@ -6,6 +6,7 @@ Thanks for your interest in jotaro! Bug reports, ideas and pull requests are all
 
 - For anything larger than a small fix, please open an issue first so we can agree on the direction. [`DESIGN.md`](DESIGN.md) explains why things are the way they are.
 - jotaro is pre-1.0 (v0.x). The API may change between minor versions.
+- Please follow the [Code of Conduct](CODE_OF_CONDUCT.md). Security problems go through [`SECURITY.md`](SECURITY.md), not a public issue.
 
 ## Development
 
@@ -17,12 +18,13 @@ go test -race ./...
 go test -run='^$' -bench=. -benchmem ./...   # benchmarks (not run in CI; timings on shared runners are noisy)
 go test -run='^$' -fuzz=FuzzReadJSON -fuzztime=30s ./report   # fuzz one target (not run in CI; plain go test only runs the seed corpus)
 golangci-lint run   # optional locally; CI runs it with the version pinned in .github/workflows/ci.yml
+go test -coverprofile=coverage.out $(go list ./... | grep -v /examples/) && scripts/coverage-summary.sh   # optional: coverage per package
 ```
 
 - Format with `gofmt`.
 - Parsers of external input have fuzz targets: `FuzzParseThreshold` and `FuzzReadJSON` (`./report`), `FuzzReadRaw` (`./record`), `FuzzResponseJSON`, `FuzzLoadCSV`, `FuzzStagesAt` and `FuzzUserChanges` (the root package), `FuzzPercentile` (`./internal/histogram`). Run one with `-fuzz=<name>` as above. If the fuzzer finds a crasher, commit the file it writes under the package's `testdata/fuzz/<name>/` together with the fix.
 - Add or update tests together with the change. Behaviour of the result format and the threshold syntax is documented in [`docs/result.md`](docs/result.md); update it when you change either.
-- Exported identifiers need a doc comment in English.
+- Exported identifiers need a doc comment in English. `golangci-lint` checks this (the `revive` exported rule) together with a few other linters listed in [`.golangci.yml`](.golangci.yml), and checks import grouping (`goimports`).
 - When you add, remove or update a dependency, run `scripts/gen-third-party-notices.sh` and commit the updated `THIRD_PARTY_NOTICES.md`. Binaries that include a dependency must ship its license text, and the release archives include this file.
   CI checks that `go mod tidy` and the script leave the tree unchanged (the `generated` job), so a stale `go.mod`, `go.sum` or `THIRD_PARTY_NOTICES.md` fails the pull request.
 - Dependabot does not regenerate `THIRD_PARTY_NOTICES.md`, so the `generated` job usually fails on its pull requests (whenever a module linked into the `jotaro` binary changes version). Check out the branch, run `go mod tidy` and `scripts/gen-third-party-notices.sh`, and push the result before merging.
@@ -32,7 +34,7 @@ golangci-lint run   # optional locally; CI runs it with the version pinned in .g
 
 - Keep one purpose per pull request.
 - Use a short prefix in the title: `feat:` / `fix:` / `docs:` / `chore:` / `ci:`.
-- CI (vet, test with `-race` on Go 1.25 and stable, golangci-lint, and the generated-files check) must pass.
+- CI (vet, test with `-race` on Go 1.25 and stable, golangci-lint, and the generated-files check) must pass. The run on Linux with the latest Go also puts the statement coverage per package in the job summary; please look at it if you change code that was well covered, and add tests when the number drops. Pull requests that push new commits cancel the previous CI run of the same pull request.
 
 ## Releasing (maintainers)
 

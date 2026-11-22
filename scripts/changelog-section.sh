@@ -16,6 +16,8 @@ cd "$(dirname "$0")/.."
 section=$(awk -v ver="$version" '
 	index($0, "## [" ver "]") == 1 { found = 1; next }
 	found && index($0, "## [") == 1 { exit }
+	# The link references at the bottom of the file belong to the last section textually, not to its notes.
+	found && $0 ~ /^\[[^]]+\]: / { next }
 	found { print }
 ' CHANGELOG.md)
 

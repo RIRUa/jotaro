@@ -3,10 +3,11 @@ package report
 import (
 	"errors"
 	"fmt"
-	"github.com/RIRUa/jotaro/internal/histogram"
-	"github.com/RIRUa/jotaro/record"
 	"math"
 	"time"
+
+	"github.com/RIRUa/jotaro/internal/histogram"
+	"github.com/RIRUa/jotaro/record"
 )
 
 // MergeReports combines several reports into one.
