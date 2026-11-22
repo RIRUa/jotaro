@@ -1,6 +1,7 @@
 package report
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -197,6 +198,13 @@ func requestRatio(n func(q RequestStats) int) metric {
 var thresholdOps = []string{"<=", ">=", "<", ">"}
 
 // ParseThreshold turns a string such as "p95<200ms" into a Threshold.
+//
+// The value must be one that a measurement can take, so that a typo cannot make a threshold that is never met
+// or always met. ParseThreshold returns an error that names the expression and the reason for NaN and
+// infinities (including a number too large for float64, such as 1e400), for a negative value of any kind
+// ("p95<-1s", "rps>-1", "error_rate<-5%"; -0 is zero and accepted) and for a ratio above 100%
+// ("error_rate<500%", or above 1 in the plain form "error_rate<1.5"). 0, 100% and 1 are accepted.
+// The same parser reads Plan.AbortOn, so "error_rate>500%" (a rule that could never fire) is an error there too.
 func ParseThreshold(s string) (Threshold, error) {
 	fail := func(format string, a ...any) (Threshold, error) {
 		return Threshold{}, fmt.Errorf("jotaro: threshold %q: %s", s, fmt.Sprintf(format, a...))
@@ -398,6 +406,10 @@ func parseSelector(sel string) ([]selectorFilter, error) {
 
 // parseThresholdValue parses the right-hand side of a threshold in the unit of kind
 // (for example "200ms" for a duration, "1%" for a ratio).
+//
+// The result is always finite and not negative, because no metric can be NaN, infinite or negative:
+// such a threshold could never be met (or, for a ratio above 100%, would always be met), which is a
+// configuration mistake. A ratio is also at most 1 (100%).
 func parseThresholdValue(kind metricKind, s string) (float64, error) {
 	if s == "" {
 		return 0, fmt.Errorf("no value")
@@ -408,24 +420,49 @@ func parseThresholdValue(kind metricKind, s string) (float64, error) {
 		if err != nil {
 			return 0, fmt.Errorf("cannot be read as a duration (e.g. 200ms, 1.5s)")
 		}
-		return float64(d), nil
+		return checkThresholdValue(float64(d), s)
 	case kindRatio:
-		if p, ok := strings.CutSuffix(s, "%"); ok {
-			v, err := strconv.ParseFloat(strings.TrimSpace(p), 64)
-			if err != nil {
-				return 0, fmt.Errorf("cannot be read as a ratio (e.g. 1%%, 0.01)")
-			}
-			return v / 100, nil
+		p, isPercent := strings.CutSuffix(s, "%")
+		text := s
+		if isPercent {
+			text = strings.TrimSpace(p)
 		}
-		v, err := strconv.ParseFloat(s, 64)
-		if err != nil {
+		v, err := strconv.ParseFloat(text, 64)
+		if err != nil && !errors.Is(err, strconv.ErrRange) {
 			return 0, fmt.Errorf("cannot be read as a ratio (e.g. 1%%, 0.01)")
+		}
+		if isPercent {
+			v /= 100
+		}
+		v, err = checkThresholdValue(v, s)
+		if err != nil {
+			return 0, err
+		}
+		if v > 1 {
+			return 0, fmt.Errorf("ratio %q is above 100%% (above 1 in the plain form)", s)
 		}
 		return v, nil
 	}
 	v, err := strconv.ParseFloat(s, 64)
-	if err != nil {
+	if err != nil && !errors.Is(err, strconv.ErrRange) {
 		return 0, fmt.Errorf("cannot be read as a number")
+	}
+	return checkThresholdValue(v, s)
+}
+
+// checkThresholdValue rejects a value that no measurement can ever take: NaN, an infinity (this includes a
+// number too large for float64, which strconv reports as a range error with an infinite result) and a negative
+// number. A negative zero is normalized to zero so that equal thresholds compare equal. text is the value as written.
+func checkThresholdValue(v float64, text string) (float64, error) {
+	switch {
+	case math.IsNaN(v):
+		return 0, fmt.Errorf("value %q is NaN; use a finite number", text)
+	case math.IsInf(v, 0):
+		return 0, fmt.Errorf("value %q is infinite or out of range; use a finite number", text)
+	case v < 0:
+		return 0, fmt.Errorf("value %q is negative; no metric can be negative", text)
+	case v == 0:
+		return 0, nil
 	}
 	return v, nil
 }
@@ -596,6 +633,10 @@ func (c Checks) Passed() bool {
 }
 
 // Check checks whether r meets all of ts.
+//
+// A threshold built by ParseThreshold always has a finite, non-negative value (and a ratio of at most 1),
+// so a mistake such as "error_rate<500%" is rejected there instead of passing here. A Threshold assembled by hand
+// with a NaN, infinite, negative or above-100% value is not checked again: such a value is the caller's mistake.
 //
 // When {step=...} matches steps of the same name in several scenarios, each is checked separately.
 // When nothing matches the filter, or there is no data to aggregate (such as zero requests),

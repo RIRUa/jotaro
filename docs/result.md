@@ -454,6 +454,16 @@ Exit code 1 if any threshold is not met. If a threshold is malformed or the file
 | `requests` | Number of requests | Number | `{step=...}` |
 | `rps` `dropped` | Requests per second / number of dropped arrivals | Number | Overall only |
 
+#### Accepted values
+
+The value must be something a measurement can actually take, so a typo cannot turn a gate into one that never fails or never passes. `ParseThreshold` returns an error that names the expression and the reason for:
+
+- `NaN` and `Inf` (also `+Inf`, `-Inf`, `infinity`) and a number too large for a 64-bit float (`1e400`), for every kind of metric
+- a negative value, for every kind: `p95<-1s`, `rps>-1`, `error_rate<-5%`. No metric can be negative. `-0`, `-0s` and `-0%` are zero and still accepted
+- a ratio above 100%, written as `500%` or above `1` in the plain form (`error_rate<1.5`). `100%`, `1` and `0` are accepted
+
+For example `error_rate<500%` fails with `ratio "500%" is above 100% (above 1 in the plain form)`. Before this check these expressions parsed without an error, but could never be met (`error_rate<-5%`) or were always met (`error_rate<500%`). The same parser reads `Plan.AbortOn`, `jotaro check -t` and the MCP tools, so they reject the same values.
+
 #### Names with special characters
 
 An unquoted name in `{...}` runs to the next comma, with the spaces around it trimmed, and braces must be balanced. To select a step or scenario whose name contains a comma, an unbalanced `{` or `}`, `<` or `>` outside braces, or spaces at either end, write the name as a Go double-quoted string:
@@ -488,7 +498,7 @@ AbortOn: []jotaro.AbortRule{
 },
 ```
 
-- `When` uses the threshold syntax above (`report.ParseThreshold`), but it describes the state to **stop at**, not the state to accept: `http_5xx_rate>50%` aborts once more than half of the requests got a 5xx. A malformed `When` makes `Run` fail before any load is sent.
+- `When` uses the threshold syntax above (`report.ParseThreshold`), but it describes the state to **stop at**, not the state to accept: `http_5xx_rate>50%` aborts once more than half of the requests got a 5xx. A malformed `When` makes `Run` fail before any load is sent; so does a value that can never be meant (`NaN`, `Inf`, a negative value, a ratio above 100%: `error_rate>500%` could never fire).
 - It is evaluated every second against the whole run so far (not a sliding window), the same way `Report.Check` reads a finished report. Percentiles are therefore the approximate ones of an incremental aggregation. Nothing counts as holding while there is no data yet.
 - `For` is how long the condition must hold without a break (0: at the first evaluation where it holds). A few seconds keep one early failure from stopping a run whose statistics have not settled.
 - Mind which metric sees the failure: `error_rate` counts transport-level errors only, so an HTTP error status needs `http_5xx_rate` / `http_4xx_rate`, and wrong responses (`Expect*`) need `iteration_fail_rate`.

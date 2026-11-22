@@ -43,6 +43,9 @@ func TestAbortRuleValidation(t *testing.T) {
 		"empty":         {{}},
 		"negative For":  {{When: "http_5xx_rate>50%", For: -time.Second}},
 		"bad value":     {{When: "p95>fast"}},
+		"never fires":   {{When: "error_rate>500%"}},
+		"negative":      {{When: "p95>-1s"}},
+		"NaN":           {{When: "rps<NaN"}},
 		"second broken": {{When: "http_5xx_rate>50%"}, {When: "p95"}},
 	} {
 		p := base

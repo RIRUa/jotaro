@@ -168,6 +168,9 @@ func TestCheckUsageErrors(t *testing.T) {
 		"no threshold":         {in},
 		"no result file":       {"-t", "p95<1s"},
 		"unreadable threshold": {"-t", "p95", in},
+		"ratio above 100%":     {"-t", "error_rate<500%", in},
+		"negative duration":    {"-t", "p95<-1s", in},
+		"NaN":                  {"-t", "rps>NaN", in},
 	} {
 		var stdout, stderr bytes.Buffer
 		if code := run(append([]string{"check"}, args...), nil, &stdout, &stderr); code != 2 {
