@@ -40,6 +40,7 @@ Go 1.25 以上が必要です。
 
 ### 1. シナリオを書く
 
+<!-- doccheck: before var creds map[string]string -->
 ```go
 var checkout = jotaro.NewScenario("checkout", func(ctx context.Context, u *jotaro.User) error {
 	var login struct {
@@ -79,6 +80,7 @@ var checkout = jotaro.NewScenario("checkout", func(ctx context.Context, u *jotar
 
 ユーザーごとに別のデータ（アカウントなど）を配るには `Feeder` を使う。CSV からは `LoadCSV` で読める。
 
+<!-- doccheck: stmts -->
 ```go
 var accounts = jotaro.NewFeeder([]map[string]string{
 	{"user": "alice"}, {"user": "bob"},
@@ -89,6 +91,7 @@ creds, ok := accounts.Next()
 
 ### 2. 負荷のかけ方を決めて実行する
 
+<!-- doccheck: before var checkout *jotaro.Scenario -->
 ```go
 rep, err := jotaro.Run(ctx, jotaro.Plan{
 	Scenario: checkout,
@@ -125,12 +128,14 @@ if err != nil && !errors.Is(err, jotaro.ErrAborted) {
 
 ### 3. 結果を出す
 
+<!-- doccheck: before var rep *report.Report -->
 ```go
 rep.Write(os.Stdout, report.FormatText) // FormatText / FormatJSON / FormatHTML
 ```
 
 しきい値で判定することもできます。
 
+<!-- doccheck: before var rep *report.Report -->
 ```go
 th, _ := report.ParseThreshold("p95<200ms")
 checks := rep.Check(th)

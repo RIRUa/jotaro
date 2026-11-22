@@ -18,6 +18,16 @@ type codeBlock struct {
 	info string // the info string after the opening fence, trimmed ("go", "sh", "")
 	code string // the content, with "\n" line ends
 	line int    // the line of the opening fence
+
+	// directives are the <!-- doccheck: ... --> comments directly before the block (blank lines may lie
+	// between them); see snippets.go.
+	directives []directive
+}
+
+// directive is one "<!-- doccheck: text -->" comment.
+type directive struct {
+	text string
+	line int
 }
 
 // document is what the checks need to know about one Markdown file.
@@ -49,6 +59,7 @@ func parseDocument(path, text string) *document {
 		fenceN  int
 		cur     codeBlock
 		body    []string
+		pending []directive // doccheck comments seen since the last line that is not blank
 	)
 	for i, line := range lines {
 		trimmed := strings.TrimLeft(line, " \t")
@@ -57,6 +68,7 @@ func parseDocument(path, text string) *document {
 				cur.code = strings.Join(body, "\n")
 				d.blocks = append(d.blocks, cur)
 				in = false
+				pending = nil
 				continue
 			}
 			body = append(body, line)
@@ -64,9 +76,17 @@ func parseDocument(path, text string) *document {
 		}
 		if ch, n, rest := fence(trimmed); n >= 3 {
 			in, fenceCh, fenceN = true, ch, n
-			cur = codeBlock{info: strings.TrimSpace(rest), line: i + 1}
+			cur = codeBlock{info: strings.TrimSpace(rest), line: i + 1, directives: pending}
+			pending = nil
 			body = body[:0]
 			continue
+		}
+		if text, ok := doccheckComment(trimmed); ok {
+			pending = append(pending, directive{text: text, line: i + 1})
+			continue
+		}
+		if trimmed != "" {
+			pending = nil
 		}
 		if level, text, ok := atxHeading(line); ok {
 			d.headings = append(d.headings, heading{level: level, text: text, line: i + 1})
@@ -77,6 +97,20 @@ func parseDocument(path, text string) *document {
 		d.blocks = append(d.blocks, cur)
 	}
 	return d
+}
+
+// doccheckComment recognises a line that is only "<!-- doccheck: text -->" and returns the text.
+func doccheckComment(line string) (text string, ok bool) {
+	rest, ok := strings.CutPrefix(strings.TrimSpace(line), "<!--")
+	if !ok {
+		return "", false
+	}
+	rest, ok = strings.CutSuffix(rest, "-->")
+	if !ok {
+		return "", false
+	}
+	rest, ok = strings.CutPrefix(strings.TrimSpace(rest), "doccheck:")
+	return strings.TrimSpace(rest), ok
 }
 
 // fence reports the fence character and length at the start of s (n is 0 when s does not start with one)

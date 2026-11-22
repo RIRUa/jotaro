@@ -34,6 +34,7 @@ README と `pkg.go.dev`（v12.13.0）で確認した事実:
 
 ## 3. シナリオの書き心地（案A）
 
+<!-- doccheck: before type Item struct{}; func creds(id int) any { return nil }; func order(it Item) any { return nil } -->
 ```go
 var checkout = jotaro.NewScenario("checkout", func(ctx context.Context, u *jotaro.User) error {
     var login struct{ Token string `json:"token"` }
@@ -70,6 +71,7 @@ var checkout = jotaro.NewScenario("checkout", func(ctx context.Context, u *jotar
 
 ## 4. 負荷モデル
 
+<!-- doccheck: before var checkout *jotaro.Scenario -->
 ```go
 jotaro.Run(ctx, jotaro.Plan{
     Scenario: checkout,
@@ -118,6 +120,7 @@ jotaro.Run(ctx, jotaro.Plan{
 
 `Feeder[T]` が、ユーザーごとに別のデータ（アカウント、入力値）を配る。全ユーザーから並行に呼べる。
 
+<!-- doccheck: before var f *os.File -->
 ```go
 rows, _ := jotaro.LoadCSV(f) // 1 行目がヘッダー。列名をキーとする map の列
 accounts := jotaro.NewFeeder(rows, jotaro.Once)

@@ -44,6 +44,21 @@ docs/foo.md | twin | Japanese version follows in #123
 
 The second field is the check that is allowed to fail (`twin`, `headings`, `blocks` or `code`) and the third is the reason, which is required. An entry that no longer matches a difference fails the test, so remove it when you bring the Japanese document in line.
 
+**Go snippets compile.** Every fenced `go` block in the Markdown documents (both languages) is built, not run, in a temporary module that replaces `github.com/RIRUa/jotaro` with your checkout, so a renamed method or a changed signature turns the check red. This step needs the `go` tool and the module cache, so a plain `go test ./...` skips it; `scripts/check-docs.sh` sets `DOCCHECK_COMPILE=1` and runs it. Most snippets are fragments, so each one is wrapped into a file of its own before it is built:
+
+- A block that starts with `package` is built as it is. One that starts with `var`, `type`, `func` or `const` is a list of top-level declarations. Anything else is a list of statements inside a function that has `ctx context.Context`.
+- The file imports `context`, `errors`, `fmt`, `io`, `log`, `net/http`, `os`, `time`, `jotaro`, `record` and `report`, and an unused import is fine. A variable that a fragment declares and does not use is fine too.
+- Anything else a snippet relies on, such as the `rep` of an earlier snippet, has to be declared with a comment on the line before the block (several comments can be stacked, and the Japanese file needs the same ones):
+
+```markdown
+<!-- doccheck: before var rep *report.Report -->
+<!-- doccheck: fields jotaro.Plan -->
+<!-- doccheck: stmts -->
+<!-- doccheck: skip: the declaration of report.Writer, quoted for reference -->
+```
+
+`before <Go code>` adds declarations the block needs (several can go on one line separated by `;`), `fields <Type>` says that the block is the body of a composite literal of that type, `stmts` says that a block starting with `var` is a list of statements, and `skip: <reason>` leaves the block out (the reason is required; use it for pseudo code). An unknown comment fails the check. The documents embedded in the MCP server (`internal/mcpserver/content/`) are not scanned, because they are served to models verbatim; `internal/mcpserver/guide_test.go` compiles the skeleton in the guide.
+
 ## Pull requests
 
 - Keep one purpose per pull request.
