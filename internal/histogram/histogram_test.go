@@ -86,3 +86,21 @@ func TestAddMatchesNew(t *testing.T) {
 		}
 	}
 }
+
+// TestPercentileSaturates checks that a bucket whose representative does not fit in a Duration gives the largest
+// Duration, not a wrapped (negative) one. The bucket of math.MaxInt64 has a representative above it, and a bucket number
+// from a hand-edited result can be anything.
+func TestPercentileSaturates(t *testing.T) {
+	for name, h := range map[string]H{
+		"MaxInt64":         New([]time.Duration{math.MaxInt64}),
+		"MaxInt64 and one": New([]time.Duration{math.MaxInt64, math.MaxInt64 - 1}),
+		"huge bucket":      {1 << 40: 1},
+		"max bucket":       {math.MaxInt: 1},
+	} {
+		for _, p := range []int{1, 50, 100} {
+			if got := h.Percentile(p); got != math.MaxInt64 {
+				t.Errorf("%s: Percentile(%d) = %v, want the largest Duration", name, p, got)
+			}
+		}
+	}
+}
