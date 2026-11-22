@@ -15,7 +15,7 @@ Requires Go 1.25 or later (the lowest version in `go.mod`).
 ```sh
 go vet ./...
 go test -race ./...
-go test -run='^$' -bench=. -benchmem ./...   # benchmarks (not run in CI; timings on shared runners are noisy)
+go test -run='^$' -bench=. -benchmem ./...   # benchmarks (not run in CI; timings on shared runners are noisy; `TestIterationAllocations` guards the allocation count instead)
 go test -run='^$' -fuzz=FuzzReadJSON -fuzztime=30s ./report   # fuzz one target (not run in CI; plain go test only runs the seed corpus)
 golangci-lint run   # optional locally; CI runs it with the version pinned in .github/workflows/ci.yml
 go test -coverprofile=coverage.out $(go list ./... | grep -v /examples/) && scripts/coverage-summary.sh   # optional: coverage per package
@@ -28,7 +28,7 @@ go test -coverprofile=coverage.out $(go list ./... | grep -v /examples/) && scri
 - When you add, remove or update a dependency, run `scripts/gen-third-party-notices.sh` and commit the updated `THIRD_PARTY_NOTICES.md`. Binaries that include a dependency must ship its license text, and the release archives include this file.
   CI checks that `go mod tidy` and the script leave the tree unchanged (the `generated` job), so a stale `go.mod`, `go.sum` or `THIRD_PARTY_NOTICES.md` fails the pull request.
 - Dependabot does not regenerate `THIRD_PARTY_NOTICES.md`, so the `generated` job usually fails on its pull requests (whenever a module linked into the `jotaro` binary changes version). Check out the branch, run `go mod tidy` and `scripts/gen-third-party-notices.sh`, and push the result before merging.
-- The README, `DESIGN.md`, `docs/result.md` and `examples/README.md` have Japanese counterparts (`*_jp.md`). If you can only update the English version, say so in the pull request and the Japanese one will be brought in line, and add the document to the allowlist described in [Documentation checks](#documentation-checks) so that CI stays green until then.
+- The README, `DESIGN.md`, `docs/result.md`, `docs/performance.md` and `examples/README.md` have Japanese counterparts (`*_jp.md`). If you can only update the English version, say so in the pull request and the Japanese one will be brought in line, and add the document to the allowlist described in [Documentation checks](#documentation-checks) so that CI stays green until then.
 
 ## Documentation checks
 
