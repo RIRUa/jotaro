@@ -195,7 +195,10 @@ func TestPanicInStepIsRecorded(t *testing.T) {
 		t.Fatalf("steps = %+v, want one record", steps)
 	}
 	st := steps[0]
-	if st.Step != "a" || st.Err != record.ErrPanic || st.UserID != 4 || st.Iteration != 2 || st.Duration <= 0 || st.Start.IsZero() {
+	// A step this short (one local request, then a panic) can legitimately be
+	// measured as 0 on a coarse monotonic clock (Windows: 0.5-15.6 ms), so only
+	// a negative Duration is invalid.
+	if st.Step != "a" || st.Err != record.ErrPanic || st.UserID != 4 || st.Iteration != 2 || st.Duration < 0 || st.Start.IsZero() {
 		t.Errorf("step = %+v", st)
 	}
 	if len(iters) != 1 || iters[0].Err != record.ErrPanic {
