@@ -287,6 +287,7 @@ func Run(ctx context.Context, p Plan) (*report.Report, error) {
 	grace := cmpOr(p.Grace, defaultGrace)
 
 	tr := newTransport()
+	trackDials(tr)
 	tr.MaxIdleConns = p.maxConcurrency() * 2
 	tr.MaxIdleConnsPerHost = p.maxConcurrency()
 	defer tr.CloseIdleConnections()

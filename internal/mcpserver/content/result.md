@@ -43,7 +43,8 @@ In the JSON every duration is an integer in nanoseconds (the field name ends in 
 | `latency` | time from sending a request until its response has been fully read. Requests that ended in a network error are included |
 | `corrected` | time from the **scheduled** start (Coordinated Omission correction). Equal to `latency` in the closed model |
 | `ttfb` | time to the first byte of the response. Only requests that received a response |
-| `dns` / `connect` / `tls` | only requests in which that phase happened, that is, requests that opened a new connection |
+| `conn_new` / `conn_reused` | `conn_new` is the number of connections that carried at least one request, counted on the first request that used each one; `conn_reused` is the number of requests that used an already used connection. Connections dialed but never used (still idle at the end, HTTP/2 start-up dials that `net/http` closes unused) are not counted, so the server can have accepted more connections than `conn_new`, by many over HTTP/2. Counting every dialed connection is tracked in #184 |
+| `dns` / `connect` / `tls` | only requests in which that phase happened, that is, requests that started a dial (usually the request that first used that connection and is counted in `conn_new`) |
 | `status` | responses per class (`2xx`, `4xx`, `5xx`, ...) |
 | `errors` | request failures per kind (below), which are transport-level errors only. **HTTP 4xx/5xx are not errors**, and neither is a failed `Expect*` check: that fails the step, not the request |
 | error rate | `errors` divided by the number of requests (the `error_rate` threshold metric). It is the share of requests that ended in a transport-level error (timeout, connection refused, DNS failure and so on). A failed `Expect*` check is not counted as a request error: it fails the step with `expect_mismatch`, which is listed in the step's errors, and it reaches `iteration_fail_rate` when the scenario returns that error |
