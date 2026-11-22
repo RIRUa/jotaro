@@ -28,13 +28,27 @@ go test -coverprofile=coverage.out $(go list ./... | grep -v /examples/) && scri
 - When you add, remove or update a dependency, run `scripts/gen-third-party-notices.sh` and commit the updated `THIRD_PARTY_NOTICES.md`. Binaries that include a dependency must ship its license text, and the release archives include this file.
   CI checks that `go mod tidy` and the script leave the tree unchanged (the `generated` job), so a stale `go.mod`, `go.sum` or `THIRD_PARTY_NOTICES.md` fails the pull request.
 - Dependabot does not regenerate `THIRD_PARTY_NOTICES.md`, so the `generated` job usually fails on its pull requests (whenever a module linked into the `jotaro` binary changes version). Check out the branch, run `go mod tidy` and `scripts/gen-third-party-notices.sh`, and push the result before merging.
-- The README, `DESIGN.md` and `docs/result.md` have Japanese counterparts (`*_jp.md`). If you can only update the English version, say so in the pull request and the Japanese one will be brought in line.
+- The README, `DESIGN.md`, `docs/result.md` and `examples/README.md` have Japanese counterparts (`*_jp.md`). If you can only update the English version, say so in the pull request and the Japanese one will be brought in line, and add the document to the allowlist described in [Documentation checks](#documentation-checks) so that CI stays green until then.
+
+## Documentation checks
+
+The Markdown documents are checked by Go tests in [`internal/doccheck`](internal/doccheck). Run them with `scripts/check-docs.sh` (CI runs the same script in the `docs` workflow; a plain `go test ./...` runs them too, apart from the steps that need the `go` tool to build something). Everything is offline.
+
+**English/Japanese parity.** Every English document has a Japanese twin named `<name>_jp.md` next to it, and the two must have the same structure: the same number and order (levels) of headings, the same number of fenced code blocks with the same language, and the same code in them. Comments are not compared (`// ...` in `go` blocks, `# ...` in `sh` blocks), because they are translated, and neither are blank lines. A block without a language, such as a diagram or a usage line, has translated words in it, so only its number of lines is compared. A twin is required for `README.md`, `DESIGN.md` and every Markdown file below `docs/` and `examples/`, so a new guide such as `docs/foo.md` needs `docs/foo_jp.md`. A `_jp.md` file without an English one fails too. The other root documents (this one, `CHANGELOG.md`, ...) are English only.
+
+If you can only write the English version, add a line to [`internal/doccheck/parity_allowlist.txt`](internal/doccheck/parity_allowlist.txt):
+
+```text
+docs/foo.md | twin | Japanese version follows in #123
+```
+
+The second field is the check that is allowed to fail (`twin`, `headings`, `blocks` or `code`) and the third is the reason, which is required. An entry that no longer matches a difference fails the test, so remove it when you bring the Japanese document in line.
 
 ## Pull requests
 
 - Keep one purpose per pull request.
 - Use a short prefix in the title: `feat:` / `fix:` / `docs:` / `chore:` / `ci:`.
-- CI (vet, test with `-race` on Go 1.25 and stable, golangci-lint, and the generated-files check) must pass. The run on Linux with the latest Go also puts the statement coverage per package in the job summary; please look at it if you change code that was well covered, and add tests when the number drops. Pull requests that push new commits cancel the previous CI run of the same pull request.
+- CI (vet, test with `-race` on Go 1.25 and stable, golangci-lint, and the generated-files check) must pass. The `docs` workflow (documentation checks) is not a required check, but please keep it green. The run on Linux with the latest Go also puts the statement coverage per package in the job summary; please look at it if you change code that was well covered, and add tests when the number drops. Pull requests that push new commits cancel the previous CI run of the same pull request.
 
 ## Releasing (maintainers)
 

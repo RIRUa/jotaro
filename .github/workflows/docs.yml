@@ -1,0 +1,29 @@
+name: docs
+
+# Checks the Markdown documentation: English/Japanese parity, Go snippets that compile and relative links
+# (internal/doccheck, run by scripts/check-docs.sh). Everything is offline, so a dead external site cannot
+# turn it red. It is not a required check.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+# Cancel the outdated run when a pull request is updated. Pushes to main are never cancelled.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version: stable
+      - run: scripts/check-docs.sh
