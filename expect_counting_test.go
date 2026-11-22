@@ -3,7 +3,6 @@ package jotaro
 import (
 	"context"
 	"net/http"
-	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -30,33 +29,30 @@ func checkExpr(t *testing.T, rep *report.Report, expr string) report.CheckResult
 // error_rate 0. The mismatch is recorded as expect_mismatch on the step, and on the iteration when the
 // scenario returns the error.
 func TestExpectMismatchCounting(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusInternalServerError)
-	}))
-	defer srv.Close()
-
-	run := func(t *testing.T, returnErr bool) *report.Report {
+	// Every request fails with a 500 after 7ms, on a fake clock: 1 user for 200ms makes 29 requests (0..196ms).
+	server := fakeServerStatus(7*time.Millisecond, http.StatusInternalServerError)
+	runPlan := func(t *testing.T, returnErr bool) *report.Report {
 		t.Helper()
 		sc := NewScenario("s", func(ctx context.Context, u *User) error {
 			err := u.Step("get", func(s *Step) error { return s.Get("/").Do().ExpectStatus(200) })
 			if returnErr {
 				return err
 			}
-			time.Sleep(time.Millisecond) // keep the loop from spinning when errors are swallowed
 			return nil
 		})
-		rep, err := Run(context.Background(), Plan{Scenario: sc, BaseURL: srv.URL, Users: 1, Duration: 200 * time.Millisecond})
+		rep, err := run(context.Background(), Plan{Scenario: sc, BaseURL: "http://stub.test", Users: 1, Duration: 200 * time.Millisecond}, server)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if rep.Requests.Count == 0 {
-			t.Fatal("no requests were made")
+		if rep.Requests.Count != 29 {
+			t.Fatalf("requests = %d, want 29", rep.Requests.Count)
 		}
 		return rep
 	}
 
 	t.Run("mismatch is a step error, not a request error", func(t *testing.T) {
-		rep := run(t, false)
+		var rep *report.Report
+		inBubble(t, func(t *testing.T) { rep = runPlan(t, false) })
 		if len(rep.Requests.Errors) != 0 {
 			t.Errorf("request errors = %v, want none", rep.Requests.Errors)
 		}
@@ -87,7 +83,8 @@ func TestExpectMismatchCounting(t *testing.T) {
 	})
 
 	t.Run("returning the mismatch reaches iteration_fail_rate", func(t *testing.T) {
-		rep := run(t, true)
+		var rep *report.Report
+		inBubble(t, func(t *testing.T) { rep = runPlan(t, true) })
 		it := rep.Scenarios[0].Iterations
 		if it.Count == 0 || it.Failed != it.Count || it.Errors[record.ErrExpect] != it.Count {
 			t.Errorf("iterations = %+v, want all failed with %s", it, record.ErrExpect)

@@ -2,8 +2,6 @@ package jotaro
 
 import (
 	"context"
-	"net/http"
-	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -30,93 +28,103 @@ func TestRateValidate(t *testing.T) {
 }
 
 func TestRunRate(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
-	defer srv.Close()
-
-	sc := NewScenario("s", func(ctx context.Context, u *User) error {
-		return u.Step("get", func(s *Step) error { return s.Get("/").Do().ExpectStatus(200) })
+	inBubble(t, func(t *testing.T) {
+		sc := NewScenario("s", func(ctx context.Context, u *User) error {
+			return u.Step("get", func(s *Step) error { return s.Get("/").Do().ExpectStatus(200) })
+		})
+		// 100/s for 60s (and 5ms, so that no arrival ties with the end): one arrival every 10ms from 0 to 60s.
+		rep, err := run(context.Background(), Plan{
+			Scenario: sc, BaseURL: "http://stub.test", Arrival: Rate(100, time.Second), Duration: time.Minute + 5*time.Millisecond,
+		}, fakeServerAfter(3*time.Millisecond))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !rep.Open || rep.Dropped != 0 {
+			t.Fatalf("Open=%v Dropped=%d", rep.Open, rep.Dropped)
+		}
+		if n := rep.Scenarios[0].Iterations.Count; n != 6001 {
+			t.Fatalf("Iterations = %d, want 6001", n)
+		}
+		if rep.Scenarios[0].Iterations.Failed != 0 {
+			t.Fatalf("Failed = %d", rep.Scenarios[0].Iterations.Failed)
+		}
+		// Every full second has exactly 100 requests (the 61st holds only the arrival at 60s).
+		if len(rep.Series) != 61 {
+			t.Fatalf("Series has %d points, want 61", len(rep.Series))
+		}
+		for _, p := range rep.Series[:60] {
+			if p.Requests != 100 {
+				t.Errorf("second %d has %d requests, want 100", p.Second, p.Requests)
+			}
+		}
 	})
-	rep, err := Run(context.Background(), Plan{
-		Scenario: sc, BaseURL: srv.URL, Arrival: Rate(100, time.Second), Duration: 500 * time.Millisecond,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !rep.Open || rep.Dropped != 0 {
-		t.Fatalf("Open=%v Dropped=%d", rep.Open, rep.Dropped)
-	}
-	// 100/s × 0.5s = 50 times. Allow a margin for timer jitter (especially large on Windows).
-	if n := rep.Scenarios[0].Iterations.Count; n < 40 || n > 56 {
-		t.Fatalf("Iterations = %d, want about 50", n)
-	}
-	if rep.Scenarios[0].Iterations.Failed != 0 {
-		t.Fatalf("Failed = %d", rep.Scenarios[0].Iterations.Failed)
-	}
 }
 
 // When responses are slow and the concurrency cap is reached, arrivals are dropped.
 func TestRunRateDropped(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		time.Sleep(200 * time.Millisecond)
-	}))
-	defer srv.Close()
-
-	sc := NewScenario("s", func(ctx context.Context, u *User) error {
-		return u.Step("get", func(s *Step) error { return s.Get("/").Do().ExpectStatus(200) })
+	inBubble(t, func(t *testing.T) {
+		sc := NewScenario("s", func(ctx context.Context, u *User) error {
+			return u.Step("get", func(s *Step) error { return s.Get("/").Do().ExpectStatus(200) })
+		})
+		// An arrival every 20ms and a request that takes 190ms with room for one: the arrival at 0 runs, the
+		// nine at 20..180ms are dropped, the one at 200ms runs again, and so on. Arrivals go from 0 to 4000ms.
+		rep, err := run(context.Background(), Plan{
+			Scenario: sc, BaseURL: "http://stub.test", Arrival: Rate(50, time.Second),
+			MaxUsers: 1, Duration: 4*time.Second + 10*time.Millisecond,
+		}, fakeServerAfter(190*time.Millisecond))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if rep.Dropped != 180 {
+			t.Errorf("Dropped = %d, want 180", rep.Dropped)
+		}
+		if n := rep.Scenarios[0].Iterations.Count; n != 21 {
+			t.Errorf("Iterations = %d, want 21", n)
+		}
+		if want := 4*time.Second + 190*time.Millisecond; rep.Elapsed != want {
+			t.Errorf("Elapsed = %v, want %v", rep.Elapsed, want)
+		}
 	})
-	rep, err := Run(context.Background(), Plan{
-		Scenario: sc, BaseURL: srv.URL, Arrival: Rate(50, time.Second),
-		MaxUsers: 1, Duration: 400 * time.Millisecond,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if rep.Dropped == 0 {
-		t.Fatal("drops should be recorded")
-	}
-	if n := rep.Scenarios[0].Iterations.Count; n > 3 {
-		t.Fatalf("Iterations = %d, want about 2 with MaxUsers=1", n)
-	}
 }
 
 // The scheduled arrival time is set only on the first request of an iteration.
 func TestRunRateScheduled(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
-	defer srv.Close()
-
-	sc := NewScenario("s", func(ctx context.Context, u *User) error {
-		for _, name := range []string{"a", "b"} {
-			if err := u.Step(name, func(s *Step) error { return s.Get("/").Do().ExpectStatus(200) }); err != nil {
-				return err
+	inBubble(t, func(t *testing.T) {
+		sc := NewScenario("s", func(ctx context.Context, u *User) error {
+			u.Think(10 * time.Millisecond) // the iteration starts its first request 10ms after it was scheduled
+			for _, name := range []string{"a", "b"} {
+				if err := u.Step(name, func(s *Step) error { return s.Get("/").Do().ExpectStatus(200) }); err != nil {
+					return err
+				}
+				u.Think(20 * time.Millisecond)
 			}
-			u.Think(20 * time.Millisecond)
+			return nil
+		})
+		p := Plan{Scenario: sc, BaseURL: "http://stub.test", Arrival: Rate(20, time.Second), Duration: 205 * time.Millisecond}
+		ctx := context.Background()
+		stopCtx, stop := context.WithTimeout(ctx, p.Duration)
+		defer stop()
+		r := &runner{p: p, tr: fakeServerAfter(3 * time.Millisecond), timeout: time.Second, col: record.NewCollector(), stopCtx: stopCtx, runCtx: ctx}
+		r.runOpen()
+
+		// An arrival every 50ms from 0 to 200ms (the end is at 205ms): 5 iterations of 2 requests.
+		reqs, _, _ := r.col.Snapshot()
+		if len(reqs) != 10 {
+			t.Fatalf("requests = %d, want 10", len(reqs))
 		}
-		return nil
+		for _, rec := range reqs {
+			switch rec.Step {
+			case "a": // The first request carries the arrival time: the dispatcher was on time, the Think was not.
+				if got := rec.Start.Sub(rec.Scheduled); got != 10*time.Millisecond {
+					t.Errorf("a: Start - Scheduled = %v, want 10ms", got)
+				}
+			case "b": // Later requests of the iteration have no scheduled time of their own.
+				if !rec.Scheduled.Equal(rec.Start) {
+					t.Errorf("b: Scheduled should equal Start, differs by %v", rec.Start.Sub(rec.Scheduled))
+				}
+			}
+		}
 	})
-	p := Plan{Scenario: sc, BaseURL: srv.URL, Arrival: Rate(20, time.Second), Duration: 200 * time.Millisecond}
-	ctx := context.Background()
-	r := &runner{p: p, tr: http.DefaultTransport, timeout: time.Second, col: record.NewCollector(), stopCtx: ctx, runCtx: ctx}
-	stopCtx, stop := context.WithTimeout(ctx, p.Duration)
-	defer stop()
-	r.stopCtx = stopCtx
-	r.runOpen()
-
-	reqs, _, _ := r.col.Snapshot()
-	if len(reqs) < 2 {
-		t.Fatalf("requests = %d", len(reqs))
-	}
-	for _, rec := range reqs {
-		switch rec.Step {
-		case "a": // If late it is before Start; if on time it is the same as or slightly before Start.
-			if rec.Scheduled.After(rec.Start) {
-				t.Errorf("a: Scheduled is after Start: %v", rec.Scheduled.Sub(rec.Start))
-			}
-		case "b":
-			if !rec.Scheduled.Equal(rec.Start) {
-				t.Errorf("b: Scheduled should equal Start")
-			}
-		}
-	}
 }
 
 func TestRecordCorrected(t *testing.T) {
@@ -166,23 +174,28 @@ func TestRampAt(t *testing.T) {
 }
 
 func TestRunRamp(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
-	defer srv.Close()
-
-	sc := NewScenario("s", func(ctx context.Context, u *User) error {
-		return u.Step("get", func(s *Step) error { return s.Get("/").Do().ExpectStatus(200) })
+	inBubble(t, func(t *testing.T) {
+		sc := NewScenario("s", func(ctx context.Context, u *User) error {
+			return u.Step("get", func(s *Step) error { return s.Get("/").Do().ExpectStatus(200) })
+		})
+		// 0 -> 200/s over 10 seconds: N(t) = 10*t^2 arrivals, 1000 by the end of the ramp (plus the one at 0).
+		rep, err := run(context.Background(), Plan{
+			Scenario: sc, BaseURL: "http://stub.test", Arrival: Ramp(0, 200, time.Second, 10*time.Second),
+			Duration: 10*time.Second + 2500*time.Microsecond,
+		}, fakeServerAfter(3*time.Millisecond))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if n := rep.Scenarios[0].Iterations.Count; n != 1001 {
+			t.Fatalf("Iterations = %d, want 1001", n)
+		}
+		// Second s of the ramp has N(s+1) - N(s) = 10*(2s+1) arrivals; one may move across a boundary.
+		for _, p := range rep.Series[:10] {
+			if want := 10 * (2*p.Second + 1); p.Requests < want-1 || p.Requests > want+1 {
+				t.Errorf("second %d has %d requests, want %d", p.Second, p.Requests, want)
+			}
+		}
 	})
-	// 0 → 200/s over 1 second: 100 in total.
-	rep, err := Run(context.Background(), Plan{
-		Scenario: sc, BaseURL: srv.URL, Arrival: Ramp(0, 200, time.Second, time.Second), Duration: time.Second,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	// Allow a margin for timer jitter (especially large on Windows).
-	if n := rep.Scenarios[0].Iterations.Count; n < 80 || n > 110 {
-		t.Fatalf("Iterations = %d, want about 100", n)
-	}
 }
 
 func TestStagesAt(t *testing.T) {

@@ -15,7 +15,8 @@ import (
 type fakeReply struct {
 	// Delay is how long the "server" takes to answer. It is waited for on the clock of the caller, so inside
 	// a synctest bubble it costs no real time. A request whose context ends first fails with the context error,
-	// as a real transport does.
+	// as a real transport does. Give it a positive value in any plan that loops (closed model): an instant
+	// answer lets a user spin without ever blocking, and the fake clock then never moves.
 	Delay time.Duration
 	// Status is the HTTP status. 0 means 200.
 	Status int
@@ -40,6 +41,11 @@ type fakeServer struct {
 // fakeServerAfter is a fakeServer that answers every request after delay with 200.
 func fakeServerAfter(delay time.Duration) *fakeServer {
 	return &fakeServer{reply: func(*http.Request) fakeReply { return fakeReply{Delay: delay} }}
+}
+
+// fakeServerStatus is a fakeServer that answers every request after delay with the given status.
+func fakeServerStatus(delay time.Duration, status int) *fakeServer {
+	return &fakeServer{reply: func(*http.Request) fakeReply { return fakeReply{Delay: delay, Status: status} }}
 }
 
 // RoundTrip implements http.RoundTripper.
