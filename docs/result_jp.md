@@ -60,10 +60,10 @@ Report
 | `TTFB` | 応答を受け取れたものだけ |
 | `DNS` / `Connect` / `TLS` | 接続を張る各区間の時間。その区間が実際に起きたリクエストだけ |
 | `NewConns` / `ReusedConns` | `NewConns` は開いた接続の数（各接続を最初に使ったリクエストで数える。つまり 1 回以上リクエストを運んだ接続の数）、`ReusedConns` は先行するリクエストがすでに使った接続を使ったリクエストの数。接続を張ったが一度もリクエストを運ばなかった接続はどちらにも数えないので、サーバーが受け付けた接続数は `NewConns` より多いことがある（実行終了時にまだアイドルだった接続、失敗した dial、HTTP/2 で `net/http` が開始時に余分に張って使わずに閉じる接続）。HTTP/2 は 1 本の接続で多数のリクエストをさばくので `NewConns` は小さくなる |
-| `Corrected` | 予定開始時刻からの時間（Coordinated Omission 補正後）。クローズドモデル（`Users` / `UserStages`）では `Latency` と同じ |
+| `Corrected` | 予定開始時刻からの時間（Coordinated Omission 補正後）。クローズドモデル（`Users` / `UserStages`）では `Latency` と同じ。オープンモデルでは、何もキューに入っていなくても、負荷生成側が加える小さな一定量だけ `Latency` より大きい。[`tuning_jp.md`](tuning_jp.md#corrected-と-latency) を参照 |
 | `Status` | `"2xx"` などステータスクラスごとの件数 |
 | `Errors` | 通信レベルのエラーの内訳（`ErrKind` ごと）。`Expect*` の失敗は入らない（ステップの `Errors` に入る） |
-| `BytesIn` / `BytesOut` | ボディのバイト数（ヘッダーは含まない） |
+| `BytesIn` / `BytesOut` | ボディのバイト数（ヘッダーは含まない）。`BytesIn` は展開後のレスポンスボディ、`BytesOut` はリクエストボディで、どちらもワイヤ上のトラフィックではない。[`tuning_jp.md`](tuning_jp.md#bytes_in-と-bytes_out) を参照 |
 
 ### `ErrKind`（失敗の種類）
 
@@ -144,7 +144,7 @@ jotaro merge -o merged.json a.json b.json c.json
 jotaro merge -format html -o report.html a.json b.json
 ```
 
-ライブラリでは `report.MergeReports(reps ...*report.Report) (*report.Report, error)`（`report/merge.go`）。`-format` の既定は `json`（結合結果を再び入力にできる）。
+ライブラリでは `report.MergeReports(reps ...*report.Report) (*report.Report, error)`（`report/merge.go`）。`-format` の既定は `json`（結合結果を再び入力にできる）。負荷の分け方、負荷生成側を同時に始める方法、結合した数字の読み方は [`multi-machine_jp.md`](multi-machine_jp.md) にある。
 
 | 項目 | 結合の仕方 |
 |---|---|
@@ -162,7 +162,7 @@ jotaro merge -format html -o report.html a.json b.json
 - **負荷生成側の健全性 (`health`、version 3)**: `jotaro.Run` を動かしているプロセスの、`started_at` からの 1 秒ごとの配列。要素は `second` / `goroutines`（その秒の終わりのゴルーチン数）/ `cpu`（その秒に使った CPU 時間の割合。GOMAXPROCS 個の CPU 全体に対して 0〜1。取得できない環境では -1）。`BuildReport` だけで作った結果や、古い JSON には無い（空）。結合では秒をずらして重ね、`goroutines` は合計、`cpu` は最大（負荷生成側が複数あるときは、一番詰まっているものを見る）。
   - CPU は `getrusage`（Unix 系）の CPU 時間から求める。Windows など取得できない環境では -1 で、グラフや平均には含めない。`runtime/metrics` の `/cpu/classes/*` は GC のたびにしか更新されないため使っていない。
   - 負荷をかける対象を同じプロセスで動かしている（`examples/checkout` など）と、その分も含む。
-  - CPU の最大が 90% 以上のとき、テキストと HTML のサマリーに「負荷生成側が詰まって測定値が悪く出ている疑い」の警告を出す。
+  - CPU の最大が 90% 以上のとき、テキストと HTML のサマリーに「負荷生成側が詰まって測定値が悪く出ている疑い」の警告を出す。対処は [`tuning_jp.md`](tuning_jp.md#cpu-と-gomaxprocs-とコンテナ) にある。
 - **version 1 の JSON との互換**: 読める。`buckets` と `started_at` が無いので、それが混じる結合では次のフォールバックになる。
   - `P50`〜`P99` は件数で重み付けした平均（誤差が大きい）。
   - `Elapsed` は最大値（同時に実行した前提）。
@@ -422,7 +422,7 @@ type Writer interface {
 
 ## 5. しきい値判定（実装済み）
 
-結果が条件を満たすかを確かめ、CI で「遅くなったら失敗」にする（`report/threshold.go`）。k6 の `thresholds` に近い。実行後の `Report` に対して判定する。`Plan` 自身にはしきい値のフィールドは無い。実行中に止めたいときは `Plan.AbortOn` を使う（この章の最後）。
+結果が条件を満たすかを確かめ、CI で「遅くなったら失敗」にする（`report/threshold.go`。完全なワークフローは [`ci_jp.md`](ci_jp.md) にある）。k6 の `thresholds` に近い。実行後の `Report` に対して判定する。`Plan` 自身にはしきい値のフィールドは無い。実行中に止めたいときは `Plan.AbortOn` を使う（この章の最後）。
 
 <!-- doccheck: before var rep *report.Report -->
 ```go

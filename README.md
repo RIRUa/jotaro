@@ -17,7 +17,7 @@ A Go library for load-testing HTTP servers with scenarios (a flow such as login 
 - Measures per-step latency (p50 / p90 / p95 / p99 / max), error breakdown, throughput, TTFB, DNS / TCP / TLS time, and connection reuse rate
 - Also records a per-second time series and the health of the load generator itself (CPU, goroutine count)
 
-For the design rationale see [`DESIGN.md`](DESIGN.md); for the result format and the threshold spec see [`docs/result.md`](docs/result.md); for what one generator can drive and how that is measured see [`docs/performance.md`](docs/performance.md).
+For the design rationale see [`DESIGN.md`](DESIGN.md); for the result format and the threshold spec see [`docs/result.md`](docs/result.md); for what one generator can drive and how that is measured see [`docs/performance.md`](docs/performance.md). To go from the examples to a test that runs regularly and can be trusted, see the [guides](#guides).
 
 > **Status: v0.x.** We do not change the API without a reason, and we aim to keep existing code working, in the spirit of the [Go 1 compatibility promise](https://go.dev/doc/go1compat). The exception is fixing an existing bug, which can change behavior that code relied on. Such changes are listed in [`CHANGELOG.md`](CHANGELOG.md).
 
@@ -219,6 +219,13 @@ Two things to know when you choose thresholds:
 
 - `error_rate` is the share of requests that ended in a transport-level error (timeout, connection refused, DNS failure and so on). A failed `Expect*` check is not counted as a request error: it fails the step with `expect_mismatch`, which is listed in the step's errors, and it reaches `iteration_fail_rate` when the scenario returns that error. To fail a run on wrong responses, return the step's error from the scenario (as in the example above) and set `iteration_fail_rate<1%`; use `http_5xx_rate` / `http_4xx_rate` for HTTP error statuses.
 - In the open model, when `MaxUsers` is full an arrival is dropped instead of waited for, and a dropped arrival leaves no latency sample. When you use `corrected_*` thresholds, add `dropped<1` so that a run that dropped arrivals cannot pass on the latencies of the arrivals that did run.
+
+## Guides
+
+- [Running in CI](docs/ci.md): a complete GitHub Actions workflow with `jotaro check` as the gate, results kept as artifacts, and a comparison with a baseline
+- [Running from several machines](docs/multi-machine.md): splitting the load, starting the generators together, and what `jotaro merge` does to the numbers
+- [Tuning the load generator and trusting the result](docs/tuning.md): file descriptors, ports and CPU, `corrected` against `latency`, HTTP/2, `bytes_in`, and a checklist for before you believe a result
+- [Generator performance](docs/performance.md): how much load one generator can drive, and how that is measured
 
 ## MCP server (scenario authoring and result checks)
 

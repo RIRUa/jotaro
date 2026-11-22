@@ -60,10 +60,10 @@ Report
 | `TTFB` | Only requests that received a response |
 | `DNS` / `Connect` / `TLS` | Time of each phase of opening a connection, over only the requests in which that phase actually happened |
 | `NewConns` / `ReusedConns` | `NewConns` is the number of connections opened, counted on the request that used each one first (the number of connections that carried at least one request); `ReusedConns` is the number of requests that used a connection an earlier request had already used. A connection that was dialed but never carried a request is in neither, so a server can have accepted more connections than `NewConns`: connections still idle when the run ended, failed dials, and with HTTP/2 the extra connections `net/http` dials at start-up and closes unused. With HTTP/2 `NewConns` is small because one connection serves many requests |
-| `Corrected` | Time from the scheduled start (after Coordinated Omission correction). Same as `Latency` in the closed model (`Users` / `UserStages`) |
+| `Corrected` | Time from the scheduled start (after Coordinated Omission correction). Same as `Latency` in the closed model (`Users` / `UserStages`). In the open model it is above `Latency` by a small constant of the load generator even when nothing is queued; see [`tuning.md`](tuning.md#corrected-and-latency) |
 | `Status` | Counts per status class such as `"2xx"` |
 | `Errors` | Breakdown of transport-level errors (per `ErrKind`). Failed `Expect*` checks are not in it (they are in the `Errors` of the step) |
-| `BytesIn` / `BytesOut` | Body bytes (headers are not included) |
+| `BytesIn` / `BytesOut` | Body bytes (headers are not included): `BytesIn` is the response body after decompression and `BytesOut` the request body, so neither is wire traffic; see [`tuning.md`](tuning.md#bytes_in-and-bytes_out) |
 
 ### `ErrKind` (kinds of failure)
 
@@ -144,7 +144,7 @@ jotaro merge -o merged.json a.json b.json c.json
 jotaro merge -format html -o report.html a.json b.json
 ```
 
-In the library: `report.MergeReports(reps ...*report.Report) (*report.Report, error)` (`report/merge.go`). The default `-format` is `json` (so the merged result can be used as input again).
+In the library: `report.MergeReports(reps ...*report.Report) (*report.Report, error)` (`report/merge.go`). The default `-format` is `json` (so the merged result can be used as input again). How to split the load, start the generators together and read the merged numbers is in [`multi-machine.md`](multi-machine.md).
 
 | Item | How it is merged |
 |---|---|
@@ -162,7 +162,7 @@ In the library: `report.MergeReports(reps ...*report.Report) (*report.Report, er
 - **Load-generator health (`health`, version 3)**: an array per second since `started_at`, for the process running `jotaro.Run`. Elements are `second` / `goroutines` (goroutine count at the end of that second) / `cpu` (the fraction of CPU time used in that second, 0 to 1 relative to all GOMAXPROCS CPUs; -1 on environments where it cannot be obtained). Absent (empty) in results built only with `BuildReport` and in old JSON. When merging, seconds are shifted and overlaid; `goroutines` is summed and `cpu` takes the maximum (with several load generators, look at the most saturated one).
   - CPU is derived from `getrusage` (Unix-like) CPU time. On environments where it cannot be obtained, such as Windows, it is -1 and is excluded from charts and averages. `runtime/metrics` `/cpu/classes/*` is not used because it is updated only at each GC.
   - If the system under test runs in the same process (as in `examples/checkout`), its share is included.
-  - When the maximum CPU is 90% or more, the text and HTML summaries show a warning that "the load generator may be saturated and the measurements may look worse than they are".
+  - When the maximum CPU is 90% or more, the text and HTML summaries show a warning that "the load generator may be saturated and the measurements may look worse than they are". What to do about it is in [`tuning.md`](tuning.md#cpu-gomaxprocs-and-containers).
 - **Compatibility with version 1 JSON**: It can be read. Since `buckets` and `started_at` are absent, merges that include it fall back as follows.
   - `P50`–`P99` become a count-weighted average (large error).
   - `Elapsed` becomes the maximum (assuming the runs were simultaneous).
@@ -422,7 +422,7 @@ type Writer interface {
 
 ## 5. Threshold checks (implemented)
 
-Check whether a result meets conditions, so that CI can fail when things get slower (`report/threshold.go`). Close to k6's `thresholds`. Checks are made against the `Report` after the run. `Plan` has no thresholds of its own; to stop a run while it is in progress, use `Plan.AbortOn` (the end of this chapter).
+Check whether a result meets conditions, so that CI can fail when things get slower (`report/threshold.go`; [`ci.md`](ci.md) has a complete workflow). Close to k6's `thresholds`. Checks are made against the `Report` after the run. `Plan` has no thresholds of its own; to stop a run while it is in progress, use `Plan.AbortOn` (the end of this chapter).
 
 <!-- doccheck: before var rep *report.Report -->
 ```go

@@ -24,6 +24,8 @@ go run ./cmd/jotaro report -format text result.json                             
 
 2 回の実行を比べたり、ほかのツールにデータを渡したりするときは、生データも保存（`-raw raw.jsonl`）して、`jotaro compare -max-p95-regression 20 base.json new.json`（p95 が 20% より悪化したら終了ステータス 1）や `jotaro export -format csv -o series.csv raw.jsonl`（`-format vegeta` もあります）を使います。
 
+こうしたテストを CI で定期的に動かす方法、複数のマシンから動かす方法、数字をどこまで信じてよいかは、[`docs/ci_jp.md`](../docs/ci_jp.md)、[`docs/multi-machine_jp.md`](../docs/multi-machine_jp.md)、[`docs/tuning_jp.md`](../docs/tuning_jp.md) を見てください。サンプルは、ほかに何も用意しなくて済むように、負荷生成側と同じプロセスでモックサーバーを起動します。本物のテストはそうしてはいけません（[負荷生成側と対象を同じマシンに置く](../docs/tuning_jp.md#負荷生成側と対象を同じマシンに置く)を参照）。
+
 ## checkout
 
 自前のモックサーバーを立てる小さなサンプルです。
