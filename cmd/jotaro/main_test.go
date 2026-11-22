@@ -466,3 +466,237 @@ func TestReportRawTruncated(t *testing.T) {
 		t.Errorf("code = %d, stderr = %q", code, stderr.String())
 	}
 }
+
+// runCLI runs the CLI and returns the exit code with what it wrote to standard output and standard error.
+func runCLI(t *testing.T, stdin string, args ...string) (code int, stdout, stderr string) {
+	t.Helper()
+	var out, errOut bytes.Buffer
+	code = run(args, strings.NewReader(stdin), &out, &errOut)
+	return code, out.String(), errOut.String()
+}
+
+// TestFlagsAfterFileNames pins that flags may follow the file names: the flag package alone would take
+// "-format" and "text" for two more files.
+func TestFlagsAfterFileNames(t *testing.T) {
+	dir := t.TempDir()
+	in, other := filepath.Join(dir, "result.json"), filepath.Join(dir, "other.json")
+	writeSample(t, in)
+	writeSample(t, other)
+	raw := filepath.Join(dir, "raw.jsonl")
+	writeSampleRaw(t, raw)
+	data, _ := os.ReadFile(in)
+
+	t.Run("report -format after the file", func(t *testing.T) {
+		code, stdout, stderr := runCLI(t, "", "report", in, "-format", "text")
+		if code != 0 || !strings.Contains(stdout, "=== Summary ===") {
+			t.Fatalf("code = %d, stdout = %.100s, stderr = %s", code, stdout, stderr)
+		}
+	})
+	t.Run("report -format=text after the file", func(t *testing.T) {
+		code, stdout, _ := runCLI(t, "", "report", in, "--format=text")
+		if code != 0 || !strings.Contains(stdout, "=== Summary ===") {
+			t.Fatalf("code = %d, stdout = %.100s", code, stdout)
+		}
+	})
+	t.Run("report stdin then flag", func(t *testing.T) {
+		code, stdout, stderr := runCLI(t, string(data), "report", "-", "-format", "text")
+		if code != 0 || !strings.Contains(stdout, "=== Summary ===") {
+			t.Fatalf("code = %d, stdout = %.100s, stderr = %s", code, stdout, stderr)
+		}
+	})
+	t.Run("report -o and bool flag after the file", func(t *testing.T) {
+		out := filepath.Join(dir, "out.txt")
+		if code, _, stderr := runCLI(t, "", "report", raw, "-raw", "-format", "text", "-o", out); code != 0 {
+			t.Fatalf("code = %d, stderr = %s", code, stderr)
+		}
+		if b, err := os.ReadFile(out); err != nil || !strings.Contains(string(b), "=== Summary ===") {
+			t.Fatalf("output = %.100s, err = %v", b, err)
+		}
+	})
+	t.Run("check -t after the file", func(t *testing.T) {
+		code, stdout, stderr := runCLI(t, "", "check", in, "-t", "p95<1s")
+		if code != 0 || !strings.Contains(stdout, "p95") {
+			t.Fatalf("code = %d, stdout = %s, stderr = %s", code, stdout, stderr)
+		}
+		if code, _, _ := runCLI(t, "", "check", in, "-t", "p95<1ns"); code != 1 {
+			t.Fatalf("failing threshold: code = %d, want 1", code)
+		}
+	})
+	t.Run("merge flags between files", func(t *testing.T) {
+		code, stdout, stderr := runCLI(t, "", "merge", in, "-format", "text", other)
+		if code != 0 || !strings.Contains(stdout, "=== Summary ===") {
+			t.Fatalf("code = %d, stdout = %.100s, stderr = %s", code, stdout, stderr)
+		}
+	})
+	t.Run("compare gate after the files", func(t *testing.T) {
+		if code, _, stderr := runCLI(t, "", "compare", in, other, "-max-p95-regression", "10"); code != 0 {
+			t.Fatalf("code = %d, stderr = %s", code, stderr)
+		}
+	})
+	t.Run("export", func(t *testing.T) {
+		code, stdout, stderr := runCLI(t, "", "export", raw, "-format", "csv")
+		if code != 0 || !strings.Contains(stdout, "second,requests,") {
+			t.Fatalf("code = %d, stdout = %.100s, stderr = %s", code, stdout, stderr)
+		}
+	})
+	t.Run("-- ends the flags", func(t *testing.T) {
+		// "-format" after "--" is a file name, so the command sees two files.
+		code, _, stderr := runCLI(t, "", "report", "-format", "text", "--", in, "-format")
+		if code != 2 || !strings.Contains(stderr, "expected one result file, got 2") {
+			t.Fatalf("code = %d, stderr = %s", code, stderr)
+		}
+	})
+	t.Run("a flag without its value is reported", func(t *testing.T) {
+		// The "--" that separates the file names must not become the value of the last flag.
+		for _, args := range [][]string{
+			{"report", in, "-o"},
+			{"report", "-o"},
+			{"check", in, "-t"},
+			{"merge", in, other, "-format"},
+			{"export", raw, "-format"},
+		} {
+			cwd := t.TempDir()
+			t.Chdir(cwd)
+			code, stdout, stderr := runCLI(t, "", args...)
+			if code != 2 || stdout != "" || !strings.Contains(stderr, "flag needs an argument") {
+				t.Errorf("%v: code = %d, stdout = %.60q, stderr = %s", args, code, stdout, stderr)
+			}
+			if entries, _ := os.ReadDir(cwd); len(entries) != 0 {
+				t.Errorf("%v: created files in the working directory: %v", args, entries)
+			}
+		}
+	})
+	t.Run("an unknown flag after the file is reported", func(t *testing.T) {
+		code, _, stderr := runCLI(t, "", "report", in, "-nope")
+		if code != 2 || !strings.Contains(stderr, "flag provided but not defined: -nope") {
+			t.Fatalf("code = %d, stderr = %s", code, stderr)
+		}
+	})
+}
+
+// TestUsageErrorsSayWhy pins that a usage error starts with a sentence about the cause, then shows the usage,
+// all on standard error.
+func TestUsageErrorsSayWhy(t *testing.T) {
+	in := filepath.Join(t.TempDir(), "result.json")
+	writeSample(t, in)
+	raw := filepath.Join(t.TempDir(), "raw.jsonl")
+	writeSampleRaw(t, raw)
+
+	for _, tc := range []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"report without a file", []string{"report"}, "jotaro report: no input file given"},
+		{"report with three files", []string{"report", "a", "b", "c"}, "jotaro report: expected one result file, got 3: a b c"},
+		{"merge without a file", []string{"merge", "-format", "text"}, "jotaro merge: no result file given"},
+		{"check without a threshold", []string{"check", in}, "jotaro check: no threshold given (-t)"},
+		{"check without a file", []string{"check", "-t", "p95<1s"}, "jotaro check: no input file given"},
+		{"compare with one file", []string{"compare", in}, "jotaro compare: expected two result files"},
+		{"export without a format", []string{"export", raw}, "jotaro export: no output format given"},
+		{"export without a file", []string{"export", "-format", "csv"}, "jotaro export: no input file given"},
+		{"mcp with an argument", []string{"mcp", "extra"}, `jotaro mcp: mcp takes no arguments, got "extra"`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			code, stdout, stderr := runCLI(t, "", tc.args...)
+			if code != 2 {
+				t.Fatalf("code = %d, want 2", code)
+			}
+			if stdout != "" {
+				t.Errorf("stdout = %q, want empty", stdout)
+			}
+			if !strings.HasPrefix(stderr, tc.want) {
+				t.Errorf("stderr should start with %q, got:\n%s", tc.want, stderr)
+			}
+			if !strings.Contains(stderr, "usage: jotaro "+tc.args[0]) {
+				t.Errorf("stderr lacks the usage:\n%s", stderr)
+			}
+		})
+	}
+}
+
+// TestHelpGoesToStdout pins that requested help is written to standard output and exits 0, wherever -h stands.
+func TestHelpGoesToStdout(t *testing.T) {
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"report", "-h"}, "usage: jotaro report"},
+		{[]string{"report", "--help"}, "usage: jotaro report"},
+		{[]string{"report", "result.json", "-h"}, "usage: jotaro report"},
+		{[]string{"merge", "-h"}, "usage: jotaro merge"},
+		{[]string{"check", "-h"}, "usage: jotaro check"},
+		{[]string{"compare", "-help"}, "usage: jotaro compare"},
+		{[]string{"export", "-h"}, "usage: jotaro export"},
+		{[]string{"mcp", "-h"}, "usage: jotaro mcp"},
+		{[]string{"version", "-h"}, "usage: jotaro version"},
+		{[]string{"-h"}, "usage: jotaro <command>"},
+		{[]string{"help"}, "usage: jotaro <command>"},
+	} {
+		code, stdout, stderr := runCLI(t, "", tc.args...)
+		if code != 0 || stderr != "" || !strings.Contains(stdout, tc.want) {
+			t.Errorf("%v: code = %d, stderr = %q, stdout = %q; want %q on stdout", tc.args, code, stderr, stdout, tc.want)
+		}
+	}
+	// The flag list is part of the help.
+	if _, stdout, _ := runCLI(t, "", "report", "-h"); !strings.Contains(stdout, "-format string") {
+		t.Errorf("report -h lacks the flag list:\n%s", stdout)
+	}
+}
+
+// TestHelpCommand pins that "jotaro help <command>" prints what "jotaro <command> -h" prints.
+func TestHelpCommand(t *testing.T) {
+	for _, name := range []string{"report", "merge", "check", "compare", "export", "mcp", "version"} {
+		wantCode, wantOut, _ := runCLI(t, "", name, "-h")
+		code, stdout, stderr := runCLI(t, "", "help", name)
+		if code != wantCode || stdout != wantOut || stderr != "" {
+			t.Errorf("help %s: code = %d, stderr = %q, stdout = %q; want %q", name, code, stderr, stdout, wantOut)
+		}
+		if !strings.Contains(stdout, "usage: jotaro "+name) {
+			t.Errorf("help %s: no usage of the command:\n%s", name, stdout)
+		}
+	}
+	code, stdout, stderr := runCLI(t, "", "help", "chek")
+	if code != 2 || stdout != "" || !strings.Contains(stderr, `unknown command "chek"`) {
+		t.Errorf("help chek: code = %d, stdout = %q, stderr = %q", code, stdout, stderr)
+	}
+}
+
+// TestUnknownCommandSuggestion pins the "did you mean" line, and that a far-off word gets none.
+func TestUnknownCommandSuggestion(t *testing.T) {
+	for in, want := range map[string]string{
+		"chek":    `did you mean "check"?`,
+		"reprot":  `did you mean "report"?`,
+		"mrege":   `did you mean "merge"?`,
+		"compar":  `did you mean "compare"?`,
+		"exprot":  `did you mean "export"?`,
+		"versoin": `did you mean "version"?`,
+	} {
+		code, stdout, stderr := runCLI(t, "", in)
+		if code != 2 || stdout != "" || !strings.Contains(stderr, `unknown command "`+in+`"; `+want) {
+			t.Errorf("%s: code = %d, stdout = %q, stderr = %q; want %q", in, code, stdout, stderr, want)
+		}
+	}
+	_, _, stderr := runCLI(t, "", "frobnicate")
+	if strings.Contains(stderr, "did you mean") {
+		t.Errorf("a far-off command should get no suggestion: %s", stderr)
+	}
+}
+
+func TestEditDistance(t *testing.T) {
+	for _, tc := range []struct {
+		a, b string
+		want int
+	}{{"", "", 0}, {"a", "", 1}, {"check", "check", 0}, {"chek", "check", 1}, {"kitten", "sitting", 3}} {
+		if got := editDistance(tc.a, tc.b); got != tc.want {
+			t.Errorf("editDistance(%q, %q) = %d, want %d", tc.a, tc.b, got, tc.want)
+		}
+	}
+}
+
+// TestUsageMentionsFlexibleFlagOrder keeps the top-level usage in step with the behaviour.
+func TestUsageMentionsFlexibleFlagOrder(t *testing.T) {
+	if !strings.Contains(usage, "before or after the file names") || !strings.Contains(usage, "jotaro help <command>") {
+		t.Errorf("usage should say that flags can follow the file names and mention help <command>:\n%s", usage)
+	}
+}
