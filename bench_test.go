@@ -89,10 +89,7 @@ func benchIterations(b *testing.B, sc *Scenario, body string, open bool) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		u, err := newUser(ctx, br.p, sc, i, 0, br.tr, 30*time.Second, br.col)
-		if err != nil {
-			b.Fatal(err)
-		}
+		u := newUser(ctx, br.p, sc, i, 0, br.tr, 30*time.Second, br.col)
 		if open {
 			u.scheduled.set(at)
 		}

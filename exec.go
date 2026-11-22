@@ -29,7 +29,10 @@ type executor struct {
 	// and later ones get none. It may be nil. Requests of one step can run concurrently
 	// (see Step), so the slot guards itself.
 	sched *schedSlot
-	sink  func(record.Record)
+	// col receives the record of each request. When it is nil, sink does. col exists so that a step does not
+	// allocate a method value of col.AddRequest for every executor.
+	col  *record.Collector
+	sink func(record.Record)
 }
 
 // schedSlot holds the scheduled arrival time of an iteration until a request takes it.
@@ -133,7 +136,11 @@ func (e *executor) do(r *Request) *Response {
 		rec.Err = classify(err)
 		resp.err = err
 	}
-	e.sink(rec)
+	if e.col != nil {
+		e.col.AddRequest(rec)
+	} else {
+		e.sink(rec)
+	}
 	return resp
 }
 
