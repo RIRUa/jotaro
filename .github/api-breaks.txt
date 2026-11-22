@@ -1,0 +1,26 @@
+# Intended breaks of the exported Go API, checked by scripts/api-compat.sh (workflow "api-compat").
+#
+# jotaro promises to keep existing code working (README, in the spirit of the Go 1 compatibility
+# promise). The check compares every public package with the last release tag and fails on any
+# incompatible change that is not listed here, so a break is a decision in a reviewed file and
+# never an accident. Additions are always fine.
+#
+# One line per identifier:
+#
+#   <last release tag> <identifier> -- <reason>
+#
+# - <last release tag> is the tag the check compares with (v0.1.3 while v0.1.4 is not released).
+#   Lines for older tags are ignored by the check and stay as a history of what each release broke.
+# - <identifier> is what apidiff prints before the first ": " in the "Incompatible changes" list,
+#   such as "LoadCSV", "Step.Wait" or "./record.Raw.Truncated" (sub-packages start with "./").
+#   Run scripts/api-compat.sh to see the exact text. One line covers every incompatible change
+#   reported for that identifier.
+# - <reason> says why the break cannot be avoided and what users do instead. It is required.
+#
+# Also describe the break in CHANGELOG.md under "Changed" with the note "This may affect existing
+# code". Lines are removed or left as history once the release is tagged; a line that matches
+# nothing only produces a warning.
+#
+# Example (not active):
+#
+#   v0.1.3 LoadCSV -- takes a second argument so that a repeated header can be allowed; callers add ", false"

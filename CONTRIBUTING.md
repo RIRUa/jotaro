@@ -5,7 +5,7 @@ Thanks for your interest in jotaro! Bug reports, ideas and pull requests are all
 ## Before you start
 
 - For anything larger than a small fix, please open an issue first so we can agree on the direction. [`DESIGN.md`](DESIGN.md) explains why things are the way they are.
-- jotaro is pre-1.0 (v0.x). The API may change between minor versions.
+- jotaro is pre-1.0 (v0.x), but we do not change the API without a reason (see the README). Pull requests are checked for that, see [Compatibility checks](#compatibility-checks).
 - Please follow the [Code of Conduct](CODE_OF_CONDUCT.md). Security problems go through [`SECURITY.md`](SECURITY.md), not a public issue.
 
 ## Development
@@ -67,6 +67,21 @@ The second field is the check that is allowed to fail (`twin`, `headings`, `bloc
 - Use a short prefix in the title: `feat:` / `fix:` / `docs:` / `chore:` / `ci:`.
 - CI (vet, test with `-race` on Go 1.25 and stable, golangci-lint, and the generated-files check) must pass. The `docs` workflow (documentation checks) is not a required check, but please keep it green. The run on Linux with the latest Go also puts the statement coverage per package in the job summary; please look at it if you change code that was well covered, and add tests when the number drops. Pull requests that push new commits cancel the previous CI run of the same pull request.
 
+## Compatibility checks
+
+The README promises to keep existing code working, in the spirit of the Go 1 compatibility promise. CI checks the exported API by machine, so a break is a decision in a reviewed file and never an accident.
+
+- **API diff** (the `api-compat` workflow, [`scripts/api-compat.sh`](scripts/api-compat.sh)): compares every public package (not `internal/`, `examples/` or `cmd/`) with the last release, the highest `vX.Y.Z` tag, using [`apidiff`](https://pkg.go.dev/golang.org/x/exp/cmd/apidiff) at the version pinned in the script. Additions (a new method, a new field) pass. An incompatible change fails the job: a removed or renamed identifier, a changed signature, a method added to an exported interface, a struct that stops being comparable, and so on. Run `scripts/api-compat.sh` locally to see the same report (it needs the release tags and network access for `go run`).
+- **An intended break**: add one line per identifier to [`.github/api-breaks.txt`](.github/api-breaks.txt):
+
+  ```
+  v0.1.3 LoadCSV -- takes a second argument so that a repeated header can be allowed; callers add ", false"
+  ```
+
+  That is the tag the job compares with, the identifier as the report prints it before the first `: `, and the reason (required). Describe the break in `CHANGELOG.md` under "Changed" as well, with the note "This may affect existing code". The line is part of the pull request, so the reviewer sees the decision. Entries for older tags are ignored and stay as a history of what each release broke. An entry that matches no incompatible change only produces a warning. There is no label or other switch: the job cannot be passed by anything but this file.
+- The job is not a required check, so a maintainer can still merge a red run on purpose, but the reason should then be in the pull request.
+- The API diff does not cover the JSON result, the raw data, the threshold syntax, the CLI flags and exit codes or the MCP tool schemas. Review those by hand and keep the docs in line.
+
 ## Releasing (maintainers)
 
 Releases are cut by merging a `release/vX.Y.Z` branch into `main`.
@@ -78,7 +93,7 @@ Releases are cut by merging a `release/vX.Y.Z` branch into `main`.
 
 If publishing fails after the tag was pushed, fix the cause and run the `release` workflow from the Actions tab (`workflow_dispatch` on `main`) with the same version. It reuses the existing tag. The same run attaches build provenance attestations (`actions/attest-build-provenance`) to the archives and `checksums.txt`. If only that last step failed, the assets are already uploaded and a plain re-run fails earlier, because GoReleaser does not replace assets that exist (`release.replace_existing_artifacts` is not set). Delete the assets of that GitHub Release (or the release itself, keeping the tag) first, then run the workflow again with the same version.
 
-The GoReleaser version and the `govulncheck` version are pinned in the workflows, and every action is pinned to a commit SHA with its version in a trailing comment (Dependabot keeps those up to date). When you bump GoReleaser or govulncheck by hand, change the version in `release.yml` / `vulncheck.yml`.
+The GoReleaser version, the `govulncheck` version and the `apidiff` version are pinned in the workflows and scripts, and every action is pinned to a commit SHA with its version in a trailing comment (Dependabot keeps those up to date). When you bump GoReleaser, govulncheck or apidiff by hand, change the version in `release.yml` / `vulncheck.yml` / `scripts/api-compat.sh`.
 
 ## License
 
