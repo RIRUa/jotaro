@@ -17,7 +17,7 @@
 - ステップ単位のレイテンシ（p50 / p90 / p95 / p99 / max）、エラーの内訳、スループット、TTFB、DNS / TCP / TLS 時間、接続の再利用率を計測する
 - 1 秒ごとの時系列と、負荷生成側の健全性（CPU・ゴルーチン数）も記録する
 
-設計の考え方は [`DESIGN_jp.md`](DESIGN_jp.md)、結果の形式としきい値の仕様は [`docs/result_jp.md`](docs/result_jp.md)、ジェネレーター 1 台で出せる負荷とその測り方は [`docs/performance_jp.md`](docs/performance_jp.md) にあります。
+設計の考え方は [`DESIGN_jp.md`](DESIGN_jp.md)、結果の形式としきい値の仕様は [`docs/result_jp.md`](docs/result_jp.md)、ジェネレーター 1 台で出せる負荷とその測り方は [`docs/performance_jp.md`](docs/performance_jp.md) にあります。サンプルから、定期的に動かして信頼できるテストへ進むには、[ガイド](#ガイド)を見てください。
 
 > **状態: v0.x。** むやみに API を変えず、[Go 1 の互換性の約束](https://go.dev/doc/go1compat)のように、既存のコードが動き続けることを大事にします。例外は既存のバグの修正で、これまでの動作に頼っていたコードに影響が出ることがあります。そうした変更は [`CHANGELOG.md`](CHANGELOG.md)（英語）にまとめます。
 
@@ -219,6 +219,13 @@ jotaro export -format csv -o series.csv raw.jsonl        # 毎秒の件数とパ
 
 - `error_rate` は、通信レベルのエラー（タイムアウト、接続拒否、DNS 失敗など）で終わったリクエストの割合です。`Expect*` の失敗はリクエストのエラーとしては数えません。ステップが `expect_mismatch` で失敗し（ステップのエラーの一覧に出ます）、シナリオがそのエラーを返すと `iteration_fail_rate` に反映されます。誤ったレスポンスで不合格にしたいときは、ステップのエラーをシナリオから返し（上の例のとおり）、`iteration_fail_rate<1%` を指定します。HTTP のエラーステータスは `http_5xx_rate` / `http_4xx_rate` で見ます。
 - オープンモデルで `MaxUsers` が満杯のとき、到着は待たされずにドロップされ、ドロップされた到着はレイテンシの標本に入りません。`corrected_*` をしきい値に使うときは `dropped<1` を併記してください。そうしないと、ドロップが出た走行でも、実行できた到着のレイテンシだけで合格してしまいます。
+
+## ガイド
+
+- [CI で動かす](docs/ci_jp.md): `jotaro check` をゲートにし、結果をアーティファクトとして残し、ベースラインと比べる、完全な GitHub Actions のワークフロー
+- [複数のマシンから動かす](docs/multi-machine_jp.md): 負荷の分け方、負荷生成側を同時に始める方法、`jotaro merge` が数字にすること
+- [負荷生成側のチューニングと、結果を信じるための確認](docs/tuning_jp.md): ファイルディスクリプタ、ポート、CPU、`corrected` と `latency`、HTTP/2、`bytes_in`、結果を信じる前のチェックリスト
+- [ジェネレーターの性能](docs/performance_jp.md): ジェネレーター 1 台で出せる負荷と、その測り方
 
 ## MCP サーバー（シナリオ作成と結果確認の補助）
 
