@@ -70,6 +70,7 @@ type htmlScenario struct {
 type htmlView struct {
 	Version   int
 	Model     string
+	Started   string // start time in UTC; empty when unknown
 	Elapsed   string
 	Requests  int
 	RPS       string
@@ -119,6 +120,9 @@ func (r *Report) toHTMLView() htmlView {
 		DNS:      latencyBars(r.Requests.DNS),
 		Connect:  latencyBars(r.Requests.Connect),
 		TLS:      latencyBars(r.Requests.TLS),
+	}
+	if !r.StartedAt.IsZero() {
+		v.Started = r.StartedAt.UTC().Format("2006-01-02 15:04:05 UTC")
 	}
 	if q := r.Requests; q.NewConns+q.ReusedConns > 0 {
 		v.Conns = fmt.Sprintf("%.1f%% reused (new %d / reused %d)", q.ReuseRate()*100, q.NewConns, q.ReusedConns)
