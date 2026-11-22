@@ -70,6 +70,7 @@ var checkout = jotaro.NewScenario("checkout", func(ctx context.Context, u *jotar
   - `ExpectHeader(key, want)` / `ExpectBodyContains(substr)`: ヘッダーの値 / ボディに含まれる文字列
   - `ExpectJSON(path, want)`: `data.items.0.id` のようなドット区切りのパスにある値。`Response.JSON(path)` はその値を返すので、構造体を定義せずに次のリクエストへ使える
   - 検証に失敗するとエラーを返し、ステップは `expect_mismatch` として記録される。リクエストのエラーとしては数えない（[しきい値の書き方](#しきい値の書き方)の `error_rate` を参照）
+- 複数のリクエストを同時に送る（ページとその API 呼び出し、ダッシュボードの各ウィジェットなど）には、ステップの中で `s.Parallel(fn1, fn2, ...)` を使う。関数を並行に実行してすべての終了を待ち、エラーを `errors.Join` でまとめて返す。同じステップのリクエストは自前の goroutine から送ってもよい（ステップ関数が戻るまでに終わらせること）。`u.Step` と `u.Think` はシナリオの goroutine からだけ呼ぶ。`Parallel` は同時に飛ぶリクエスト数を制限しない
 - `Think` は思考時間。シナリオ時間は、`Think` を除いたものと含めたものの両方が出る
 - ステップが失敗しても、シナリオの関数が `nil` を返せばそのイテレーションは成功として数える。ステップの失敗はステップ単位の集計で見る
 - Cookie はイテレーションごとに新しくなる。接続プールは全ユーザーで共有する

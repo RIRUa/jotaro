@@ -25,10 +25,34 @@ type executor struct {
 
 	// tag is a template record.Record with Scenario, Step, UserID, Iteration and so on filled in.
 	tag record.Record
-	// sched holds the scheduled arrival time. The first request uses it for Scheduled and resets it to zero.
-	// Steps run in order, so there is no locking.
-	sched *time.Time
+	// sched holds the scheduled arrival time. The first request of the iteration takes it for Scheduled
+	// and later ones get none. It may be nil. Requests of one step can run concurrently
+	// (see Step), so the slot guards itself.
+	sched *schedSlot
 	sink  func(record.Record)
+}
+
+// schedSlot holds the scheduled arrival time of an iteration until a request takes it.
+// It is safe for concurrent use: exactly one of several concurrent callers of take gets the time.
+type schedSlot struct {
+	mu sync.Mutex
+	t  time.Time
+}
+
+// set stores the scheduled arrival time, replacing any that was not taken yet.
+func (s *schedSlot) set(t time.Time) {
+	s.mu.Lock()
+	s.t = t
+	s.mu.Unlock()
+}
+
+// take returns the stored time and clears it, so the next call returns the zero time.
+func (s *schedSlot) take() time.Time {
+	s.mu.Lock()
+	t := s.t
+	s.t = time.Time{}
+	s.mu.Unlock()
+	return t
 }
 
 // resolve turns a request path into a full URL.
@@ -66,10 +90,13 @@ func (e *executor) do(r *Request) *Response {
 	rec.BytesOut = int64(len(r.Spec.Body))
 
 	rec.Start = time.Now()
+	var sched time.Time
+	if e.sched != nil {
+		sched = e.sched.take()
+	}
 	switch {
-	case e.sched != nil && !e.sched.IsZero():
-		rec.Scheduled = *e.sched
-		*e.sched = time.Time{}
+	case !sched.IsZero():
+		rec.Scheduled = sched
 	case rec.Scheduled.IsZero():
 		rec.Scheduled = rec.Start
 	}
