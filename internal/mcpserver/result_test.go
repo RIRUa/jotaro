@@ -214,6 +214,13 @@ func TestSummarizeResult(t *testing.T) {
 				t.Errorf("unexpected scenario %+v", sc)
 			}
 			login, order := sc.Steps[0], sc.Steps[1]
+			// order failed twice: once by a failed check (no request error) and once by the timeout it returned.
+			if o := order.Errors; len(o) != 2 || o["expect_mismatch"] != 1 || o["timeout"] != 1 {
+				t.Errorf("want order errors expect_mismatch=1 timeout=1, got %v", o)
+			}
+			if login.Errors == nil || len(login.Errors) != 0 {
+				t.Errorf("a healthy step has an empty errors map (written as {}), got %#v", login.Errors)
+			}
 			if login.Name != "login" || login.Failed != 0 || login.Requests.Latency.P95Ms != 10 {
 				t.Errorf("unexpected login step %+v", login)
 			}

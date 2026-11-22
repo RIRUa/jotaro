@@ -37,7 +37,7 @@ Report
 ├─ Scenarios[] ScenarioReport
 │  ├─ Name
 │  ├─ Iterations  IterationStats (Active = excluding Think / Total = including Think)
-│  └─ Steps[]     StepStats (in order of first execution)
+│  └─ Steps[]     StepStats (in order of first execution): Count, Failed, Duration, Errors (why the step failed, per ErrKind)
 │     └─ Requests RequestStats
 ├─ Series[]    SeriesPoint: per-second aggregate since StartedAt (see "Merging reports")
 └─ Health[]    record.HealthPoint: per-second health of the load generator (only for a run done with Run)
@@ -62,7 +62,7 @@ Report
 | `NewConns` / `ReusedConns` | Number of requests that opened a new connection / reused one |
 | `Corrected` | Time from the scheduled start (after Coordinated Omission correction). Same as `Latency` in the closed model (`Users` / `UserStages`) |
 | `Status` | Counts per status class such as `"2xx"` |
-| `Errors` | Breakdown of transport-level errors (per `ErrKind`). Failed `Expect*` checks are not in it |
+| `Errors` | Breakdown of transport-level errors (per `ErrKind`). Failed `Expect*` checks are not in it (they are in the `Errors` of the step) |
 | `BytesIn` / `BytesOut` | Body bytes (headers are not included) |
 
 ### `ErrKind` (kinds of failure)
@@ -82,6 +82,10 @@ Report
 HTTP 4xx/5xx are recorded as a status (`Status`), not as an `ErrKind`.
 
 Where each kind is recorded: the transport-level kinds (`timeout`, `connection_refused`, `dns`, `tls`, `canceled`, `other`) are recorded on the request, and also on the step and the iteration when the error is returned from them. `panic` is recorded on the step that was running and on the iteration: the step is listed as failed (`Failed`) with the time up to the panic, requests sent before the panic stay under it, and the run goes on with the other users. The first panic of a run is written once, with its stack, to `Plan.Progress` (or to standard error when `Progress` is nil) after the run; later ones are only counted. `expect_mismatch` is decided by the `Expect*` call after the response has arrived, so it is **not** recorded on the request: it appears in `Errors` of the step (and of the iteration, when the scenario returns the error), and it fails the step (`Failed`). That is why `error_rate` (chapter 5) does not see it.
+
+A step's `Errors` is the reason of each failed run, one `ErrKind` per run, so the counts add up to `Failed`.
+
+Where the reasons are shown: the text report lists them in the `failures` column of "steps (duration)" (`expect_mismatch=500`), and the HTML report in the same column of its step table. The `errors` column of "steps (requests)" is named `net errors` in both, because it counts only the transport-level errors of the requests; a step whose checks failed shows `fail` above 0, `failures` with `expect_mismatch` and `net errors` as `-`. `summarize_result` of `jotaro mcp` returns the same breakdown as `errors` in each step, and its `failed_checks` warning names the kinds. A step with no failure shows `-` in `failures`.
 
 ### Notes
 
@@ -125,7 +129,7 @@ if err := rep.WriteHTML(f); err != nil {
 - It is generated with `html/template`, so scenario and step names are escaped automatically.
 - CSS is embedded; no JS, chart library or external resources are used (the charts are inline SVG). Light/dark follows the OS setting.
 - The page declares `<html lang="en">` (its text is English). The start time (UTC) is shown in the header and in `<title>`, so two reports can be told apart; both are left out when the start time is unknown.
-- Contents: summary (including the load model, `closed` / `open`), breakdown of statuses and errors, latency (p50 to max bars), `corrected` (open model only, that is, with `Arrival`), TTFB, per-scenario iteration time and per-step tables. When the report has a time series, a per-second timeline of inline SVG line charts follows: requests / errors / 5xx, latency p50 / p95 / p99, concurrency, connections, DNS / connect / TLS time, and the goroutines and CPU of the load generator.
+- Contents: summary (including the load model, `closed` / `open`), breakdown of statuses and errors, latency (p50 to max bars), `corrected` (open model only, that is, with `Arrival`), TTFB, per-scenario iteration time and per-step tables (with the failure reasons of each step in `failures`). When the report has a time series, a per-second timeline of inline SVG line charts follows: requests / errors / 5xx, latency p50 / p95 / p99, concurrency, connections, DNS / connect / TLS time, and the goroutines and CPU of the load generator.
 - Displayed values use the same format as `Print` (`fmtDur`). Use JSON for lossless nanosecond values.
 - Sample: `go run ./examples/checkout -format html -o report.html` (`-rate 30` for the `Rate` model).
 

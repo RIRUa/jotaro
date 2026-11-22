@@ -43,10 +43,11 @@ type htmlStep struct {
 	Name     string
 	Count    int
 	Failed   int
+	Failures string // why the step failed, per error kind (StepStats.Errors), such as "expect_mismatch=3"
 	Duration []string
 	Requests int
 	Status   string
-	Errors   string
+	Errors   string // transport-level errors of the step's requests (RequestStats.Errors)
 	P50      string
 	P95      string
 	P99      string
@@ -154,6 +155,7 @@ func (r *Report) toHTMLView() htmlView {
 			q := s.Requests
 			hs.Steps = append(hs.Steps, htmlStep{
 				Name: s.Name, Count: s.Count, Failed: s.Failed,
+				Failures: fmtErrors(s.Errors),
 				Duration: latencyCellList(s.Duration),
 				Requests: q.Count,
 				Status:   fmtStatus(q.Status),

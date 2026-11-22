@@ -228,7 +228,7 @@ claude mcp add jotaro -- jotaro mcp     # Claude Code の場合。他のクラ�
 | Prompt | `write_scenario` | 指定したフローのシナリオを書き、チェックまで行う |
 | Tool | `check_scenario` | シナリオを検査する。Go の構文、jotaro 固有の lint（`Users` / `UserStages` / `Arrival` のうちちょうど 1 つ、レスポンス未検証、Step 名の重複・データから組み立てた Step 名など）、コンパイルによる型チェック。lint は jotaro の型とメソッドで判定するので、別名の import や変数を経由していても検出し、自前の `Plan` 型や `Do()` メソッドは無視する（コンパイルが通った場合に型情報つきで実行し、それまでは名前ベースの代替が警告だけを返す）。`dir`（jotaro を require している module）を渡すとその jotaro のバージョンで検査し、省略すると、実行中の `jotaro` バイナリと同じバージョンの jotaro（開発ビルドでは最新版）を使う一時 module を作る（ネットワークが必要） |
 | Tool | `validate_threshold` | `p99{step=login}<100ms` のようなしきい値をパースする |
-| Tool | `summarize_result` | 保存した結果ファイルを要約する。スループット、エラー率、ステップごとのレイテンシ、dropped、最も遅かった 1 秒、数値を信用してはいけない理由を示す警告 (負荷生成側の CPU 飽和、dropped、p95/p99 に対してリクエスト数が少ない、`error_rate` に出ない検証失敗、4xx の多さ、到着の遅れ、実行中の劣化) を返す。ヒストグラムと毎秒の時系列を含む結果ファイルそのものよりずっと小さい |
+| Tool | `summarize_result` | 保存した結果ファイルを要約する。スループット、エラー率、ステップごとのレイテンシと失敗理由、dropped、最も遅かった 1 秒、数値を信用してはいけない理由を示す警告 (負荷生成側の CPU 飽和、dropped、p95/p99 に対してリクエスト数が少ない、`error_rate` に出ない検証失敗、4xx の多さ、到着の遅れ、実行中の劣化) を返す。ヒストグラムと毎秒の時系列を含む結果ファイルそのものよりずっと小さい |
 | Tool | `check_result` | 保存した結果ファイルをしきい値で判定する（`jotaro check` と同じ）。しきい値ごとの合否と実測値を返す。`raw: true` で生データ（JSON Lines）を読む |
 
 ## パッケージ

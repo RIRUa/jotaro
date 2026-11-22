@@ -144,13 +144,13 @@ footer { margin-top: 32px; color: var(--muted); font-size: 12px; }
 {{if .Steps}}
 <h3>steps (duration)</h3>
 <div class="scroll"><table>
-  <tr><th>step</th><th>count</th><th>fail</th>{{range $hdr}}<th>{{.}}</th>{{end}}</tr>
-  {{range .Steps}}<tr><td>{{.Name}}</td><td>{{.Count}}</td><td{{if .Failed}} class="bad"{{end}}>{{.Failed}}</td>{{range .Duration}}<td>{{.}}</td>{{end}}</tr>{{end}}
+  <tr><th>step</th><th>count</th><th>fail</th><th>failures</th>{{range $hdr}}<th>{{.}}</th>{{end}}</tr>
+  {{range .Steps}}<tr><td>{{.Name}}</td><td>{{.Count}}</td><td{{if .Failed}} class="bad"{{end}}>{{.Failed}}</td><td>{{.Failures}}</td>{{range .Duration}}<td>{{.}}</td>{{end}}</tr>{{end}}
 </table></div>
 
 <h3>steps (requests)</h3>
 <div class="scroll"><table>
-  <tr><th>step</th><th>reqs</th><th>status</th><th>errors</th><th>p50</th><th>p95</th><th>p99</th><th>ttfb p50</th><th>ttfb p95</th></tr>
+  <tr><th>step</th><th>reqs</th><th>status</th><th>net errors</th><th>p50</th><th>p95</th><th>p99</th><th>ttfb p50</th><th>ttfb p95</th></tr>
   {{range .Steps}}<tr><td>{{.Name}}</td><td>{{.Requests}}</td><td>{{.Status}}</td><td>{{.Errors}}</td><td>{{.P50}}</td><td>{{.P95}}</td><td>{{.P99}}</td><td>{{.TTFBP50}}</td><td>{{.TTFBP95}}</td></tr>{{end}}
 </table></div>
 {{end}}

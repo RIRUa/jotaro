@@ -233,3 +233,25 @@ func TestWriteHTMLNoStartTime(t *testing.T) {
 		t.Error("an unknown start time must not be shown")
 	}
 }
+
+func TestWriteHTMLShowsStepFailureReasons(t *testing.T) {
+	var buf bytes.Buffer
+	if err := mismatchReport().WriteHTML(&buf); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	// The step failed twice by expect_mismatch only: the reason is in the step table, the failed count is
+	// marked, and the request table says "net errors" for the transport-level column.
+	for _, want := range []string{
+		"<th>fail</th><th>failures</th>",
+		`<td class="bad">2</td><td>expect_mismatch=2</td>`,
+		"<th>net errors</th>",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("%q missing from output", want)
+		}
+	}
+	if strings.Contains(out, "<th>errors</th><th>p50</th>") {
+		t.Error("the request table still has an unlabeled errors column")
+	}
+}
