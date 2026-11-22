@@ -33,55 +33,55 @@ func TestRunValidate(t *testing.T) {
 }
 
 func TestRunUsers(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte(`{}`))
-	}))
-	defer srv.Close()
-
-	sc := NewScenario("checkout", func(ctx context.Context, u *User) error {
-		if err := u.Step("login", func(s *Step) error {
-			return s.Post("/login").Do().ExpectStatus(200)
-		}); err != nil {
-			return err
-		}
-		u.Think(5 * time.Millisecond)
-		return u.Step("list", func(s *Step) error {
-			return s.Get("/items").Do().ExpectStatus(200)
+	inBubble(t, func(t *testing.T) {
+		sc := NewScenario("checkout", func(ctx context.Context, u *User) error {
+			if err := u.Step("login", func(s *Step) error {
+				return s.Post("/login").Do().ExpectStatus(200)
+			}); err != nil {
+				return err
+			}
+			u.Think(5 * time.Millisecond)
+			return u.Step("list", func(s *Step) error {
+				return s.Get("/items").Do().ExpectStatus(200)
+			})
 		})
-	})
 
-	rep, err := Run(context.Background(), Plan{
-		Scenario: sc, BaseURL: srv.URL, Users: 3, Duration: 300 * time.Millisecond,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if len(rep.Scenarios) != 1 {
-		t.Fatalf("Scenarios = %d", len(rep.Scenarios))
-	}
-	s := rep.Scenarios[0]
-	if s.Iterations.Count < 3 || s.Iterations.Failed != 0 {
-		t.Fatalf("Iterations = %+v", s.Iterations)
-	}
-	if len(s.Steps) != 2 || s.Steps[0].Name != "login" || s.Steps[1].Name != "list" {
-		t.Fatalf("Steps = %+v", s.Steps)
-	}
-	for _, st := range s.Steps {
-		if st.Count != s.Iterations.Count || st.Failed != 0 {
-			t.Errorf("%s: Count=%d Failed=%d, iterations=%d", st.Name, st.Count, st.Failed, s.Iterations.Count)
+		rep, err := run(context.Background(), Plan{
+			Scenario: sc, BaseURL: "http://stub.test", Users: 3, Duration: 300 * time.Millisecond,
+		}, fakeServerAfter(2*time.Millisecond))
+		if err != nil {
+			t.Fatal(err)
 		}
-	}
-	if rep.Requests.Count != 2*s.Iterations.Count || rep.Requests.Status["2xx"] != rep.Requests.Count {
-		t.Fatalf("Requests = %+v", rep.Requests)
-	}
-	if rep.Elapsed < 300*time.Millisecond || rep.RPS() <= 0 {
-		t.Fatalf("Elapsed=%v RPS=%v", rep.Elapsed, rep.RPS())
-	}
-	// Scenario time without Think is shorter than the time with it.
-	if s.Iterations.Active.P50 >= s.Iterations.Total.P50 {
-		t.Fatalf("Active=%v Total=%v", s.Iterations.Active.P50, s.Iterations.Total.P50)
-	}
+
+		if len(rep.Scenarios) != 1 {
+			t.Fatalf("Scenarios = %d", len(rep.Scenarios))
+		}
+		s := rep.Scenarios[0]
+		// An iteration takes 2 + 5 + 2 = 9ms, so every user starts one at 0, 9, ..., 297ms: 34 of them, the
+		// last ending at 306ms.
+		if s.Iterations.Count != 3*34 || s.Iterations.Failed != 0 {
+			t.Fatalf("Iterations = %+v, want 102 and none failed", s.Iterations)
+		}
+		if len(s.Steps) != 2 || s.Steps[0].Name != "login" || s.Steps[1].Name != "list" {
+			t.Fatalf("Steps = %+v", s.Steps)
+		}
+		for _, st := range s.Steps {
+			if st.Count != s.Iterations.Count || st.Failed != 0 {
+				t.Errorf("%s: Count=%d Failed=%d, iterations=%d", st.Name, st.Count, st.Failed, s.Iterations.Count)
+			}
+		}
+		if rep.Requests.Count != 2*s.Iterations.Count || rep.Requests.Status["2xx"] != rep.Requests.Count {
+			t.Fatalf("Requests = %+v", rep.Requests)
+		}
+		if rep.Elapsed != 306*time.Millisecond {
+			t.Fatalf("Elapsed = %v, want 306ms", rep.Elapsed)
+		}
+		// Scenario time without Think is shorter than the time with it (percentiles are within 1%).
+		within := func(got, want time.Duration) bool { return math.Abs(float64(got-want)) <= 0.011*float64(want) }
+		if !within(s.Iterations.Active.P50, 4*time.Millisecond) || !within(s.Iterations.Total.P50, 9*time.Millisecond) {
+			t.Fatalf("Active=%v Total=%v, want 4ms and 9ms", s.Iterations.Active.P50, s.Iterations.Total.P50)
+		}
+	})
 }
 
 func TestRunAllUsersParticipate(t *testing.T) {
@@ -103,21 +103,23 @@ func TestRunAllUsersParticipate(t *testing.T) {
 
 // Iterations still running after Duration are waited for until they finish.
 func TestRunLetsInflightIterationFinish(t *testing.T) {
-	sc := NewScenario("s", func(ctx context.Context, u *User) error {
-		u.Think(300 * time.Millisecond)
-		return nil
+	inBubble(t, func(t *testing.T) {
+		sc := NewScenario("s", func(ctx context.Context, u *User) error {
+			u.Think(300 * time.Millisecond)
+			return nil
+		})
+		rep, err := Run(context.Background(), Plan{Scenario: sc, Users: 1, Duration: 50 * time.Millisecond})
+		if err != nil {
+			t.Fatal(err)
+		}
+		it := rep.Scenarios[0].Iterations
+		if it.Count != 1 || it.Failed != 0 {
+			t.Fatalf("Iterations = %+v", it)
+		}
+		if rep.Elapsed != 300*time.Millisecond {
+			t.Fatalf("Elapsed = %v, want 300ms: Run must wait for the running iteration, no longer", rep.Elapsed)
+		}
 	})
-	rep, err := Run(context.Background(), Plan{Scenario: sc, Users: 1, Duration: 50 * time.Millisecond})
-	if err != nil {
-		t.Fatal(err)
-	}
-	it := rep.Scenarios[0].Iterations
-	if it.Count != 1 || it.Failed != 0 {
-		t.Fatalf("Iterations = %+v", it)
-	}
-	if rep.Elapsed < 300*time.Millisecond {
-		t.Fatalf("Elapsed = %v: did not wait for running iterations", rep.Elapsed)
-	}
 }
 
 // Past Grace, they are aborted and recorded as record.ErrCanceled.
@@ -224,46 +226,50 @@ func TestRunRawWriteErrorStillReturnsReport(t *testing.T) {
 }
 
 // Run folds records into histograms with and without Plan.Raw. Both give the same counts.
+//
+// It runs on a fake clock: the old version asserted on real time and failed on Windows once, with a
+// concurrency of 6 in the first second where 3 users can only have 3 (#56).
 func TestRunAggregatesWithAndWithoutRaw(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		time.Sleep(2 * time.Millisecond)
-		w.Write([]byte(`{}`))
-	}))
-	defer srv.Close()
+	inBubble(t, func(t *testing.T) {
+		sc := NewScenario("s", func(ctx context.Context, u *User) error {
+			return u.Step("get", func(s *Step) error { return s.Get("/").Do().ExpectStatus(200) })
+		})
+		plan := Plan{Scenario: sc, BaseURL: "http://stub.test", Users: 3, Duration: 301 * time.Millisecond}
+		server := fakeServerAfter(2 * time.Millisecond)
 
-	sc := NewScenario("s", func(ctx context.Context, u *User) error {
-		return u.Step("get", func(s *Step) error { return s.Get("/").Do().ExpectStatus(200) })
+		streamed, err := run(context.Background(), plan, server)
+		if err != nil {
+			t.Fatal(err)
+		}
+		plan.Raw = &bytes.Buffer{}
+		exact, err := run(context.Background(), plan, server)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		// Every user starts a request every 2ms from 0 to 300ms inclusive: 151 each.
+		const want = 3 * 151
+		for name, rep := range map[string]*report.Report{"streamed": streamed, "with raw": exact} {
+			if rep.Requests.Count != want || len(rep.Scenarios) != 1 || len(rep.Scenarios[0].Steps) != 1 {
+				t.Fatalf("%s: unexpected report %+v, want %d requests", name, rep, want)
+			}
+			st := rep.Scenarios[0].Steps[0]
+			if st.Count != want || st.Failed != 0 || rep.Scenarios[0].Iterations.Count != want {
+				t.Errorf("%s: step %+v, iterations %+v, requests %d", name, st, rep.Scenarios[0].Iterations, rep.Requests.Count)
+			}
+			if len(rep.Series) == 0 || len(rep.Health) == 0 || rep.StartedAt.IsZero() || rep.Elapsed != 302*time.Millisecond {
+				t.Errorf("%s: series/health/start/elapsed wrong: %+v", name, rep)
+			}
+			if rep.Series[0].Concurrency != 3 {
+				t.Errorf("%s: concurrency in the first second = %d, want 3", name, rep.Series[0].Concurrency)
+			}
+			// Every request took exactly 2ms (the streamed percentiles are within 1%).
+			l := rep.Requests.Latency
+			if l.Min != 2*time.Millisecond || l.Max != 2*time.Millisecond || math.Abs(float64(l.P50-2*time.Millisecond)) > 0.011*float64(2*time.Millisecond) {
+				t.Errorf("%s: latency %+v, want 2ms throughout", name, l)
+			}
+		}
 	})
-	plan := Plan{Scenario: sc, BaseURL: srv.URL, Users: 3, Duration: 300 * time.Millisecond}
-
-	streamed, err := Run(context.Background(), plan)
-	if err != nil {
-		t.Fatal(err)
-	}
-	plan.Raw = &bytes.Buffer{}
-	exact, err := Run(context.Background(), plan)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	for name, rep := range map[string]*report.Report{"streamed": streamed, "with raw": exact} {
-		if rep.Requests.Count == 0 || len(rep.Scenarios) != 1 || len(rep.Scenarios[0].Steps) != 1 {
-			t.Fatalf("%s: unexpected report %+v", name, rep)
-		}
-		st := rep.Scenarios[0].Steps[0]
-		if st.Count != rep.Requests.Count || st.Failed != 0 || rep.Scenarios[0].Iterations.Count != st.Count {
-			t.Errorf("%s: step %+v, iterations %+v, requests %d", name, st, rep.Scenarios[0].Iterations, rep.Requests.Count)
-		}
-		if len(rep.Series) == 0 || len(rep.Health) == 0 || rep.StartedAt.IsZero() || rep.Elapsed <= 0 {
-			t.Errorf("%s: series/health/start/elapsed missing: %+v", name, rep)
-		}
-		if rep.Series[0].Concurrency != 3 {
-			t.Errorf("%s: concurrency in the first second = %d, want 3", name, rep.Series[0].Concurrency)
-		}
-		if l := rep.Requests.Latency; l.P50 < 2*time.Millisecond || l.P50 > l.Max || l.Min > l.P50 {
-			t.Errorf("%s: latency %+v", name, l)
-		}
-	}
 }
 
 // The open model goes through the same path; dropped arrivals and the Open flag are kept.

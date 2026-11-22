@@ -161,23 +161,32 @@ func TestRunAbortWithRaw(t *testing.T) {
 	}
 }
 
+// A healthy server never trips the rules, however long the run is. It runs on a fake clock, so the
+// run lasts exactly as long as the Plan says and the count of requests is exact: nothing depends on how fast
+// the machine is (on Windows, a run was measured 0.3 ms short of its Duration).
 func TestRunNotAbortedWhenHealthy(t *testing.T) {
-	fastAbort(t)
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte(`{}`))
-	}))
-	defer srv.Close()
-
-	rep, err := Run(context.Background(), Plan{
-		Scenario: getScenario(), BaseURL: srv.URL, Users: 2, Duration: 300 * time.Millisecond,
-		AbortOn: []AbortRule{{When: "http_5xx_rate>50%"}, {When: "p99>10s"}},
+	inBubble(t, func(t *testing.T) {
+		const (
+			latency  = 10 * time.Millisecond
+			duration = 10*time.Second + 5*time.Millisecond // ends in the middle of an iteration
+		)
+		stub := fakeServerAfter(latency)
+		rep, err := run(context.Background(), Plan{
+			Scenario: getScenario(), BaseURL: "http://stub.test", Users: 2, Duration: duration,
+			AbortOn: []AbortRule{{When: "http_5xx_rate>50%"}, {When: "p99>10s"}},
+		}, stub)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// Each user starts an iteration every 10ms from 0 to 10s inclusive (1001 of them); the last one
+		// ends at 10.01s.
+		if rep.Requests.Count != 2*1001 || stub.calls.Load() != 2*1001 {
+			t.Errorf("requests = %d (stub saw %d), want %d", rep.Requests.Count, stub.calls.Load(), 2*1001)
+		}
+		if want := 10*time.Second + latency; rep.Elapsed != want {
+			t.Errorf("Elapsed = %v, want %v", rep.Elapsed, want)
+		}
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if rep.Requests.Count == 0 || rep.Elapsed < 300*time.Millisecond {
-		t.Errorf("run was cut short: %d requests in %v", rep.Requests.Count, rep.Elapsed)
-	}
 }
 
 // After an abort the running iterations get Grace counted from the abort, not from the end of Duration,

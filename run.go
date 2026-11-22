@@ -281,17 +281,28 @@ func newTransport() *http.Transport {
 // When ctx is done, everything stops at once, including running iterations,
 // and the results so far are returned. Report.Elapsed is the real time until all users have stopped.
 func Run(ctx context.Context, p Plan) (*report.Report, error) {
+	return run(ctx, p, nil)
+}
+
+// run is Run with a seam for tests: a non-nil rt is used instead of the transport that Run prepares, so a
+// test can serve a plan from memory (see fakeServer in the tests) without sockets, which lets it run
+// inside a testing/synctest bubble on a fake clock. Run itself always passes nil.
+func run(ctx context.Context, p Plan, rt http.RoundTripper) (*report.Report, error) {
 	if err := p.validate(); err != nil {
 		return nil, err
 	}
 	timeout := cmpOr(p.Timeout, defaultTimeout)
 	grace := cmpOr(p.Grace, defaultGrace)
 
-	tr := newTransport()
-	trackDials(tr)
-	tr.MaxIdleConns = p.maxConcurrency() * 2
-	tr.MaxIdleConnsPerHost = p.maxConcurrency()
-	defer tr.CloseIdleConnections()
+	tr := rt
+	if tr == nil {
+		t := newTransport()
+		trackDials(t)
+		t.MaxIdleConns = p.maxConcurrency() * 2
+		t.MaxIdleConnsPerHost = p.maxConcurrency()
+		defer t.CloseIdleConnections()
+		tr = t
+	}
 
 	// stopCtx: whether new iterations may be started.
 	// runCtx:  whether running iterations may continue. It is cancelled at Duration + Grace.
