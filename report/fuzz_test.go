@@ -14,14 +14,14 @@ import (
 // FuzzParseThreshold feeds arbitrary text to ParseThreshold. It must never panic, and a threshold it accepts
 // must survive String → ParseThreshold unchanged.
 //
-// The value should also be finite and non-negative, but ParseThreshold still accepts NaN, Inf and negative
-// values (#82). Until that is fixed the inputs that hit it are skipped, so the fuzzer can look for other
-// problems; delete the skip when #82 is closed.
+// The value must also be finite and non-negative (and at most 1 for a ratio), because no measurement can be
+// NaN, infinite or negative (#82).
 func FuzzParseThreshold(f *testing.F) {
 	for _, s := range []string{
 		"p95<200ms", "error_rate<1%", "rps>12345.6", "requests>=1234567", "dropped<0x10",
 		"p99{scenario=checkout,step=login}<=1.5s", `p95{step="list, then order"}<1s`,
 		"p95<-1ms", "error_rate<-5%", "rps>NaN", "rps>Inf", "rps>1e999", "p95<1e30h", "error_rate<1e400%",
+		"error_rate<500%", "error_rate<1.5", "error_rate<100%", "error_rate<-0%", "rps>-0", "p95<-0s", "rps>-Inf", "rps>1e308",
 		"", "<", "p95", "p95<", "{", "p95{", "p95{}<1s", "p95{step=}<1s", "p95{step=a,step=b}<1s",
 	} {
 		f.Add(s)
@@ -31,8 +31,11 @@ func FuzzParseThreshold(f *testing.F) {
 		if err != nil {
 			return
 		}
-		if math.IsNaN(th.Value) || math.IsInf(th.Value, 0) || th.Value < 0 {
-			t.Skip("known issue #82: NaN, Inf and negative values are accepted")
+		if math.IsNaN(th.Value) || math.IsInf(th.Value, 0) || th.Value < 0 || math.Signbit(th.Value) {
+			t.Fatalf("%q: parsed to the value %v, which no measurement can meet", in, th.Value)
+		}
+		if strings.HasSuffix(th.Metric, "_rate") && th.Value > 1 {
+			t.Fatalf("%q: parsed to the ratio %v, which is above 100%%", in, th.Value)
 		}
 		again, err := ParseThreshold(th.String())
 		if err != nil {
@@ -112,10 +115,12 @@ func fuzzJSONSeeds() []string {
 	}
 }
 
-// TestParseThresholdValueRange documents the property FuzzParseThreshold skips: a parsed value is finite and non-negative.
+// TestParseThresholdValueRange pins the inputs that #82 made errors: a parsed value is finite and non-negative, and a ratio is at most 1.
 func TestParseThresholdValueRange(t *testing.T) {
-	t.Skip("known issue #82: ParseThreshold accepts NaN, Inf and negative values; remove this skip with the fix")
-	for _, in := range []string{"p95<-1ms", "error_rate<-5%", "rps>NaN", "rps>Inf", "rps>1e999"} {
+	for _, in := range []string{
+		"p95<-1ms", "error_rate<-5%", "rps>NaN", "rps>Inf", "rps>1e999", "error_rate<500%", "error_rate<1.5",
+		"rps>-Inf", "error_rate<NaN%", "error_rate<-0.0001%", "iteration_p95<-1s", "requests>=-1",
+	} {
 		if th, err := ParseThreshold(in); err == nil {
 			t.Errorf("ParseThreshold(%q) = %+v, want an error", in, th)
 		}

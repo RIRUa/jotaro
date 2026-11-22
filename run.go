@@ -116,7 +116,9 @@ type Plan struct {
 
 	// AbortOn stops the run early when any of its conditions holds, for example
 	// {When: "error_rate>50%", For: 5 * time.Second}. A broken server is then not hit for the whole Duration.
-	// See AbortRule for the syntax and how the conditions are evaluated.
+	// See AbortRule for the syntax and how the conditions are evaluated. A malformed condition, including a value
+	// that can never be meant (NaN, Inf, a negative value, a ratio above 100%: "error_rate>500%" could never fire),
+	// makes Run fail before any load is sent.
 	//
 	// On abort no new iterations are started and the running ones get Grace, counted from the moment of the abort,
 	// to finish (the rest is cancelled and recorded as record.ErrCanceled), exactly as at the end of Duration.

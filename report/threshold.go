@@ -198,6 +198,13 @@ func requestRatio(n func(q RequestStats) int) metric {
 var thresholdOps = []string{"<=", ">=", "<", ">"}
 
 // ParseThreshold turns a string such as "p95<200ms" into a Threshold.
+//
+// The value must be one that a measurement can take, so that a typo cannot make a threshold that is never met
+// or always met. ParseThreshold returns an error that names the expression and the reason for NaN and
+// infinities (including a number too large for float64, such as 1e400), for a negative value of any kind
+// ("p95<-1s", "rps>-1", "error_rate<-5%"; -0 is zero and accepted) and for a ratio above 100%
+// ("error_rate<500%", or above 1 in the plain form "error_rate<1.5"). 0, 100% and 1 are accepted.
+// The same parser reads Plan.AbortOn, so "error_rate>500%" (a rule that could never fire) is an error there too.
 func ParseThreshold(s string) (Threshold, error) {
 	fail := func(format string, a ...any) (Threshold, error) {
 		return Threshold{}, fmt.Errorf("jotaro: threshold %q: %s", s, fmt.Sprintf(format, a...))
@@ -626,6 +633,10 @@ func (c Checks) Passed() bool {
 }
 
 // Check checks whether r meets all of ts.
+//
+// A threshold built by ParseThreshold always has a finite, non-negative value (and a ratio of at most 1),
+// so a mistake such as "error_rate<500%" is rejected there instead of passing here. A Threshold assembled by hand
+// with a NaN, infinite, negative or above-100% value is not checked again: such a value is the caller's mistake.
 //
 // When {step=...} matches steps of the same name in several scenarios, each is checked separately.
 // When nothing matches the filter, or there is no data to aggregate (such as zero requests),
