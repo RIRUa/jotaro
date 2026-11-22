@@ -4,8 +4,8 @@
 #
 # Usage: scripts/api-compat.sh [base-tag]
 #
-# Without an argument the base is the highest stable tag (vX.Y.Z, no pre-release suffix) of the
-# repository. Needs git (for the tags), tar and the Go toolchain; golang.org/x/exp/cmd/apidiff is
+# Without an argument the base is the highest stable tag (vX.Y.Z, no pre-release suffix) that is
+# merged into HEAD, so a tag on another line of history is not taken for the last release. Needs git (for the tags), tar and the Go toolchain; golang.org/x/exp/cmd/apidiff is
 # fetched at the version pinned below (set GOPROXY if your environment cannot reach the default).
 #
 # What is compared: every package of the module except internal/ packages (apidiff skips them),
@@ -22,10 +22,10 @@ cd "$(dirname "$0")/.."
 
 base=${1:-}
 if [ -z "$base" ]; then
-	base=$(git tag --list 'v*' --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n 1 || true)
+	base=$(git tag --list 'v*' --merged HEAD --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n 1 || true)
 fi
 if [ -z "$base" ]; then
-	echo "api-compat: no release tag (vX.Y.Z) found, nothing to compare with" >&2
+	echo "api-compat: no release tag (vX.Y.Z) merged into HEAD found, nothing to compare with" >&2
 	echo "api-compat: in CI, check out with fetch-depth: 0 so that the tags are there" >&2
 	exit 1
 fi
@@ -36,7 +36,9 @@ fi
 
 module=$(go list -m)
 work=$(mktemp -d)
-trap 'rm -rf "$work"' EXIT INT TERM
+trap 'rm -rf "$work"' EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 # Export data of the last release, written from a clean copy of its tree.
 mkdir "$work/base"

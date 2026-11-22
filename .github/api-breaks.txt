@@ -14,7 +14,9 @@
 # - <identifier> is what apidiff prints before the first ": " in the "Incompatible changes" list,
 #   such as "LoadCSV", "Step.Wait" or "./record.Raw.Truncated" (sub-packages start with "./").
 #   Run scripts/api-compat.sh to see the exact text. One line covers every incompatible change
-#   reported for that identifier.
+#   reported for that identifier, also one that a later pull request of the same release cycle
+#   introduces (the line is for the tag, not for one pull request), so the reviewer of such a pull
+#   request should look at the report of the job, not only at this file.
 # - <reason> says why the break cannot be avoided and what users do instead. It is required.
 #
 # Also describe the break in CHANGELOG.md under "Changed" with the note "This may affect existing
