@@ -11,6 +11,10 @@ import (
 // User is a virtual user that runs the scenario once.
 // ID is the number of the virtual user and does not change across iterations.
 // Client has its own cookie jar per iteration, so every iteration starts a fresh session.
+//
+// A User belongs to the goroutine that runs the scenario: call [User.Step] and [User.Think] only from it.
+// To send requests concurrently, do it inside one step with [Step.Parallel] (or your own goroutines
+// that finish before the step function returns); [Step] is safe for that.
 type User struct {
 	// ID identifies the virtual user. In the open model every arrival gets its own ID.
 	ID int
@@ -28,7 +32,7 @@ type User struct {
 	// think is the total time spent in Think so far, subtracted to get the active time.
 	think time.Duration
 	// scheduled is the scheduled arrival time. It goes back to zero once the first request has used it.
-	scheduled time.Time
+	scheduled schedSlot
 }
 
 // Step runs one section of the scenario and records its duration and outcome.

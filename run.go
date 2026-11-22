@@ -573,7 +573,7 @@ func (r *runner) runOpen() {
 			if err != nil {
 				return
 			}
-			u.scheduled = at
+			u.scheduled.set(at)
 			r.runScenario(sc, u) // the error is kept in the IterationRecord
 		}()
 	}

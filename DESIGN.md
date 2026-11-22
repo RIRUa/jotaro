@@ -27,7 +27,7 @@ Facts checked against the README and `pkg.go.dev` (v12.13.0):
 |---|---|
 | Form | Library first, plus a thin CLI |
 | How scenarios are written | Start with **option A: plain Go functions**. Option B (a builder) is added later as sugar over A |
-| Execution model | One user (one run of a scenario) = one goroutine. Steps are delimited with `u.Step(name, fn)` |
+| Execution model | One user (one run of a scenario) = one goroutine. Steps are delimited with `u.Step(name, fn)`. `User` is used from that goroutine only; requests inside one step may be sent concurrently (`Step.Parallel`), and the scheduled arrival time is taken by exactly one of them |
 | Protocol | HTTP only. We first planned to cut interfaces so that others could be plugged in later, but none exists yet (`exec.go` calls `net/http` directly); we will cut one when a second protocol is actually needed |
 | YAML | Deferred. If done, one-way: YAML → B (data structures) → A (execution), loaded at run time |
 | Request description | Held internally as a data structure (`RequestSpec`: method, path, query, headers, body), to keep the YAML path open. Value extraction and expectations were first planned to live in it too, but as implemented they are methods of `Response` (`Decode`, `JSON(path)`, `Expect*`) |

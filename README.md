@@ -70,6 +70,7 @@ var checkout = jotaro.NewScenario("checkout", func(ctx context.Context, u *jotar
   - `ExpectHeader(key, want)` / `ExpectBodyContains(substr)`: a header value / a substring of the body
   - `ExpectJSON(path, want)`: the value at a dot path such as `data.items.0.id`. `Response.JSON(path)` returns that value so you can use it in the next request without defining a struct
   - A failed check returns an error and the step is recorded as `expect_mismatch`. It is not counted as a request error (see `error_rate` under [Threshold syntax](#threshold-syntax))
+- To send several requests at once (a page and its API calls, the widgets of a dashboard), use `s.Parallel(fn1, fn2, ...)` inside the step: it runs the functions concurrently, waits for all of them and returns their errors joined (`errors.Join`). Requests of one step may also be sent from your own goroutines, as long as they finish before the step function returns. `u.Step` and `u.Think` must be called from the scenario goroutine only. `Parallel` does not limit how many requests are in flight
 - `Think` is think time. Scenario time is reported both without and with `Think`
 - Even if a step fails, the iteration counts as successful as long as the scenario function returns `nil`. Step failures show up in the per-step stats
 - Cookies are fresh for each iteration. The connection pool is shared by all users
