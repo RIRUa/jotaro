@@ -94,8 +94,17 @@ type RequestStats struct {
 	DNS     Latency
 	Connect Latency
 	TLS     Latency
-	// NewConns / ReusedConns are the number of requests that opened a new connection and that reused one.
-	// They follow httptrace.GotConnInfo.Reused, so they are approximate over TLS (see #111).
+	// NewConns is the number of connections that were opened, counted on the request that used the connection
+	// first, and ReusedConns the number of requests that used a connection some earlier request had already used.
+	// So NewConns is the number of connections that carried at least one request, which is what a server
+	// counts as accepted connections that served something. It does not use net/http's "reused" flag, which also
+	// marks a freshly dialed connection that was parked in the idle pool before any request used it.
+	// A connection that was dialed but never carried a request is not counted: one still idle when the run ends,
+	// one that failed to connect (which shows up as an error instead), and, with HTTP/2, the extra connections
+	// that net/http dials at start-up and closes unused. So the number of connections a server accepts can be
+	// higher than NewConns, by many with HTTP/2. Requests that failed before getting a connection are in neither.
+	// With HTTP/2 one connection serves many requests, so NewConns stays small.
+	// A transport that dials TLS by itself falls back to net/http's flag, which undercounts.
 	NewConns    int
 	ReusedConns int
 	// Corrected is the time since the scheduled start (after Coordinated Omission correction).

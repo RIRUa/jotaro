@@ -21,8 +21,9 @@ type SeriesPoint struct {
 	// HTTP5xx is how many of them returned HTTP 5xx. It can overlap with Errors: a request whose status line
 	// was 5xx but whose body then failed to arrive is counted in both (see #149).
 	HTTP5xx int
-	// NewConns / ReusedConns are, among the requests started in this interval,
-	// the number that opened a new connection and the number that reused one. Those that failed before getting a connection are counted in neither.
+	// NewConns / ReusedConns are, among the requests started in this interval, the number that were the first to use
+	// a connection (the connection was opened for them) and the number that used a connection that had carried
+	// an earlier request. See RequestStats.NewConns. Those that failed before getting a connection are counted in neither.
 	NewConns    int
 	ReusedConns int
 	// Latency is the latency distribution of the requests started in this interval.

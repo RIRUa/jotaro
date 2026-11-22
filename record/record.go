@@ -22,11 +22,13 @@ const (
 )
 
 // ConnKind is where the connection used by a request came from. Empty means it failed before getting a connection.
+// A connection is new for the first request that uses it and reused for every later one, even if net/http took it
+// from the idle pool the first time.
 type ConnKind string
 
 const (
-	ConnNew    ConnKind = "new"    // a newly opened connection
-	ConnReused ConnKind = "reused" // reused from the connection pool
+	ConnNew    ConnKind = "new"    // a connection that no earlier request had used
+	ConnReused ConnKind = "reused" // a connection that an earlier request had already used
 )
 
 // Record is the raw data of one HTTP request. All aggregation is done from it.

@@ -164,8 +164,11 @@ func (t *tracer) clientTrace() *httptrace.ClientTrace {
 		GotConn: func(info httptrace.GotConnInfo) {
 			t.mu.Lock()
 			defer t.mu.Unlock()
-			t.conn = record.ConnNew
-			if info.Reused {
+			// A request that got more than one connection (a retry after a stale one) keeps "new" if any
+			// of them was its own, so no connection is counted as new more than once (a retry that was first to use two fresh connections counts as one new).
+			if connFirstUse(info) {
+				t.conn = record.ConnNew
+			} else if t.conn == "" {
 				t.conn = record.ConnReused
 			}
 		},

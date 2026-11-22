@@ -46,7 +46,8 @@ type jsonRequests struct {
 	DNS       jsonLatency `json:"dns"`
 	Connect   jsonLatency `json:"connect"`
 	TLS       jsonLatency `json:"tls"`
-	// ConnNew / ConnReused are the number of requests that opened a new connection / reused one.
+	// ConnNew / ConnReused are the number of connections opened (counted on the request that used each first) / the
+	// number of requests that reused one. See RequestStats.NewConns.
 	ConnNew    int            `json:"conn_new"`
 	ConnReused int            `json:"conn_reused"`
 	Status     map[string]int `json:"status"`
