@@ -40,6 +40,7 @@ Requires Go 1.25 or later.
 
 ### 1. Write a scenario
 
+<!-- doccheck: before var creds map[string]string -->
 ```go
 var checkout = jotaro.NewScenario("checkout", func(ctx context.Context, u *jotaro.User) error {
 	var login struct {
@@ -79,6 +80,7 @@ var checkout = jotaro.NewScenario("checkout", func(ctx context.Context, u *jotar
 
 Use a `Feeder` to hand out different data (accounts, etc.) to each user. `LoadCSV` reads one from a CSV.
 
+<!-- doccheck: stmts -->
 ```go
 var accounts = jotaro.NewFeeder([]map[string]string{
 	{"user": "alice"}, {"user": "bob"},
@@ -89,6 +91,7 @@ creds, ok := accounts.Next()
 
 ### 2. Choose the load and run
 
+<!-- doccheck: before var checkout *jotaro.Scenario -->
 ```go
 rep, err := jotaro.Run(ctx, jotaro.Plan{
 	Scenario: checkout,
@@ -125,12 +128,14 @@ To stop a run as soon as the server is clearly broken, set `AbortOn`, for exampl
 
 ### 3. Output the results
 
+<!-- doccheck: before var rep *report.Report -->
 ```go
 rep.Write(os.Stdout, report.FormatText) // FormatText / FormatJSON / FormatHTML
 ```
 
 You can also judge the results against thresholds.
 
+<!-- doccheck: before var rep *report.Report -->
 ```go
 th, _ := report.ParseThreshold("p95<200ms")
 checks := rep.Check(th)

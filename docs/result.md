@@ -97,6 +97,7 @@ Where the reasons are shown: the text report lists them in the `failures` column
 
 `Report.WriteJSON(w io.Writer) error` writes the aggregated result as JSON (`report/json.go`).
 
+<!-- doccheck: before var rep *report.Report -->
 ```go
 f, _ := os.Create("result.json")
 defer f.Close()
@@ -118,6 +119,7 @@ if err := rep.WriteJSON(f); err != nil {
 
 `Report.WriteHTML(w io.Writer) error` writes a single self-contained HTML file (`report/html.go` / `report/report.html.tmpl`).
 
+<!-- doccheck: before var rep *report.Report -->
 ```go
 f, _ := os.Create("report.html")
 defer f.Close()
@@ -333,6 +335,7 @@ Decisions made when it was built:
 *Report ─▶ Write(w, format) ─▶ Text / JSON / HTML ─▶ w
 ```
 
+<!-- doccheck: before var rep *report.Report -->
 ```go
 f, _ := report.ParseFormat("json") // from a CLI flag string
 if err := rep.Write(os.Stdout, f); err != nil {
@@ -355,6 +358,7 @@ if err := rep.Write(os.Stdout, f); err != nil {
 
 A report can be rebuilt later from saved JSON.
 
+<!-- doccheck: before var f *os.File -->
 ```go
 rep, err := report.ReadJSON(f) // turn the JSON written by WriteJSON back into a Report
 ```
@@ -405,6 +409,7 @@ It reads raw data (the output of `Plan.Raw`; it never reads an aggregated result
 
 If users want to add their own formats, we will move to an interface instead of a `switch` on `Format`. Until demand appears, we keep the current form.
 
+<!-- doccheck: skip: the declaration of report.Writer, quoted for reference -->
 ```go
 type Writer interface {
     Write(w io.Writer, r *Report) error
@@ -419,6 +424,7 @@ type Writer interface {
 
 Check whether a result meets conditions, so that CI can fail when things get slower (`report/threshold.go`). Close to k6's `thresholds`. Checks are made against the `Report` after the run. `Plan` has no thresholds of its own; to stop a run while it is in progress, use `Plan.AbortOn` (the end of this chapter).
 
+<!-- doccheck: before var rep *report.Report -->
 ```go
 th, _ := report.ParseThreshold("p95<200ms")
 checks := rep.Check(th)  // Checks
@@ -473,6 +479,7 @@ Inside the quotes everything is literal, and `\"` and `\\` are escapes (the othe
 
 `Plan.AbortOn` is the equivalent of k6's `abortOnFail`: it stops the run as soon as a condition holds, so a broken server is not hit for the whole `Duration` (`abort.go`).
 
+<!-- doccheck: fields jotaro.Plan -->
 ```go
 AbortOn: []jotaro.AbortRule{
 	{When: "http_5xx_rate>50%", For: 5 * time.Second},

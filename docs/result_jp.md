@@ -97,6 +97,7 @@ HTTP 4xx/5xx は `ErrKind` ではなくステータス（`Status`）として記
 
 `Report.WriteJSON(w io.Writer) error` で、集計結果を JSON として書き出せる（`report/json.go`）。
 
+<!-- doccheck: before var rep *report.Report -->
 ```go
 f, _ := os.Create("result.json")
 defer f.Close()
@@ -118,6 +119,7 @@ if err := rep.WriteJSON(f); err != nil {
 
 `Report.WriteHTML(w io.Writer) error` で、外部に依存しない 1 枚の HTML を書き出せる（`report/html.go` / `report/report.html.tmpl`）。
 
+<!-- doccheck: before var rep *report.Report -->
 ```go
 f, _ := os.Create("report.html")
 defer f.Close()
@@ -333,6 +335,7 @@ rep, err := jotaro.Run(ctx, jotaro.Plan{ /* ... */ MetricsAddr: ":9090" })
 *Report ─▶ Write(w, format) ─▶ Text / JSON / HTML ─▶ w
 ```
 
+<!-- doccheck: before var rep *report.Report -->
 ```go
 f, _ := report.ParseFormat("json") // CLI のフラグ文字列から
 if err := rep.Write(os.Stdout, f); err != nil {
@@ -355,6 +358,7 @@ if err := rep.Write(os.Stdout, f); err != nil {
 
 保存した JSON から、あとでレポートを作り直せる。
 
+<!-- doccheck: before var f *os.File -->
 ```go
 rep, err := report.ReadJSON(f) // WriteJSON が書いた JSON を Report に戻す
 ```
@@ -405,6 +409,7 @@ jotaro export -format vegeta|csv [-o 出力先] <raw.jsonl | ->
 
 利用者が独自の形式を足したくなったら、`Format` の `switch` の代わりにインターフェースへ移る。需要が出るまでは今の形のままにする。
 
+<!-- doccheck: skip: the declaration of report.Writer, quoted for reference -->
 ```go
 type Writer interface {
     Write(w io.Writer, r *Report) error
@@ -419,6 +424,7 @@ type Writer interface {
 
 結果が条件を満たすかを確かめ、CI で「遅くなったら失敗」にする（`report/threshold.go`）。k6 の `thresholds` に近い。実行後の `Report` に対して判定する。`Plan` 自身にはしきい値のフィールドは無い。実行中に止めたいときは `Plan.AbortOn` を使う（この章の最後）。
 
+<!-- doccheck: before var rep *report.Report -->
 ```go
 th, _ := report.ParseThreshold("p95<200ms")
 checks := rep.Check(th)  // Checks
@@ -473,6 +479,7 @@ p95{step="say \"hi\""}<1s
 
 `Plan.AbortOn` は k6 の `abortOnFail` に当たる。条件が成り立ったらすぐに実行を止め、壊れたサーバーに `Duration` のあいだ中負荷をかけ続けないようにする（`abort.go`）。
 
+<!-- doccheck: fields jotaro.Plan -->
 ```go
 AbortOn: []jotaro.AbortRule{
 	{When: "http_5xx_rate>50%", For: 5 * time.Second},

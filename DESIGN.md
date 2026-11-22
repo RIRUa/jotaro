@@ -34,6 +34,7 @@ Facts checked against the README and `pkg.go.dev` (v12.13.0):
 
 ## 3. How scenarios feel to write (option A)
 
+<!-- doccheck: before type Item struct{}; func creds(id int) any { return nil }; func order(it Item) any { return nil } -->
 ```go
 var checkout = jotaro.NewScenario("checkout", func(ctx context.Context, u *jotaro.User) error {
     var login struct{ Token string `json:"token"` }
@@ -70,6 +71,7 @@ The user ID, which run it is, an `http.Client` with a cookie jar (new for each i
 
 ## 4. Load models
 
+<!-- doccheck: before var checkout *jotaro.Scenario -->
 ```go
 jotaro.Run(ctx, jotaro.Plan{
     Scenario: checkout,
@@ -118,6 +120,7 @@ Watching a run while it is in progress (all optional, all fed by the same stream
 
 A `Feeder[T]` hands out different data (accounts, input values) to each user. It can be called concurrently from all users.
 
+<!-- doccheck: before var f *os.File -->
 ```go
 rows, _ := jotaro.LoadCSV(f) // first row is the header; a list of maps keyed by column name
 accounts := jotaro.NewFeeder(rows, jotaro.Once)
