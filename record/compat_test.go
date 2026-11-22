@@ -8,6 +8,7 @@ package record
 import (
 	"bytes"
 	"flag"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -29,21 +30,42 @@ func testdataBytes(t *testing.T, name string) []byte {
 	return bytes.ReplaceAll(b, []byte("\r\n"), []byte("\n"))
 }
 
+// rawFixtures are the stored raw files; version is the RawVersion in their meta line.
+var rawFixtures = []struct {
+	file    string
+	version int
+	elapsed time.Duration // the last meta line wins
+}{
+	{"raw-v0.1.0.jsonl", 1, 390576167},
+	{"raw-v0.1.2.jsonl", 1, 325594875},
+	{"raw-v0.1.3.jsonl", 1, 329910458},
+}
+
+// TestRawFixtureVersionsCoverTheCurrentOne fails when RawVersion is raised without a fixture of the
+// new version, so every version that can be read has a stored file.
+func TestRawFixtureVersionsCoverTheCurrentOne(t *testing.T) {
+	seen := map[int]bool{}
+	for _, f := range rawFixtures {
+		seen[f.version] = true
+	}
+	for v := 1; v <= RawVersion; v++ {
+		if !seen[v] {
+			t.Errorf("no fixture of raw version %d in testdata (see testdata/README.md)", v)
+		}
+	}
+}
+
 // TestReadRawOldFormats reads stored raw data of every release that has it. All of them are
 // RawVersion 1; they differ in how the file was written (v0.1.3 streams: a first meta line when the
 // run starts and a second one with the final elapsed time at the end).
 func TestReadRawOldFormats(t *testing.T) {
-	tests := []struct {
-		file    string
-		elapsed time.Duration // the last meta line wins
-	}{
-		{"raw-v0.1.0.jsonl", 390576167},
-		{"raw-v0.1.2.jsonl", 325594875},
-		{"raw-v0.1.3.jsonl", 329910458},
-	}
-	for _, tc := range tests {
+	for _, tc := range rawFixtures {
 		t.Run(tc.file, func(t *testing.T) {
-			raw, err := ReadRaw(bytes.NewReader(testdataBytes(t, tc.file)))
+			data := testdataBytes(t, tc.file)
+			if want := fmt.Sprintf(`{"type":"meta","version":%d,`, tc.version); !bytes.HasPrefix(data, []byte(want)) {
+				t.Errorf("the first line of %s does not start with %s", tc.file, want)
+			}
+			raw, err := ReadRaw(bytes.NewReader(data))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -121,7 +143,8 @@ func TestReadRawOldFormats(t *testing.T) {
 // TestOldRawWriteAndReadAgain writes what an old file was read as in the current format and reads
 // that back: the data survives the trip unchanged.
 func TestOldRawWriteAndReadAgain(t *testing.T) {
-	for _, file := range []string{"raw-v0.1.0.jsonl", "raw-v0.1.2.jsonl", "raw-v0.1.3.jsonl"} {
+	for _, f := range rawFixtures {
+		file := f.file
 		t.Run(file, func(t *testing.T) {
 			raw, err := ReadRaw(bytes.NewReader(testdataBytes(t, file)))
 			if err != nil {
