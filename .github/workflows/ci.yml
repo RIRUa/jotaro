@@ -35,6 +35,23 @@ jobs:
           go-version: ${{ matrix.go }}
       - run: go vet ./...
       - run: go test -race ./...
+        if: ${{ !(matrix.os == 'ubuntu-latest' && matrix.go == 'stable') }}
+      # One cell also records statement coverage and shows it in the job summary, so a pull request
+      # that drops coverage is visible. The examples are programs, not library code, and are left out.
+      - name: go test -race with coverage
+        if: ${{ matrix.os == 'ubuntu-latest' && matrix.go == 'stable' }}
+        run: go test -race -coverprofile=coverage.out $(go list ./... | grep -v /examples/)
+      - name: go test -race ./examples/...
+        if: ${{ matrix.os == 'ubuntu-latest' && matrix.go == 'stable' }}
+        run: go test -race ./examples/...
+      - name: Coverage summary
+        if: ${{ matrix.os == 'ubuntu-latest' && matrix.go == 'stable' }}
+        run: |
+          {
+            echo '### Test coverage (statements, examples excluded)'
+            echo
+            scripts/coverage-summary.sh coverage.out
+          } >> "$GITHUB_STEP_SUMMARY"
 
   lint:
     runs-on: ubuntu-latest

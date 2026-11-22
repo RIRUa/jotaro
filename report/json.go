@@ -3,11 +3,12 @@ package report
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/RIRUa/jotaro/internal/histogram"
-	"github.com/RIRUa/jotaro/record"
 	"io"
 	"maps"
 	"time"
+
+	"github.com/RIRUa/jotaro/internal/histogram"
+	"github.com/RIRUa/jotaro/record"
 )
 
 // JSONVersion is the version of the schema that WriteJSON emits. It is raised on every change that breaks compatibility.

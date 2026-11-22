@@ -9,6 +9,7 @@ import (
 // ErrKind is the kind of a failure. The empty string means success.
 type ErrKind string
 
+// The values of ErrKind.
 const (
 	ErrNone        ErrKind = ""                   // success
 	ErrTimeout     ErrKind = "timeout"            // a deadline passed or the network timed out
@@ -26,6 +27,7 @@ const (
 // from the idle pool the first time.
 type ConnKind string
 
+// The values of ConnKind.
 const (
 	ConnNew    ConnKind = "new"    // a connection that no earlier request had used
 	ConnReused ConnKind = "reused" // a connection that an earlier request had already used
