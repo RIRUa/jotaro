@@ -105,6 +105,7 @@ func fuzzJSONSeeds() []string {
 		`{"version":2,"series":[{"second":1000000000000}]}`,
 		`{"version":2,"health":[{"second":-7,"goroutines":-1,"cpu":1e308},{"second":99999999999}]}`,
 		`{"version":2,"requests":{"count":1,"latency":{"count":1,"buckets":{"5":7,"-3":2,"999999":1}}}}`,
+		`{"version":2,"requests":{"count":2,"latency":{"count":2,"min_ns":9223372036854775807,"mean_ns":9223372036854775807,"p50_ns":9223372036854775807,"p95_ns":9223372036854775807,"max_ns":9223372036854775807}}}`,
 		`{"version":2,"scenarios":[{"name":"s","steps":[{"name":"a"},{"name":"a"}]},{"name":"s"}]}`,
 		`{"version":2} {"version":2}`,
 		strings.Repeat(`[`, 100),
