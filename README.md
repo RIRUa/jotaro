@@ -164,7 +164,7 @@ go install github.com/RIRUa/jotaro/cmd/jotaro@latest
 
 Prebuilt binaries (Linux / macOS / Windows) are attached to each [GitHub Release](https://github.com/RIRUa/jotaro/releases). `jotaro version` prints the version (please include it in bug reports).
 
-Put options **before** the file names.
+Options can come before or after the file names (`jotaro check result.json -t 'p95<200ms'` works), and `--` ends the options. `jotaro help <command>` and `jotaro <command> -h` print the options of a command to standard output. A command that is given the wrong arguments says what is wrong on standard error and exits with code 2.
 
 ```sh
 # Build an HTML report from a JSON result (default format is html)

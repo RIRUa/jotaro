@@ -164,7 +164,7 @@ go install github.com/RIRUa/jotaro/cmd/jotaro@latest
 
 ビルド済みのバイナリ（Linux / macOS / Windows）は、[GitHub Release](https://github.com/RIRUa/jotaro/releases) ごとに添付します。`jotaro version` でバージョンを表示します（バグ報告に添えてください）。
 
-オプションは、ファイル名より**前**に書きます。
+オプションは、ファイル名の前でも後でも書けます（`jotaro check result.json -t 'p95<200ms'` も動く）。`--` を置くと、それ以降はオプションとして読みません。`jotaro help <command>` と `jotaro <command> -h` は、そのコマンドのオプションを標準出力に表示します。引数が正しくないときは、標準エラー出力に原因を書いて終了コード 2 で終わります。
 
 ```sh
 # JSON の結果から HTML レポートを作る（既定は html）
