@@ -96,6 +96,9 @@ func userChanges(start int, stages []UserStage) []userChange {
 			n := (b - a) * step // number of single-user steps in this stage
 			for i := 1; i <= n; i++ {
 				at := off + time.Duration(float64(d)*float64(i)/float64(n))
+				if i == n {
+					at = off + d // float rounding must not move the last step off the end of the stage
+				}
 				out = append(out, userChange{at: at, count: a + i*step})
 			}
 		}
