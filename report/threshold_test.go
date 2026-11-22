@@ -163,7 +163,6 @@ func TestThresholdStringRoundTrip(t *testing.T) {
 		{"p50<1ns", "p50<1ns"},
 		{"max<90m", "max<1h30m0s"},
 		{"max<2562047h47m16.854775807s", "max<2562047h47m16.854775807s"}, // MaxInt64 ns; its float64 is 2^63, out of int64 range
-		{"max>-2562047h47m16.854775808s", "max>-2562047h47m16.854775808s"},
 		{"requests>=1234567", "requests>=1234567"},
 		{"rps>12345.6", "rps>12345.6"},
 		{"dropped<1", "dropped<1"},
@@ -549,5 +548,136 @@ func TestCheckIterationLatency(t *testing.T) {
 	empty := BuildReport(nil, nil, nil, time.Second)
 	if r := checkOne(t, empty, "iteration_p95<1s"); r.Pass {
 		t.Errorf("no iterations must not pass: %+v", r)
+	}
+}
+
+// TestParseThresholdRange checks the accepted range of a threshold value: finite, not negative, and for a ratio
+// at most 100% (1 in the plain form). The error names the whole expression and the reason.
+func TestParseThresholdRange(t *testing.T) {
+	for _, tc := range []struct {
+		in      string
+		wantErr string // empty: must parse; otherwise the whole error text
+	}{
+		// The table of issue #82.
+		{"error_rate<NaN", `jotaro: threshold "error_rate<NaN": value "NaN" is NaN; use a finite number`},
+		{"rps>Inf", `jotaro: threshold "rps>Inf": value "Inf" is infinite or out of range; use a finite number`},
+		{"error_rate<-5%", `jotaro: threshold "error_rate<-5%": value "-5%" is negative; no metric can be negative`},
+		{"error_rate<500%", `jotaro: threshold "error_rate<500%": ratio "500%" is above 100% (above 1 in the plain form)`},
+		{"p95<-1s", `jotaro: threshold "p95<-1s": value "-1s" is negative; no metric can be negative`},
+
+		// NaN and infinity for every kind.
+		{"rps>nan", `jotaro: threshold "rps>nan": value "nan" is NaN; use a finite number`},
+		{"requests>=+Inf", `jotaro: threshold "requests>=+Inf": value "+Inf" is infinite or out of range; use a finite number`},
+		{"dropped<-Inf", `jotaro: threshold "dropped<-Inf": value "-Inf" is infinite or out of range; use a finite number`},
+		{"rps>infinity", `jotaro: threshold "rps>infinity": value "infinity" is infinite or out of range; use a finite number`},
+		{"error_rate<0.5%NaN", `jotaro: threshold "error_rate<0.5%NaN": cannot be read as a ratio (e.g. 1%, 0.01)`},
+		{"error_rate<Inf", `jotaro: threshold "error_rate<Inf": value "Inf" is infinite or out of range; use a finite number`},
+		{"error_rate<NaN%", `jotaro: threshold "error_rate<NaN%": value "NaN%" is NaN; use a finite number`},
+		{"error_rate<Inf%", `jotaro: threshold "error_rate<Inf%": value "Inf%" is infinite or out of range; use a finite number`},
+		{"p95<Inf", `jotaro: threshold "p95<Inf": cannot be read as a duration (e.g. 200ms, 1.5s)`},
+		{"p95<NaN", `jotaro: threshold "p95<NaN": cannot be read as a duration (e.g. 200ms, 1.5s)`},
+
+		// Out of float64 range (strconv ErrRange with an infinite result).
+		{"rps>1e400", `jotaro: threshold "rps>1e400": value "1e400" is infinite or out of range; use a finite number`},
+		{"rps>-1e400", `jotaro: threshold "rps>-1e400": value "-1e400" is infinite or out of range; use a finite number`},
+		{"error_rate<1e400%", `jotaro: threshold "error_rate<1e400%": value "1e400%" is infinite or out of range; use a finite number`},
+		{"p95<1e30h", `jotaro: threshold "p95<1e30h": cannot be read as a duration (e.g. 200ms, 1.5s)`},
+		{"p95<9999999999h", `jotaro: threshold "p95<9999999999h": cannot be read as a duration (e.g. 200ms, 1.5s)`},
+
+		// Negative values for every kind.
+		{"rps>-1", `jotaro: threshold "rps>-1": value "-1" is negative; no metric can be negative`},
+		{"requests>=-0.5", `jotaro: threshold "requests>=-0.5": value "-0.5" is negative; no metric can be negative`},
+		{"dropped<-1e-3", `jotaro: threshold "dropped<-1e-3": value "-1e-3" is negative; no metric can be negative`},
+		{"error_rate<-0.05", `jotaro: threshold "error_rate<-0.05": value "-0.05" is negative; no metric can be negative`},
+		{"http_5xx_rate<-1e-9%", `jotaro: threshold "http_5xx_rate<-1e-9%": value "-1e-9%" is negative; no metric can be negative`},
+		{"p95<-1ms", `jotaro: threshold "p95<-1ms": value "-1ms" is negative; no metric can be negative`},
+		{"iteration_p95{scenario=a}<-1s", `jotaro: threshold "iteration_p95{scenario=a}<-1s": value "-1s" is negative; no metric can be negative`},
+		{"max>-2562047h47m16.854775808s", `jotaro: threshold "max>-2562047h47m16.854775808s": value "-2562047h47m16.854775808s" is negative; no metric can be negative`},
+		{`p95{step="a, b"}<-1s`, `jotaro: threshold "p95{step=\"a, b\"}<-1s": value "-1s" is negative; no metric can be negative`},
+
+		// Ratios above 100%.
+		{"error_rate<1.5", `jotaro: threshold "error_rate<1.5": ratio "1.5" is above 100% (above 1 in the plain form)`},
+		{"error_rate<101%", `jotaro: threshold "error_rate<101%": ratio "101%" is above 100% (above 1 in the plain form)`},
+		{"error_rate<100.0000000001%", `jotaro: threshold "error_rate<100.0000000001%": ratio "100.0000000001%" is above 100% (above 1 in the plain form)`},
+		{"iteration_fail_rate>2", `jotaro: threshold "iteration_fail_rate>2": ratio "2" is above 100% (above 1 in the plain form)`},
+		{"http_4xx_rate{step=a}<1e3", `jotaro: threshold "http_4xx_rate{step=a}<1e3": ratio "1e3" is above 100% (above 1 in the plain form)`},
+
+		// Malformed values keep failing.
+		{"error_rate<5%%", `jotaro: threshold "error_rate<5%%": cannot be read as a ratio (e.g. 1%, 0.01)`},
+		{"error_rate<%", `jotaro: threshold "error_rate<%": cannot be read as a ratio (e.g. 1%, 0.01)`},
+		{"rps>1,5", `jotaro: threshold "rps>1,5": cannot be read as a number`},
+
+		// Accepted: zero, the upper bound, and everything in between.
+		{"rps>0", ""},
+		{"rps>-0", ""},
+		{"rps>+0", ""},
+		{"rps>0.0", ""},
+		{"rps>1e-3", ""},
+		{"rps>1e308", ""},
+		{"rps>+5", ""},
+		{"requests>=1234567", ""},
+		{"error_rate<0", ""},
+		{"error_rate<0%", ""},
+		{"error_rate<-0%", ""},
+		{"error_rate<+5%", ""},
+		{"error_rate<5 %", ""},
+		{"error_rate<1", ""},
+		{"error_rate<1.0", ""},
+		{"error_rate<100%", ""},
+		{"error_rate<1e-3", ""},
+		{"error_rate<1e-300%", ""},
+		{"error_rate<0.5%", ""},
+		{"p95<0s", ""},
+		{"p95<-0s", ""},
+		{"p95<1ns", ""},
+		{"p95<1.5s", ""},
+		{"p95<200ms", ""},
+		{"max<2562047h47m16.854775807s", ""},
+	} {
+		th, err := ParseThreshold(tc.in)
+		if tc.wantErr == "" {
+			if err != nil {
+				t.Errorf("ParseThreshold(%q): %v, want no error", tc.in, err)
+				continue
+			}
+			if math.IsNaN(th.Value) || math.IsInf(th.Value, 0) || th.Value < 0 || math.Signbit(th.Value) {
+				t.Errorf("ParseThreshold(%q).Value = %v, want finite and not negative (and no negative zero)", tc.in, th.Value)
+			}
+			continue
+		}
+		if err == nil {
+			t.Errorf("ParseThreshold(%q) = %+v, want error %q", tc.in, th, tc.wantErr)
+			continue
+		}
+		if err.Error() != tc.wantErr {
+			t.Errorf("ParseThreshold(%q) error = %q, want %q", tc.in, err.Error(), tc.wantErr)
+		}
+	}
+}
+
+// TestParseThresholdBounds pins the exact values at the edges of the accepted range.
+func TestParseThresholdBounds(t *testing.T) {
+	for _, tc := range []struct {
+		in   string
+		want float64
+	}{
+		{"error_rate<100%", 1},
+		{"error_rate<1", 1},
+		{"error_rate<1.0", 1},
+		{"error_rate<0%", 0},
+		{"error_rate<-0%", 0},
+		{"rps>-0", 0},
+		{"p95<-0s", 0},
+		{"rps>1e-3", 0.001},
+		{"p95<1.5s", float64(1500 * time.Millisecond)},
+	} {
+		th, err := ParseThreshold(tc.in)
+		if err != nil {
+			t.Errorf("ParseThreshold(%q): %v", tc.in, err)
+			continue
+		}
+		if th.Value != tc.want || math.Signbit(th.Value) {
+			t.Errorf("ParseThreshold(%q).Value = %v, want %v", tc.in, th.Value, tc.want)
+		}
 	}
 }
