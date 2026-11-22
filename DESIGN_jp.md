@@ -110,7 +110,7 @@ jotaro.Run(ctx, jotaro.Plan{
 
 実行中の状態を見る手段（どれも任意で、同じ記録の流れを受け取る）:
 
-- `Plan.Progress`（`io.Writer`）: 1 秒ごとに `12s/60s rps=480 p95=38ms err=0.2%` のような 1 行を書く。軽いカウンタと専用のヒストグラムで数えるので（`progress.go`）、`Plan.Raw` の有無でコストは変わらない。
+- `Plan.Progress`（`io.Writer`）: 1 秒ごとに `12s/60s rps=480 p95=38ms err=0.2% 5xx=31.0% fail=31.2%` のような 1 行を書く（`5xx`・`fail`・`dropped` は 0 でない間だけ）。軽いカウンタと専用のヒストグラムで数えるので（`progress.go`）、`Plan.Raw` の有無でコストは変わらない。
 - `Plan.MetricsAddr`（たとえば `":9090"`）: 集計器のスナップショットを Prometheus のテキスト形式で `/metrics` に公開する（`metrics.go`）。テキストは自前で書くので `client_golang` の依存は増えない。ラベルはステータスクラスとエラーの種類だけで、レイテンシは固定バケットのヒストグラムではなく分位点の summary。サーバーは `Run` が返ると止まり、アドレスが不正なら、リクエストを送る前に失敗する。
 - `Plan.AbortOn`: 上を参照。
 
