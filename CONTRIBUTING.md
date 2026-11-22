@@ -32,7 +32,7 @@ go test -coverprofile=coverage.out $(go list ./... | grep -v /examples/) && scri
 
 ## Documentation checks
 
-The Markdown documents are checked by Go tests in [`internal/doccheck`](internal/doccheck). Run them with `scripts/check-docs.sh` (CI runs the same script in the `docs` workflow; a plain `go test ./...` runs them too, apart from the steps that need the `go` tool to build something). Everything is offline.
+The Markdown documents are checked by Go tests in [`internal/doccheck`](internal/doccheck). Run them with `scripts/check-docs.sh` (CI runs the same script in the `docs` workflow). A plain `go test ./...` runs them too, apart from the step that builds the snippets, so the parity and link checks also run in the `test` jobs, which are required: a pull request that breaks them cannot be merged even though the `docs` workflow itself is not a required check. Everything is offline.
 
 **English/Japanese parity.** Every English document has a Japanese twin named `<name>_jp.md` next to it, and the two must have the same structure: the same number and order (levels) of headings, the same number of fenced code blocks with the same language, and the same code in them. Comments are not compared (`// ...` in `go` blocks, `# ...` in `sh` blocks), because they are translated, and neither are blank lines. A block without a language, such as a diagram or a usage line, has translated words in it, so only its number of lines is compared. A twin is required for `README.md`, `DESIGN.md` and every Markdown file below `docs/` and `examples/`, so a new guide such as `docs/foo.md` needs `docs/foo_jp.md`. A `_jp.md` file without an English one fails too. The other root documents (this one, `CHANGELOG.md`, ...) are English only.
 
@@ -58,6 +58,8 @@ The second field is the check that is allowed to fail (`twin`, `headings`, `bloc
 ```
 
 `before <Go code>` adds declarations the block needs (several can go on one line separated by `;`), `fields <Type>` says that the block is the body of a composite literal of that type, `stmts` says that a block starting with `var` is a list of statements, and `skip: <reason>` leaves the block out (the reason is required; use it for pseudo code). An unknown comment fails the check. The documents embedded in the MCP server (`internal/mcpserver/content/`) are not scanned, because they are served to models verbatim; `internal/mcpserver/guide_test.go` compiles the skeleton in the guide.
+
+**Links.** Every relative link in every Markdown file (`[text](docs/result.md)`, `[text](#threshold-syntax)`, images, reference definitions, `href="..."`) has to point to a file or directory that exists, and a `#fragment` on a Markdown file has to match one of its headings (spelled as GitHub does: lower case, punctuation dropped, spaces turned into `-`, repeated headings numbered `-1`, `-2`) or an `<a id="...">`. Fragments on directories and source files (`#L10`) are not checked. Links with a scheme (`https:`, `mailto:`) are not followed, so a dead site never fails a pull request; run a link checker such as `lychee` by hand if you want to look for those.
 
 ## Pull requests
 

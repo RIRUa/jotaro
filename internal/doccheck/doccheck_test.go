@@ -148,3 +148,15 @@ func TestAllowlist(t *testing.T) {
 		}
 	}
 }
+
+// TestLinks pins that the relative links and #anchors between the Markdown documents resolve. External
+// links are not followed.
+func TestLinks(t *testing.T) {
+	problems, err := checkLinks(repoRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range problems {
+		t.Error(p)
+	}
+}

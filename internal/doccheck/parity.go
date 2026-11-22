@@ -153,7 +153,7 @@ func compare(en, ja *document) []finding {
 func codeForCompare(b codeBlock) string {
 	lines := strings.Split(b.code, "\n")
 	var marker string
-	switch b.info {
+	switch b.lang() {
 	case "go", "golang":
 		marker = "//"
 	case "sh", "bash", "shell", "console", "yaml", "yml", "toml":

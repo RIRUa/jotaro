@@ -163,6 +163,9 @@ func TestSnippetsOf(t *testing.T) {
 		"```go",
 		"package main",
 		"```",
+		"```go title=x",
+		"var z = 1",
+		"```",
 		"```sh",
 		"echo hi",
 		"```",
@@ -175,7 +178,7 @@ func TestSnippetsOf(t *testing.T) {
 	for _, s := range sn {
 		modes = append(modes, s.mode)
 	}
-	want := []snippetMode{modeStatements, modeFields, modeStatements, modeDecls, modeFile}
+	want := []snippetMode{modeStatements, modeFields, modeStatements, modeDecls, modeFile, modeDecls}
 	if !reflect.DeepEqual(modes, want) {
 		t.Fatalf("modes = %v, want %v", modes, want)
 	}
@@ -208,8 +211,8 @@ func TestWrap(t *testing.T) {
 }
 
 func TestParseBuildOutput(t *testing.T) {
-	out := "# doccheck.test/s001\r\ns001/README.md:12:3: declared and not used: rep\n" +
-		"s002/docs/result.md:5:9: undefined: x\n" +
+	out := "# doccheck.test/s001\r\ns001\\README.md:12:3: declared and not used: rep\n" +
+		"s002\\docs\\result.md:5:9: undefined: x\n" +
 		"go: downloading example.com/m v1.0.0\n" +
 		"s003/a.md:7: declared and not used: err\n" +
 		"go: updates to go.mod needed\n"

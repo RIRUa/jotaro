@@ -24,6 +24,15 @@ type codeBlock struct {
 	directives []directive
 }
 
+// lang is the language of the block: the first word of the info string ("go title=x" is go).
+func (b codeBlock) lang() string {
+	f := strings.Fields(b.info)
+	if len(f) == 0 {
+		return ""
+	}
+	return f[0]
+}
+
 // directive is one "<!-- doccheck: text -->" comment.
 type directive struct {
 	text string
@@ -35,6 +44,8 @@ type document struct {
 	path     string // slash-separated, relative to the repository root
 	headings []heading
 	blocks   []codeBlock
+	links    []link
+	anchors  []string // ids and names of HTML anchors (<a id="x">)
 }
 
 // readDocument reads and parses the Markdown file at root/path.
@@ -54,12 +65,13 @@ func parseDocument(path, text string) *document {
 	d := &document{path: path}
 	lines := strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n")
 	var (
-		in      bool
-		fenceCh byte
-		fenceN  int
-		cur     codeBlock
-		body    []string
-		pending []directive // doccheck comments seen since the last line that is not blank
+		in        bool
+		fenceCh   byte
+		fenceN    int
+		cur       codeBlock
+		body      []string
+		pending   []directive // doccheck comments seen since the last line that is not blank
+		inComment bool        // inside a multi-line <!-- ... --> comment
 	)
 	for i, line := range lines {
 		trimmed := strings.TrimLeft(line, " \t")
@@ -72,6 +84,14 @@ func parseDocument(path, text string) *document {
 				continue
 			}
 			body = append(body, line)
+			continue
+		}
+		if inComment {
+			inComment = !strings.Contains(line, "-->")
+			continue
+		}
+		if strings.HasPrefix(trimmed, "<!--") && !strings.Contains(trimmed, "-->") {
+			inComment = true
 			continue
 		}
 		if ch, n, rest := fence(trimmed); n >= 3 {
@@ -88,6 +108,8 @@ func parseDocument(path, text string) *document {
 		if trimmed != "" {
 			pending = nil
 		}
+		d.links = append(d.links, linksIn(line, i+1)...)
+		d.anchors = append(d.anchors, htmlAnchorsIn(line)...)
 		if level, text, ok := atxHeading(line); ok {
 			d.headings = append(d.headings, heading{level: level, text: text, line: i + 1})
 		}

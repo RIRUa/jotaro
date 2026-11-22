@@ -87,7 +87,7 @@ func snippetsOf(d *document) (out []snippet, problems []string) {
 			verb, arg, _ := strings.Cut(dir.text, " ")
 			arg = strings.TrimSpace(arg)
 			switch {
-			case b.info != "go":
+			case b.lang() != "go":
 				problems = append(problems, where+": a doccheck comment belongs before a go block")
 			case strings.HasPrefix(dir.text, "skip"):
 				if reason := strings.TrimPrefix(strings.TrimSpace(strings.TrimPrefix(dir.text, "skip")), ":"); strings.TrimSpace(reason) == "" {
@@ -104,7 +104,7 @@ func snippetsOf(d *document) (out []snippet, problems []string) {
 				problems = append(problems, fmt.Sprintf("%s: unknown doccheck directive %q (want skip: <reason>, fields <Type> or before <code>)", where, dir.text))
 			}
 		}
-		if b.info != "go" || skip {
+		if b.lang() != "go" || skip {
 			continue
 		}
 		if sn.mode != modeFields {
@@ -197,6 +197,7 @@ func parseBuildOutput(out string) (errs []compileError, other []string) {
 			continue
 		}
 		// go build prints the package directory (s012/) before the file name.
+		pos = strings.ReplaceAll(pos, `\`, "/") // Windows prints s001\README.md
 		if len(pos) > 5 && pos[0] == 's' && pos[4] == '/' {
 			pos = pos[5:]
 		}
