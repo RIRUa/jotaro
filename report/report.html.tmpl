@@ -1,9 +1,9 @@
 <!doctype html>
-<html lang="ja">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>jotaro report</title>
+<title>jotaro report{{if .Started}} · {{.Started}}{{end}}</title>
 <style>
 :root {
   --bg: #ffffff; --fg: #1f2328; --muted: #656d76; --line: #d0d7de;
@@ -56,7 +56,7 @@ footer { margin-top: 32px; color: var(--muted); font-size: 12px; }
 </head>
 <body>
 <h1>jotaro report</h1>
-<div class="meta">{{.Model}} · elapsed {{.Elapsed}}</div>
+<div class="meta">{{.Model}} · {{if .Started}}started {{.Started}} · {{end}}elapsed {{.Elapsed}}</div>
 
 <div class="cards">
   <div class="card"><div class="k">requests</div><div class="v">{{.Requests}}</div></div>

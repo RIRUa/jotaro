@@ -178,3 +178,58 @@ func TestSeriesChartsWithoutConns(t *testing.T) {
 		}
 	}
 }
+
+func TestWriteHTMLLangIsEnglish(t *testing.T) {
+	var buf bytes.Buffer
+	if err := sampleReport(false).WriteHTML(&buf); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, `<html lang="en">`) {
+		t.Error(`the page is English, so it must declare <html lang="en">`)
+	}
+	if strings.Contains(out, `lang="ja"`) {
+		t.Error(`lang="ja" must not appear: every label is English`)
+	}
+}
+
+func TestWriteHTMLStartTime(t *testing.T) {
+	rep := sampleReport(false)
+	// A zone other than UTC must still be shown in UTC.
+	jst := time.FixedZone("JST", 9*60*60)
+	rep.StartedAt = time.Date(2026, 11, 22, 19, 4, 5, 0, jst)
+
+	var buf bytes.Buffer
+	if err := rep.WriteHTML(&buf); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	const when = "2026-11-22 10:04:05 UTC"
+	for _, want := range []string{
+		"<title>jotaro report · " + when + "</title>",
+		`<div class="meta">closed · started ` + when + ` · elapsed `,
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("%q missing from output", want)
+		}
+	}
+}
+
+func TestWriteHTMLNoStartTime(t *testing.T) {
+	rep := sampleReport(false)
+	rep.StartedAt = time.Time{}
+
+	var buf bytes.Buffer
+	if err := rep.WriteHTML(&buf); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	for _, want := range []string{"<title>jotaro report</title>", `<div class="meta">closed · elapsed `} {
+		if !strings.Contains(out, want) {
+			t.Errorf("%q missing from output", want)
+		}
+	}
+	if strings.Contains(out, "started ") {
+		t.Error("an unknown start time must not be shown")
+	}
+}

@@ -124,6 +124,7 @@ if err := rep.WriteHTML(f); err != nil {
 
 - It is generated with `html/template`, so scenario and step names are escaped automatically.
 - CSS is embedded; no JS, chart library or external resources are used (the charts are inline SVG). Light/dark follows the OS setting.
+- The page declares `<html lang="en">` (its text is English). The start time (UTC) is shown in the header and in `<title>`, so two reports can be told apart; both are left out when the start time is unknown.
 - Contents: summary (including the load model, `closed` / `open`), breakdown of statuses and errors, latency (p50 to max bars), `corrected` (open model only, that is, with `Arrival`), TTFB, per-scenario iteration time and per-step tables. When the report has a time series, a per-second timeline of inline SVG line charts follows: requests / errors / 5xx, latency p50 / p95 / p99, concurrency, connections, DNS / connect / TLS time, and the goroutines and CPU of the load generator.
 - Displayed values use the same format as `Print` (`fmtDur`). Use JSON for lossless nanosecond values.
 - Sample: `go run ./examples/checkout -format html -o report.html` (`-rate 30` for the `Rate` model).
