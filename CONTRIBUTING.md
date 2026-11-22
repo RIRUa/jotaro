@@ -5,7 +5,7 @@ Thanks for your interest in jotaro! Bug reports, ideas and pull requests are all
 ## Before you start
 
 - For anything larger than a small fix, please open an issue first so we can agree on the direction. [`DESIGN.md`](DESIGN.md) explains why things are the way they are.
-- jotaro is pre-1.0 (v0.x). The API may change between minor versions.
+- jotaro is pre-1.0 (v0.x), but we do not change the API without a reason (see the README). Pull requests are checked for that, see [Compatibility checks](#compatibility-checks).
 - Please follow the [Code of Conduct](CODE_OF_CONDUCT.md). Security problems go through [`SECURITY.md`](SECURITY.md), not a public issue.
 
 ## Development
@@ -65,7 +65,24 @@ The second field is the check that is allowed to fail (`twin`, `headings`, `bloc
 
 - Keep one purpose per pull request.
 - Use a short prefix in the title: `feat:` / `fix:` / `docs:` / `chore:` / `ci:`.
-- CI (vet, test with `-race` on Go 1.25 and stable, golangci-lint, and the generated-files check) must pass. The `docs` workflow (documentation checks) is not a required check, but please keep it green. The run on Linux with the latest Go also puts the statement coverage per package in the job summary; please look at it if you change code that was well covered, and add tests when the number drops. Pull requests that push new commits cancel the previous CI run of the same pull request.
+- CI (vet, test with `-race` on Go 1.25 and stable, golangci-lint, and the generated-files check) must pass, and so should the `api-compat` check (see [Compatibility checks](#compatibility-checks)). The `docs` workflow (documentation checks) is not a required check, but please keep it green. The run on Linux with the latest Go also puts the statement coverage per package in the job summary; please look at it if you change code that was well covered, and add tests when the number drops. Pull requests that push new commits cancel the previous CI run of the same pull request.
+
+## Compatibility checks
+
+The README promises to keep existing code working, in the spirit of the Go 1 compatibility promise. CI checks the exported API by machine, so a break is a decision in a reviewed file and never an accident.
+
+- **API diff** (the `api-compat` workflow, [`scripts/api-compat.sh`](scripts/api-compat.sh)): compares every public package (not `internal/`, `examples/` or `cmd/`) with the last release, the highest `vX.Y.Z` tag, using [`apidiff`](https://pkg.go.dev/golang.org/x/exp/cmd/apidiff) at the version pinned in the script. Additions (a new method, a new field) pass. An incompatible change fails the job: a removed or renamed identifier, a changed signature, a method added to an exported interface, a struct that stops being comparable, and so on. Run `scripts/api-compat.sh` locally to see the same report (it needs the release tags and network access for `go run`).
+- **An intended break**: add one line per identifier to [`.github/api-breaks.txt`](.github/api-breaks.txt):
+
+  ```
+  v0.1.3 LoadCSV -- takes a second argument so that a repeated header can be allowed; callers add ", false"
+  ```
+
+  That is the tag the job compares with, the identifier as the report prints it before the first `: `, and the reason (required). Describe the break in `CHANGELOG.md` under "Changed" as well, with the note "This may affect existing code". The line is part of the pull request, so the reviewer sees the decision. A line is valid for the whole release cycle of its base tag: it also covers a later pull request of the same cycle that breaks the same identifier in another way, so look at the job report of such a pull request, which lists every incompatible change and the reason of each acknowledged one. Entries for older tags are ignored and stay as a history of what each release broke. An entry that matches no incompatible change only produces a warning. There is no label or other switch: the job cannot be passed by anything but this file.
+- The job is not a required check, so a maintainer can still merge a red run on purpose, but the reason should then be in the pull request.
+- **Stored results of old versions**: `report/testdata` and `record/testdata` hold results and raw data written by older versions (JSON `version` 1 to 3, raw data of v0.1.0, v0.1.2 and v0.1.3). `ReadJSON`, `ReadRaw`, `FromRaw` and `MergeReports` are tested against them, with the numbers that are stored in the files (`compat_test.go`), so a change to a field name or to the meaning of a field cannot pass just because the writer and the reader changed together. Never rewrite these files with the current code. How each one was produced is in the `README.md` next to them.
+- **What WriteJSON and WriteRaw emit** is pinned by a golden file (`TestWriteJSONGolden`, `TestWriteRawGolden`). When one fails, the shape of the output changed: update `docs/result.md` (and `docs/result_jp.md`), raise `JSONVersion` / `RawVersion` if readers could break, add a fixture of the new version (the tests fail while a version has none), run `go test ./report -run TestWriteJSONGolden -update` (or `./record ... TestWriteRawGolden`) and commit the new golden file, so the change is a diff in the review.
+- What counts as a break: for the Go API, what the API diff reports; for the JSON result and the raw data, removing or renaming a field, changing its unit or meaning, or making a file that an older version reads unreadable (adding a field is fine); for the threshold syntax, a string that was valid and means something else now or is rejected; for the CLI, removing or renaming a command or flag or changing an exit code; for the MCP tools (`jotaro mcp`), removing or renaming a tool, an input field or an output field, or changing what one means or its type (adding an optional input or an output field is fine). The API diff does not cover any of these but the first, so review them by hand, keep the docs in line and list a deliberate change in `CHANGELOG.md` under "Changed".
 
 ## Releasing (maintainers)
 
@@ -75,10 +92,11 @@ Releases are cut by merging a `release/vX.Y.Z` branch into `main`.
 2. Run `scripts/prepare-release.sh X.Y.Z`. It turns `[Unreleased]` in `CHANGELOG.md` into `[X.Y.Z] - <today>`. Review the entries and commit.
 3. Open a pull request to `main` with the `ci:`/`chore:` prefix and wait for CI to pass.
 4. Merge it. [`release.yml`](.github/workflows/release.yml) then tags the merge commit `vX.Y.Z`, builds the binaries with GoReleaser and publishes a GitHub Release. The release notes are the `[X.Y.Z]` section of `CHANGELOG.md`; the workflow fails if that section is missing or empty, or if the tag already exists on another commit.
+5. If the release raised `JSONVersion` or `RawVersion`, or added a field to the result or raw data, produce a result and a raw file with the released tag and commit them as fixtures (`report/testdata/v<N>-vX.Y.Z.json`, `record/testdata/raw-vX.Y.Z.jsonl`, how: `report/testdata/README.md`), so that every format a user may still have stays covered. The tests already fail until there is a fixture of every `version` up to `JSONVersion`.
 
 If publishing fails after the tag was pushed, fix the cause and run the `release` workflow from the Actions tab (`workflow_dispatch` on `main`) with the same version. It reuses the existing tag. The same run attaches build provenance attestations (`actions/attest-build-provenance`) to the archives and `checksums.txt`. If only that last step failed, the assets are already uploaded and a plain re-run fails earlier, because GoReleaser does not replace assets that exist (`release.replace_existing_artifacts` is not set). Delete the assets of that GitHub Release (or the release itself, keeping the tag) first, then run the workflow again with the same version.
 
-The GoReleaser version and the `govulncheck` version are pinned in the workflows, and every action is pinned to a commit SHA with its version in a trailing comment (Dependabot keeps those up to date). When you bump GoReleaser or govulncheck by hand, change the version in `release.yml` / `vulncheck.yml`.
+The GoReleaser version, the `govulncheck` version and the `apidiff` version are pinned in the workflows and scripts, and every action is pinned to a commit SHA with its version in a trailing comment (Dependabot keeps those up to date). When you bump GoReleaser, govulncheck or apidiff by hand, change the version in `release.yml` / `vulncheck.yml` / `scripts/api-compat.sh`.
 
 ## License
 
