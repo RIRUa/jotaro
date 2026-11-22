@@ -84,10 +84,26 @@ type Plan struct {
 	Raw io.Writer
 
 	// If Progress is not nil, one line is written to it every second while the run is in progress,
-	// for example "12s/60s rps=480 p95=38ms err=0.2%" (elapsed/Duration, throughput of the last second,
-	// and p95 and error rate over the run so far). Pass os.Stderr to watch a long run.
-	// The p95 is an approximation within 1% relative error. Nothing is written after Run returns,
-	// and write errors are ignored. It works together with Raw.
+	// for example "12s/60s rps=480 p95=38ms err=0.2% 5xx=31.0% fail=31.2% dropped=7". Pass os.Stderr to
+	// watch a long run. The fields are:
+	//
+	//   - elapsed/Duration, and rps, the throughput of the last second;
+	//   - p95, the 95th percentile of the request latency over the run so far (an approximation within
+	//     1% relative error);
+	//   - err, the share of requests so far that ended in a transport-level error (a timeout, a refused
+	//     connection and so on). It is the same as error_rate in the report. A request that got a response is
+	//     never counted here, whatever its status, so a server that answers every request with 500 or with a
+	//     body that fails an Expect check still shows err=0.0%;
+	//   - 5xx, the share of requests so far that got a 5xx response (http_5xx_rate). A request that ended in
+	//     a transport-level error is not counted here;
+	//   - fail, the share of iterations so far that ended with an error of any kind, such as the error that
+	//     a failed Expect check returns from the scenario (iteration_fail_rate). Only finished iterations are
+	//     counted;
+	//   - dropped, the number of arrivals dropped so far because of MaxUsers (open model, as dropped).
+	//
+	// 5xx, fail and dropped are left out while they are zero. So a line that shows only err=0.0% means no
+	// 5xx response and no failed iteration yet, not only no transport error. Nothing is written after Run
+	// returns, and write errors are ignored. It works together with Raw.
 	Progress io.Writer
 
 	// If MetricsAddr is not empty, Run serves the state of the run so far at http://<MetricsAddr>/metrics in the
@@ -308,6 +324,9 @@ func Run(ctx context.Context, p Plan) (*report.Report, error) {
 		col = record.NewStreamingCollector(agg)
 	} else {
 		col = record.NewStreamingCollector(obs)
+	}
+	if prog != nil {
+		prog.dropped = col.Dropped
 	}
 	var live *report.Aggregator
 	if len(abortRules) > 0 {

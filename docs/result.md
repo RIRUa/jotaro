@@ -279,10 +279,20 @@ Run ─(Plan.Progress)─▶ one line per second on the console
 If `Plan.Progress` is an `io.Writer` (for example `os.Stderr`), `Run` writes one line to it every second while the run is in progress:
 
 ```
-12s/60s rps=480 p95=38ms err=0.2%
+12s/60s rps=480 p95=38ms err=0.2% 5xx=31.0% fail=31.2% dropped=7
 ```
 
-The fields are the elapsed time / `Duration`, the throughput of the last second, and the p95 and the error rate (the share of requests that ended in a transport-level error, as in `error_rate`) over the run so far. The p95 is an approximation within 1% relative error. It works with and without `Plan.Raw`, adds no recording cost, ignores write errors, and writes nothing after `Run` returns. If `AbortOn` stops the run, a line `aborted: ...` follows (see "Stopping a run early" in chapter 5).
+The fields are the elapsed time / `Duration` and the throughput of the last second, followed by values over the run so far, which converge to the ones of the final report:
+
+| Field | Meaning | Same as |
+|---|---|---|
+| `p95` | 95th percentile of the request latency (an approximation within 1% relative error) | `p95` |
+| `err` | share of requests that ended in a transport-level error (a timeout, a refused connection and so on). A request that got a response is never counted here, whatever its status, so a server that answers every request with `500`, or with a body that fails an `Expect*` check, still shows `err=0.0%` | `error_rate` |
+| `5xx` | share of requests that got a 5xx response. A request that ended in a transport-level error is not counted here | `http_5xx_rate` |
+| `fail` | share of finished iterations that ended with an error of any kind, such as the error that a failed `Expect*` check returns from the scenario | `iteration_fail_rate` |
+| `dropped` | number of arrivals dropped because of `MaxUsers` (open model) | `dropped` |
+
+`5xx`, `fail` and `dropped` are left out while they are zero, so a healthy line stays short; a line that shows only `err=0.0%` means no 5xx response and no failed iteration yet, not only no transport error. A failed `Expect*` check that the scenario does not return (it ignores the error) is not seen by `fail`. It works with and without `Plan.Raw`, adds no recording cost, ignores write errors, and writes nothing after `Run` returns. If `AbortOn` stops the run, a line `aborted: ...` follows (see "Stopping a run early" in chapter 5).
 
 ### `/metrics` (`Plan.MetricsAddr`) (implemented)
 

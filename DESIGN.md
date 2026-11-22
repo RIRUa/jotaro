@@ -110,7 +110,7 @@ How a run ends (all models):
 
 Watching a run while it is in progress (all optional, all fed by the same stream of records):
 
-- `Plan.Progress` (an `io.Writer`): one line per second, such as `12s/60s rps=480 p95=38ms err=0.2%`. It uses a light counter and its own histogram (`progress.go`), so it costs the same with and without `Plan.Raw`.
+- `Plan.Progress` (an `io.Writer`): one line per second, such as `12s/60s rps=480 p95=38ms err=0.2% 5xx=31.0% fail=31.2%` (`5xx`, `fail` and `dropped` only while they are not zero). It uses a light counter and its own histogram (`progress.go`), so it costs the same with and without `Plan.Raw`.
 - `Plan.MetricsAddr` (for example `":9090"`): serves the aggregator's snapshot at `/metrics` in the Prometheus text format (`metrics.go`). The text is written by hand, so no `client_golang` dependency is added; the labels are only the status class and the error kind; the latency is a summary of quantiles, not a fixed-bucket histogram. The server stops when `Run` returns, and a bad address fails the run before any request.
 - `Plan.AbortOn`: see above.
 

@@ -116,7 +116,7 @@ if err != nil && !errors.Is(err, jotaro.ErrAborted) {
 
 段階の並びを繰り返したいとき（たとえば波を 3 回）は `jotaro.RepeatUserStages(3, stage1, stage2, ...)` を使います。並びを 3 回くり返した段階を返し、`append` で他の段階と連結できます。各回は直前の回が終わった Target から始まります。
 
-そのほか、`MaxUsers`（オープンのときの同時実行数の上限。上限に達しているときに来た到着は、待たされず実行もされずにドロップとして数える。ドロップがあるとテキストのレポートに `warning:` の行が出る）、`Timeout`（1 リクエストの上限）、`Grace`（`Duration` 後に実行中のイテレーションを待つ時間）、`Raw`（生データの書き出し先）、`Progress`（`os.Stderr` などの `io.Writer`。実行中、1 秒ごとに `12s/60s rps=480 p95=38ms err=0.2%` のような 1 行を書き出す）、`MetricsAddr`（たとえば `":9090"`。実行中の状態を Prometheus のテキスト形式で `/metrics` に公開し、Grafana などで実行中に見られる。依存は増えず、`Run` が返ると止まる）を指定できます。
+そのほか、`MaxUsers`（オープンのときの同時実行数の上限。上限に達しているときに来た到着は、待たされず実行もされずにドロップとして数える。ドロップがあるとテキストのレポートに `warning:` の行が出る）、`Timeout`（1 リクエストの上限）、`Grace`（`Duration` 後に実行中のイテレーションを待つ時間）、`Raw`（生データの書き出し先）、`Progress`（`os.Stderr` などの `io.Writer`。実行中、1 秒ごとに `12s/60s rps=480 p95=38ms err=0.2% 5xx=31.0% fail=31.2%` のような 1 行を書き出す。`err` は通信エラーだけの割合で、`5xx` は 5xx の応答の割合、`fail` は `Expect*` の失敗などで失敗したイテレーションの割合。`5xx`・`fail`・`dropped` は 0 の間は出さない）、`MetricsAddr`（たとえば `":9090"`。実行中の状態を Prometheus のテキスト形式で `/metrics` に公開し、Grafana などで実行中に見られる。依存は増えず、`Run` が返ると止まる）を指定できます。
 
 サーバーが明らかに壊れたら早めに止めたいときは `AbortOn` を指定します。例: `AbortOn: []jotaro.AbortRule{{When: "http_5xx_rate>50%", For: 5 * time.Second}}`。`When` は閾値と同じ書き方ですが、「止める状態」を表します。1 秒ごとに、ここまでの実行全体に対して判定し、`For` はその状態が途切れず続くべき時間です。実行中のイテレーションは `Grace` まで待たれ、その後 `Run` は途中までのレポートと、`errors.Is(err, jotaro.ErrAborted)` を満たすエラーを一緒に返します。
 
