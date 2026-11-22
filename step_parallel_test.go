@@ -16,29 +16,29 @@ import (
 // under -race it reported a data race on the scheduled arrival time. Nothing here depends on Step.Parallel,
 // so it covers the plain-goroutine style too.
 func TestRunOpenConcurrentRequestsInStep(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
-	defer srv.Close()
-
-	const perStep = 4
-	sc := NewScenario("s", func(ctx context.Context, u *User) error {
-		return u.Step("assets", func(s *Step) error {
-			var wg sync.WaitGroup
-			for i := 0; i < perStep; i++ {
-				wg.Add(1)
-				go func() { defer wg.Done(); s.Get("/a").Do() }()
-			}
-			wg.Wait()
-			return nil
+	inBubble(t, func(t *testing.T) {
+		const perStep = 4
+		sc := NewScenario("s", func(ctx context.Context, u *User) error {
+			return u.Step("assets", func(s *Step) error {
+				var wg sync.WaitGroup
+				for i := 0; i < perStep; i++ {
+					wg.Add(1)
+					go func() { defer wg.Done(); s.Get("/a").Do() }()
+				}
+				wg.Wait()
+				return nil
+			})
 		})
+		// An arrival every 5ms from 0 to 3s inclusive: 601 iterations of 4 requests each.
+		p := Plan{Scenario: sc, BaseURL: "http://stub.test", Arrival: Rate(200, time.Second), Duration: 3*time.Second + 2*time.Millisecond}
+		rep, err := run(context.Background(), p, fakeServerAfter(3*time.Millisecond))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if rep.Requests.Count != 601*perStep {
+			t.Fatalf("requests = %d, want %d", rep.Requests.Count, 601*perStep)
+		}
 	})
-	p := Plan{Scenario: sc, BaseURL: srv.URL, Arrival: Rate(200, time.Second), Duration: 300 * time.Millisecond}
-	rep, err := Run(context.Background(), p)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if rep.Requests.Count == 0 || rep.Requests.Count%perStep != 0 {
-		t.Fatalf("requests = %d, want a positive multiple of %d", rep.Requests.Count, perStep)
-	}
 }
 
 // Of the requests that start together, exactly one takes the scheduled arrival time.
@@ -77,43 +77,51 @@ func TestExecutorSchedTakenOnce(t *testing.T) {
 
 // A Step inside a real iteration: with Parallel, only the first request carries the dispatch delay.
 func TestParallelOpenModelCorrectedOnce(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
-	defer srv.Close()
-
-	sc := NewScenario("s", func(ctx context.Context, u *User) error {
-		return u.Step("page", func(s *Step) error {
-			return s.Parallel(
-				func() error { return s.Get("/a").Do().ExpectStatus(200) },
-				func() error { return s.Get("/b").Do().ExpectStatus(200) },
-				func() error { return s.Get("/c").Do().ExpectStatus(200) },
-			)
+	inBubble(t, func(t *testing.T) {
+		sc := NewScenario("s", func(ctx context.Context, u *User) error {
+			u.Think(10 * time.Millisecond) // the step starts 10ms after the arrival it was scheduled for
+			return u.Step("page", func(s *Step) error {
+				return s.Parallel(
+					func() error { return s.Get("/a").Do().ExpectStatus(200) },
+					func() error { return s.Get("/b").Do().ExpectStatus(200) },
+					func() error { return s.Get("/c").Do().ExpectStatus(200) },
+				)
+			})
 		})
-	})
-	p := Plan{Scenario: sc, BaseURL: srv.URL, Arrival: Rate(20, time.Second), Duration: 200 * time.Millisecond}
-	ctx := context.Background()
-	r := &runner{p: p, tr: http.DefaultTransport, timeout: time.Second, col: record.NewCollector(), stopCtx: ctx, runCtx: ctx}
-	stopCtx, stop := context.WithTimeout(ctx, p.Duration)
-	defer stop()
-	r.stopCtx = stopCtx
-	r.runOpen()
+		p := Plan{Scenario: sc, BaseURL: "http://stub.test", Arrival: Rate(20, time.Second), Duration: 205 * time.Millisecond}
+		ctx := context.Background()
+		stopCtx, stop := context.WithTimeout(ctx, p.Duration)
+		defer stop()
+		r := &runner{p: p, tr: fakeServerAfter(3 * time.Millisecond), timeout: time.Second, col: record.NewCollector(), stopCtx: stopCtx, runCtx: ctx}
+		r.runOpen()
 
-	reqs, _, _ := r.col.Snapshot()
-	if len(reqs) == 0 || len(reqs)%3 != 0 {
-		t.Fatalf("requests = %d, want a positive multiple of 3", len(reqs))
-	}
-	// Per iteration (the UserID is the arrival number) at most one request is scheduled before it started.
-	// A request that took the arrival time may also start exactly on time, so the count is only bounded above.
-	early := map[int]int{}
-	for _, rec := range reqs {
-		if rec.Scheduled.Before(rec.Start) {
-			early[rec.UserID]++
+		// An arrival every 50ms from 0 to 200ms: 5 iterations of 3 requests.
+		reqs, _, _ := r.col.Snapshot()
+		if len(reqs) != 15 {
+			t.Fatalf("requests = %d, want 15", len(reqs))
 		}
-	}
-	for id, n := range early {
-		if n > 1 {
-			t.Fatalf("iteration %d: %d requests carry the scheduled time, want at most 1", id, n)
+		// Every iteration is 10ms late (the Think), and exactly one of its three requests carries that delay:
+		// the one that took the scheduled time. The other two have no scheduled time of their own. A slot that
+		// were not cleared after the first request would give all three the delay.
+		delayed := map[int]int{}
+		for _, rec := range reqs {
+			switch got := rec.Start.Sub(rec.Scheduled); got {
+			case 10 * time.Millisecond:
+				delayed[rec.UserID]++
+			case 0:
+			default:
+				t.Errorf("iteration %d: Start - Scheduled = %v, want 10ms or 0", rec.UserID, got)
+			}
 		}
-	}
+		if len(delayed) != 5 {
+			t.Errorf("%d iterations have a delayed request, want 5: %v", len(delayed), delayed)
+		}
+		for id, n := range delayed {
+			if n != 1 {
+				t.Errorf("iteration %d: %d requests carry the scheduled time, want exactly 1", id, n)
+			}
+		}
+	})
 }
 
 func TestParallelRunsAllConcurrently(t *testing.T) {
@@ -143,23 +151,25 @@ func TestParallelRunsAllConcurrently(t *testing.T) {
 }
 
 func TestParallelJoinsErrorsAndWaitsForAll(t *testing.T) {
-	s := &Step{name: "s"}
-	e1, e2 := errors.New("e1"), errors.New("e2")
-	var finished bool
-	err := s.Parallel(
-		func() error { return e1 },
-		func() error { time.Sleep(50 * time.Millisecond); finished = true; return nil },
-		func() error { return e2 },
-	)
-	if !finished {
-		t.Fatal("Parallel returned before every function finished")
-	}
-	if !errors.Is(err, e1) || !errors.Is(err, e2) {
-		t.Fatalf("err = %v, want both e1 and e2", err)
-	}
-	if got, want := err.Error(), "e1\ne2"; got != want {
-		t.Fatalf("err = %q, want %q (order of fns)", got, want)
-	}
+	inBubble(t, func(t *testing.T) {
+		s := &Step{name: "s"}
+		e1, e2 := errors.New("e1"), errors.New("e2")
+		var finished bool
+		err := s.Parallel(
+			func() error { return e1 },
+			func() error { time.Sleep(50 * time.Millisecond); finished = true; return nil },
+			func() error { return e2 },
+		)
+		if !finished {
+			t.Fatal("Parallel returned before every function finished")
+		}
+		if !errors.Is(err, e1) || !errors.Is(err, e2) {
+			t.Fatalf("err = %v, want both e1 and e2", err)
+		}
+		if got, want := err.Error(), "e1\ne2"; got != want {
+			t.Fatalf("err = %q, want %q (order of fns)", got, want)
+		}
+	})
 }
 
 func TestParallelNoFunctions(t *testing.T) {
@@ -169,50 +179,52 @@ func TestParallelNoFunctions(t *testing.T) {
 }
 
 func TestParallelRepanicsOnCaller(t *testing.T) {
-	s := &Step{name: "s"}
-	var finished bool
-	defer func() {
-		if p := recover(); p != "boom" {
-			t.Fatalf("recovered %v, want boom", p)
-		}
-		if !finished {
-			t.Fatal("Parallel panicked before the other function finished")
-		}
-	}()
-	s.Parallel(
-		func() error { panic("boom") },
-		func() error { time.Sleep(50 * time.Millisecond); finished = true; return nil },
-	)
-	t.Fatal("Parallel should have panicked")
+	inBubble(t, func(t *testing.T) {
+		s := &Step{name: "s"}
+		var finished bool
+		defer func() {
+			if p := recover(); p != "boom" {
+				t.Fatalf("recovered %v, want boom", p)
+			}
+			if !finished {
+				t.Fatal("Parallel panicked before the other function finished")
+			}
+		}()
+		s.Parallel(
+			func() error { panic("boom") },
+			func() error { time.Sleep(50 * time.Millisecond); finished = true; return nil },
+		)
+		t.Fatal("Parallel should have panicked")
+	})
 }
 
 // A panic in a Parallel function is recorded like a panic in the step function.
 func TestParallelPanicRecordedAsStepPanic(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
-	defer srv.Close()
-
-	sc := NewScenario("s", func(ctx context.Context, u *User) error {
-		return u.Step("page", func(s *Step) error {
-			return s.Parallel(
-				func() error { return s.Get("/").Do().ExpectStatus(200) },
-				func() error { panic("boom") },
-			)
+	inBubble(t, func(t *testing.T) {
+		sc := NewScenario("s", func(ctx context.Context, u *User) error {
+			return u.Step("page", func(s *Step) error {
+				return s.Parallel(
+					func() error { return s.Get("/").Do().ExpectStatus(200) },
+					func() error { panic("boom") },
+				)
+			})
 		})
+		rep, err := run(context.Background(), Plan{Scenario: sc, BaseURL: "http://stub.test", Users: 1, Duration: 100 * time.Millisecond, Progress: discard{}}, fakeServerAfter(3*time.Millisecond))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(rep.Scenarios) != 1 || len(rep.Scenarios[0].Steps) != 1 {
+			t.Fatalf("unexpected report shape: %+v", rep.Scenarios)
+		}
+		// An iteration every 3ms from 0 to 99ms: 34, every one of them with the panic.
+		st := rep.Scenarios[0].Steps[0]
+		if st.Count != 34 || st.Failed != st.Count {
+			t.Fatalf("step count=%d failed=%d, want 34 runs, every one failed", st.Count, st.Failed)
+		}
+		if st.Errors[record.ErrPanic] != st.Count {
+			t.Fatalf("step errors = %v, want %d panics", st.Errors, st.Count)
+		}
 	})
-	rep, err := Run(context.Background(), Plan{Scenario: sc, BaseURL: srv.URL, Users: 1, Duration: 100 * time.Millisecond, Progress: discard{}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(rep.Scenarios) != 1 || len(rep.Scenarios[0].Steps) != 1 {
-		t.Fatalf("unexpected report shape: %+v", rep.Scenarios)
-	}
-	st := rep.Scenarios[0].Steps[0]
-	if st.Failed != st.Count || st.Count == 0 {
-		t.Fatalf("step count=%d failed=%d, want every run failed", st.Count, st.Failed)
-	}
-	if st.Errors[record.ErrPanic] != st.Count {
-		t.Fatalf("step errors = %v, want %d panics", st.Errors, st.Count)
-	}
 }
 
 type discard struct{}

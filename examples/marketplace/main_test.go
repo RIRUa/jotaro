@@ -2,12 +2,13 @@ package main
 
 import (
 	"context"
-	"net/http/httptest"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/RIRUa/jotaro"
+	"github.com/RIRUa/jotaro/internal/memnet"
 )
 
 // runFast runs the scenario at 5% of the real think times against a mock with short-lived sessions.
@@ -18,7 +19,9 @@ func runFast(t *testing.T, plan jotaro.Plan) (*config, *market) {
 		t.Fatal(err)
 	}
 	shop := newMarket(300*time.Millisecond, accounts)
-	srv := httptest.NewServer(shop.handler())
+	// The mock runs on an in-memory network inside a synctest bubble (the callers), so its latency, the session
+	// lifetimes and the think times of the scenario all use the fake clock: a 2s run takes milliseconds.
+	srv := memnet.Start(shop.handler())
 	t.Cleanup(srv.Close)
 
 	// Play the personas in turn instead of drawing them at random, so every persona shows up in any run that
@@ -44,7 +47,9 @@ func runFast(t *testing.T, plan jotaro.Plan) (*config, *market) {
 	return cfg, shop
 }
 
-func TestMarketplaceClosed(t *testing.T) {
+func TestMarketplaceClosed(t *testing.T) { synctest.Test(t, testMarketplaceClosed) }
+
+func testMarketplaceClosed(t *testing.T) {
 	cfg, shop := runFast(t, jotaro.Plan{Users: 8, Duration: 2 * time.Second})
 
 	if err := shop.checkInventory(); err != nil {
@@ -63,7 +68,9 @@ func TestMarketplaceClosed(t *testing.T) {
 	}
 }
 
-func TestMarketplaceOpen(t *testing.T) {
+func TestMarketplaceOpen(t *testing.T) { synctest.Test(t, testMarketplaceOpen) }
+
+func testMarketplaceOpen(t *testing.T) {
 	cfg, shop := runFast(t, jotaro.Plan{
 		Arrival:  profile(10, 2*time.Second),
 		Duration: 2 * time.Second,

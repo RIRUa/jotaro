@@ -2,17 +2,21 @@ package main
 
 import (
 	"context"
-	"net/http/httptest"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/RIRUa/jotaro"
+	"github.com/RIRUa/jotaro/internal/memnet"
 )
 
 // The checkout flow runs against its mock shop. The mock fails some orders on purpose and the counts depend
 // on timing, so the test only asks that every step ran and that no request failed at the network level.
-func TestCheckoutRuns(t *testing.T) {
-	srv := httptest.NewServer(mockShop())
+func TestCheckoutRuns(t *testing.T) { synctest.Test(t, testCheckoutRuns) }
+
+// It runs on a fake clock against an in-memory network, so the second of load takes milliseconds.
+func testCheckoutRuns(t *testing.T) {
+	srv := memnet.Start(mockShop())
 	t.Cleanup(srv.Close)
 
 	rep, err := jotaro.Run(context.Background(), jotaro.Plan{

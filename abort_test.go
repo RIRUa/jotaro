@@ -5,28 +5,18 @@ import (
 	"context"
 	"errors"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/RIRUa/jotaro/record"
 )
 
-// fastAbort shortens the evaluation interval for the duration of a test.
-func fastAbort(t *testing.T) {
-	t.Helper()
-	old := abortInterval
-	abortInterval = 20 * time.Millisecond
-	t.Cleanup(func() { abortInterval = old })
-}
-
-// failingServer answers 500 to everything.
-func failingServer(t *testing.T) *httptest.Server {
-	t.Helper()
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusInternalServerError)
-	}))
-	t.Cleanup(srv.Close)
-	return srv
+// failingServer answers 500 to everything after 7ms. The delay is not a detail: a stub that answered at once
+// would let a closed-model user spin without ever blocking, and the fake clock of a bubble moves only when
+// every goroutine is blocked. 7ms never ties with a whole second of the abort evaluation or the progress line.
+func failingServer() *fakeServer {
+	return fakeServerStatus(7*time.Millisecond, http.StatusInternalServerError)
 }
 
 func getScenario() *Scenario {
@@ -107,61 +97,66 @@ func TestAbortStateHoldsFor(t *testing.T) {
 	}
 }
 
+// A run with AbortOn {5xx rate > 50%, For: 5s} against a server that fails every request stops at the 6th
+// evaluation: the condition holds from the first one (1s) and has held for 5s at 6s. The Duration is a minute and
+// the Grace the default 30s, none of which is waited for.
 func TestRunAbortsEarly(t *testing.T) {
-	fastAbort(t)
-	srv := failingServer(t)
-
 	for name, plan := range map[string]Plan{
 		"closed": {Users: 2},
 		"staged": {UserStages: []UserStage{{Target: 2, For: time.Second}}},
 		"open":   {Arrival: Rate(200, time.Second)},
 	} {
 		t.Run(name, func(t *testing.T) {
-			var progress syncBuffer
-			plan.Scenario, plan.BaseURL, plan.Duration = getScenario(), srv.URL, 30*time.Second
-			plan.AbortOn = []AbortRule{{When: "http_5xx_rate>50%", For: 100 * time.Millisecond}}
-			plan.Progress = &progress
+			inBubble(t, func(t *testing.T) {
+				var progress syncBuffer
+				plan.Scenario, plan.BaseURL, plan.Duration = getScenario(), "http://stub.test", time.Minute
+				plan.AbortOn = []AbortRule{{When: "http_5xx_rate>50%", For: 5 * time.Second}}
+				plan.Progress = &progress
 
-			begin := time.Now()
-			rep, err := Run(context.Background(), plan)
-			if !errors.Is(err, ErrAborted) {
-				t.Fatalf("err = %v, want ErrAborted", err)
-			}
-			if d := time.Since(begin); d > 5*time.Second {
-				t.Errorf("Run took %v although the condition held almost at once", d)
-			}
-			if rep == nil || rep.Requests.Count == 0 {
-				t.Fatalf("partial report missing: %+v", rep)
-			}
-			if rep.Elapsed >= 5*time.Second {
-				t.Errorf("Elapsed = %v", rep.Elapsed)
-			}
-			if !strings.Contains(err.Error(), "http_5xx_rate>50%") {
-				t.Errorf("error does not name the condition: %v", err)
-			}
-			if !strings.Contains(progress.String(), "aborted: http_5xx_rate>50%") {
-				t.Errorf("no abort line in progress output: %q", progress.String())
-			}
+				rep, err := run(context.Background(), plan, failingServer())
+				if !errors.Is(err, ErrAborted) {
+					t.Fatalf("err = %v, want ErrAborted", err)
+				}
+				if want := "jotaro: run aborted: http_5xx_rate>50% for 5s (at 6s)"; err.Error() != want {
+					t.Errorf("err = %q, want %q", err, want)
+				}
+				if rep == nil || rep.Requests.Count == 0 {
+					t.Fatalf("partial report missing: %+v", rep)
+				}
+				// The abort comes at 6s; the requests in flight then (7ms each) finish before 6.007s.
+				if rep.Elapsed < 6*time.Second || rep.Elapsed > 6*time.Second+7*time.Millisecond {
+					t.Errorf("Elapsed = %v, want 6s plus the request that was in flight", rep.Elapsed)
+				}
+				if !strings.Contains(progress.String(), "aborted: http_5xx_rate>50% for 5s (at 6s)\n") {
+					t.Errorf("no abort line in progress output: %q", progress.String())
+				}
+			})
 		})
 	}
 }
 
 // The raw data of an aborted run is still written.
 func TestRunAbortWithRaw(t *testing.T) {
-	fastAbort(t)
-	srv := failingServer(t)
-
-	var raw bytes.Buffer
-	rep, err := Run(context.Background(), Plan{
-		Scenario: getScenario(), BaseURL: srv.URL, Users: 2, Duration: 30 * time.Second,
-		AbortOn: []AbortRule{{When: "http_5xx_rate>50%"}}, Raw: &raw,
+	inBubble(t, func(t *testing.T) {
+		var raw bytes.Buffer
+		rep, err := run(context.Background(), Plan{
+			Scenario: getScenario(), BaseURL: "http://stub.test", Users: 2, Duration: 30 * time.Second,
+			AbortOn: []AbortRule{{When: "http_5xx_rate>50%"}}, Raw: &raw,
+		}, failingServer())
+		if !errors.Is(err, ErrAborted) {
+			t.Fatalf("err = %v, want ErrAborted", err)
+		}
+		if raw.Len() == 0 || rep.Requests.Count == 0 {
+			t.Errorf("raw = %d bytes, requests = %d", raw.Len(), rep.Requests.Count)
+		}
+		got, err := record.ReadRaw(&raw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(got.Requests) != rep.Requests.Count {
+			t.Errorf("raw has %d requests, the report %d", len(got.Requests), rep.Requests.Count)
+		}
 	})
-	if !errors.Is(err, ErrAborted) {
-		t.Fatalf("err = %v, want ErrAborted", err)
-	}
-	if raw.Len() == 0 || rep.Requests.Count == 0 {
-		t.Errorf("raw = %d bytes, requests = %d", raw.Len(), rep.Requests.Count)
-	}
 }
 
 // A healthy server never trips the rules, however long the run is. It runs on a fake clock, so the
@@ -193,38 +188,38 @@ func TestRunNotAbortedWhenHealthy(t *testing.T) {
 }
 
 // After an abort the running iterations get Grace counted from the abort, not from the end of Duration,
-// so one hanging request does not keep Run waiting for Duration + Grace.
+// so one hanging request does not keep Run waiting for Duration + Grace (here: 60s + 30s).
 func TestRunAbortGraceStartsAtAbort(t *testing.T) {
-	fastAbort(t)
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/hang" {
-			<-r.Context().Done()
-			return
-		}
-		w.WriteHeader(http.StatusInternalServerError)
-	}))
-	defer srv.Close()
-
-	sc := NewScenario("s", func(ctx context.Context, u *User) error {
-		return u.Step("get", func(s *Step) error {
-			if u.ID == 1 {
-				return s.Get("/hang").Do().ExpectStatus(200)
+	inBubble(t, func(t *testing.T) {
+		server := &fakeServer{reply: func(r *http.Request) fakeReply {
+			if r.URL.Path == "/hang" {
+				return fakeReply{Delay: 24 * time.Hour} // ended only by the context
 			}
-			return s.Get("/bad").Do().ExpectStatus(200)
+			return fakeReply{Delay: 7 * time.Millisecond, Status: http.StatusInternalServerError}
+		}}
+		sc := NewScenario("s", func(ctx context.Context, u *User) error {
+			return u.Step("get", func(s *Step) error {
+				if u.ID == 1 {
+					return s.Get("/hang").Do().ExpectStatus(200)
+				}
+				return s.Get("/bad").Do().ExpectStatus(200)
+			})
 		})
+		rep, err := run(context.Background(), Plan{
+			Scenario: sc, BaseURL: "http://stub.test", Users: 2, Duration: time.Minute, Grace: 30 * time.Second,
+			Timeout: time.Hour, // longer than anything here, so only the Grace can end the hanging request
+			AbortOn: []AbortRule{{When: "http_5xx_rate>50%"}},
+		}, server)
+		if !errors.Is(err, ErrAborted) {
+			t.Fatalf("err = %v, want ErrAborted", err)
+		}
+		// Aborted at the first evaluation (1s); the hanging request is cancelled when the Grace that started
+		// then is over.
+		if want := 31 * time.Second; rep.Elapsed != want {
+			t.Errorf("Elapsed = %v, want %v (abort at 1s plus Grace)", rep.Elapsed, want)
+		}
+		if it := rep.Scenarios[0].Iterations; it.Errors[record.ErrCanceled] != 1 {
+			t.Errorf("iterations = %+v, want the hanging one recorded as canceled", it)
+		}
 	})
-	begin := time.Now()
-	rep, err := Run(context.Background(), Plan{
-		Scenario: sc, BaseURL: srv.URL, Users: 2, Duration: 30 * time.Second, Grace: 300 * time.Millisecond,
-		AbortOn: []AbortRule{{When: "http_5xx_rate>50%"}},
-	})
-	if !errors.Is(err, ErrAborted) {
-		t.Fatalf("err = %v, want ErrAborted", err)
-	}
-	if d := time.Since(begin); d > 5*time.Second {
-		t.Errorf("Run took %v; the hanging request was not cancelled after Grace", d)
-	}
-	if rep.Requests.Count == 0 {
-		t.Error("no requests recorded")
-	}
 }
