@@ -27,13 +27,14 @@ README と `pkg.go.dev`（v12.13.0）で確認した事実:
 |---|---|
 | 提供形態 | ライブラリ中心＋薄い CLI |
 | シナリオの書き方 | **案A: 素の Go 関数**で始める。案B（ビルダー）は後から A の糖衣として追加 |
-| 実行モデル | 1 ユーザー（シナリオの 1 回の実行）= 1 goroutine。`u.Step(name, fn)` でステップを区切る |
+| 実行モデル | 1 ユーザー（シナリオの 1 回の実行）= 1 goroutine。`u.Step(name, fn)` でステップを区切る。`User` はその goroutine からだけ使う。1 つのステップの中のリクエストは並行に送ってよく（`Step.Parallel`）、予定到着時刻はそのうちちょうど 1 つが取る |
 | プロトコル | HTTP のみ。他のプロトコルを後で差し込めるようインターフェースを切る予定だったが、まだ無い（`exec.go` が `net/http` を直接呼ぶ）。2 つ目のプロトコルが実際に必要になったときに切る |
 | YAML | 後回し。実現するなら YAML → B（データ構造）→ A（実行）の片方向で、実行時に読み込む方式 |
 | リクエスト記述 | 内部でデータ構造として持つ（`RequestSpec`: メソッド・パス・クエリ・ヘッダー・ボディ）。YAML の道を残すため。値の抽出と期待値も最初はここに入れる予定だったが、実装では `Response` のメソッド（`Decode`、`JSON(path)`、`Expect*`）になった |
 
 ## 3. シナリオの書き心地（案A）
 
+<!-- doccheck: before type Item struct{}; func creds(id int) any { return nil }; func order(it Item) any { return nil } -->
 ```go
 var checkout = jotaro.NewScenario("checkout", func(ctx context.Context, u *jotaro.User) error {
     var login struct{ Token string `json:"token"` }
@@ -70,6 +71,7 @@ var checkout = jotaro.NewScenario("checkout", func(ctx context.Context, u *jotar
 
 ## 4. 負荷モデル
 
+<!-- doccheck: before var checkout *jotaro.Scenario -->
 ```go
 jotaro.Run(ctx, jotaro.Plan{
     Scenario: checkout,
@@ -110,7 +112,7 @@ jotaro.Run(ctx, jotaro.Plan{
 
 実行中の状態を見る手段（どれも任意で、同じ記録の流れを受け取る）:
 
-- `Plan.Progress`（`io.Writer`）: 1 秒ごとに `12s/60s rps=480 p95=38ms err=0.2%` のような 1 行を書く。軽いカウンタと専用のヒストグラムで数えるので（`progress.go`）、`Plan.Raw` の有無でコストは変わらない。
+- `Plan.Progress`（`io.Writer`）: 1 秒ごとに `12s/60s rps=480 p95=38ms err=0.2% 5xx=31.0% fail=31.2%` のような 1 行を書く（`5xx`・`fail`・`dropped` は 0 でない間だけ）。軽いカウンタと専用のヒストグラムで数えるので（`progress.go`）、`Plan.Raw` の有無でコストは変わらない。
 - `Plan.MetricsAddr`（たとえば `":9090"`）: 集計器のスナップショットを Prometheus のテキスト形式で `/metrics` に公開する（`metrics.go`）。テキストは自前で書くので `client_golang` の依存は増えない。ラベルはステータスクラスとエラーの種類だけで、レイテンシは固定バケットのヒストグラムではなく分位点の summary。サーバーは `Run` が返ると止まり、アドレスが不正なら、リクエストを送る前に失敗する。
 - `Plan.AbortOn`: 上を参照。
 
@@ -118,6 +120,7 @@ jotaro.Run(ctx, jotaro.Plan{
 
 `Feeder[T]` が、ユーザーごとに別のデータ（アカウント、入力値）を配る。全ユーザーから並行に呼べる。
 
+<!-- doccheck: before var f *os.File -->
 ```go
 rows, _ := jotaro.LoadCSV(f) // 1 行目がヘッダー。列名をキーとする map の列
 accounts := jotaro.NewFeeder(rows, jotaro.Once)

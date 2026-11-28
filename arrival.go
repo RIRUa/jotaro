@@ -159,6 +159,10 @@ type stagedArrival struct {
 	counts []int           // number of arrivals in each stage
 }
 
+// maxStageArrivals is the most arrivals count looks for in one stage. A stage with more is cut here, which
+// is about a trillion arrivals and not a realistic run.
+const maxStageArrivals = 1 << 40
+
 // count is the number of arrivals in the stage (those whose arrival time is before For).
 func (st Stage) count() int {
 	if st.Arrival == nil || st.For <= 0 || st.Arrival.validate() != nil {
@@ -170,7 +174,7 @@ func (st Stage) count() int {
 	}
 	// at is monotonically increasing, so binary-search for the first i where in is false.
 	hi := 1
-	for in(hi) && hi < 1<<40 {
+	for in(hi) && hi < maxStageArrivals {
 		hi *= 2
 	}
 	lo := 0

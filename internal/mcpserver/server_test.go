@@ -125,6 +125,20 @@ func TestValidateThreshold(t *testing.T) {
 	if strings.HasPrefix(bad.Error, "jotaro:") {
 		t.Errorf("error %q keeps the jotaro: prefix", bad.Error)
 	}
+
+	// A value that can never be meant (#82) is invalid, and the error says why.
+	for expr, want := range map[string]string{
+		"error_rate<500%": "above 100%",
+		"p95<-1s":         "negative",
+		"rps>NaN":         "NaN",
+		"rps>Inf":         "infinite",
+	} {
+		var out ThresholdOutput
+		callTool(t, cs, "validate_threshold", map[string]any{"expression": expr}, &out)
+		if out.Valid || !strings.Contains(out.Error, want) || !strings.Contains(out.Error, expr) {
+			t.Errorf("%q: parsed as %+v, want an invalid result whose error names the expression and %q", expr, out, want)
+		}
+	}
 }
 
 const goodScenario = `package main

@@ -18,10 +18,12 @@ type SeriesPoint struct {
 	Requests int
 	// Errors is how many of them ended in a network error (Err is not empty). HTTP 4xx/5xx are not included.
 	Errors int
-	// HTTP5xx is how many of them returned HTTP 5xx (it does not overlap with Errors).
+	// HTTP5xx is how many of them returned HTTP 5xx. It can overlap with Errors: a request whose status line
+	// was 5xx but whose body then failed to arrive is counted in both (see #149).
 	HTTP5xx int
-	// NewConns / ReusedConns are, among the requests started in this interval,
-	// the number that opened a new connection and the number that reused one. Those that failed before getting a connection are counted in neither.
+	// NewConns / ReusedConns are, among the requests started in this interval, the number that were the first to use
+	// a connection (the connection was opened for them) and the number that used a connection that had carried
+	// an earlier request. See RequestStats.NewConns. Those that failed before getting a connection are counted in neither.
 	NewConns    int
 	ReusedConns int
 	// Latency is the latency distribution of the requests started in this interval.
@@ -127,32 +129,24 @@ func buildSeries(origin time.Time, reqs []record.Record, iters []record.Iteratio
 	return pts
 }
 
-// mergeSeries adds b, shifted by offset seconds, into a.
+// mergeSeries adds the series in parts into one, each shifted by the matching offset in seconds.
 // Counts are summed, and concurrency is summed on the assumption that the runs overlapped (an upper bound).
-func mergeSeries(a, b []SeriesPoint, offset int) []SeriesPoint {
-	out := slices.Clone(a)
-	for _, p := range b {
-		sec := p.Second + offset
-		i := slices.IndexFunc(out, func(q SeriesPoint) bool { return q.Second == sec })
-		if i < 0 {
-			p.Second = sec
-			out = append(out, p)
-			continue
-		}
-		q := &out[i]
-		q.Requests += p.Requests
-		q.Errors += p.Errors
-		q.HTTP5xx += p.HTTP5xx
-		q.NewConns += p.NewConns
-		q.ReusedConns += p.ReusedConns
-		q.Latency = mergeLatency(q.Latency, p.Latency)
-		q.DNS = mergeLatency(q.DNS, p.DNS)
-		q.Connect = mergeLatency(q.Connect, p.Connect)
-		q.TLS = mergeLatency(q.TLS, p.TLS)
-		q.Concurrency += p.Concurrency
-	}
-	slices.SortFunc(out, func(x, y SeriesPoint) int { return x.Second - y.Second })
-	return out
+// Points of the same second are combined in the order of parts. The result is ordered by Second, and nil when there are no points.
+func mergeSeries(parts [][]SeriesPoint, offsets []int) []SeriesPoint {
+	return mergeBySecond(parts, offsets,
+		func(p SeriesPoint) int { return p.Second }, func(p *SeriesPoint, s int) { p.Second = s },
+		func(q *SeriesPoint, p SeriesPoint) {
+			q.Requests += p.Requests
+			q.Errors += p.Errors
+			q.HTTP5xx += p.HTTP5xx
+			q.NewConns += p.NewConns
+			q.ReusedConns += p.ReusedConns
+			q.Latency = mergeLatency(q.Latency, p.Latency)
+			q.DNS = mergeLatency(q.DNS, p.DNS)
+			q.Connect = mergeLatency(q.Connect, p.Connect)
+			q.TLS = mergeLatency(q.TLS, p.TLS)
+			q.Concurrency += p.Concurrency
+		})
 }
 
 // iterationEnds returns the end of each iteration as an offset from origin, in the order of iters.

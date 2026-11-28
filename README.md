@@ -4,6 +4,8 @@
 
 [![CI](https://github.com/RIRUa/jotaro/actions/workflows/ci.yml/badge.svg)](https://github.com/RIRUa/jotaro/actions/workflows/ci.yml)
 [![Go Reference](https://pkg.go.dev/badge/github.com/RIRUa/jotaro.svg)](https://pkg.go.dev/github.com/RIRUa/jotaro)
+[![Release](https://img.shields.io/github/v/release/RIRUa/jotaro)](https://github.com/RIRUa/jotaro/releases/latest)
+[![Go version](https://img.shields.io/github/go-mod/go-version/RIRUa/jotaro)](go.mod)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 A Go library for load-testing HTTP servers with scenarios (a flow such as login → list → order). Results can be written to the console, JSON or HTML, and the CLI can check them against thresholds.
@@ -15,7 +17,7 @@ A Go library for load-testing HTTP servers with scenarios (a flow such as login 
 - Measures per-step latency (p50 / p90 / p95 / p99 / max), error breakdown, throughput, TTFB, DNS / TCP / TLS time, and connection reuse rate
 - Also records a per-second time series and the health of the load generator itself (CPU, goroutine count)
 
-For the design rationale see [`DESIGN.md`](DESIGN.md); for the result format and the threshold spec see [`docs/result.md`](docs/result.md).
+For the design rationale see [`DESIGN.md`](DESIGN.md); for the result format and the threshold spec see [`docs/result.md`](docs/result.md); for what one generator can drive and how that is measured see [`docs/performance.md`](docs/performance.md). To go from the examples to a test that runs regularly and can be trusted, see the [guides](#guides).
 
 > **Status: v0.x.** We do not change the API without a reason, and we aim to keep existing code working, in the spirit of the [Go 1 compatibility promise](https://go.dev/doc/go1compat). The exception is fixing an existing bug, which can change behavior that code relied on. Such changes are listed in [`CHANGELOG.md`](CHANGELOG.md).
 
@@ -38,6 +40,7 @@ Requires Go 1.25 or later.
 
 ### 1. Write a scenario
 
+<!-- doccheck: before var creds map[string]string -->
 ```go
 var checkout = jotaro.NewScenario("checkout", func(ctx context.Context, u *jotaro.User) error {
 	var login struct {
@@ -62,20 +65,22 @@ var checkout = jotaro.NewScenario("checkout", func(ctx context.Context, u *jotar
 - `Step` is the unit of measurement. Results are aggregated per step
 - Build a request with `Get` / `Post` / `Put` / `Patch` / `Delete` and send it with `Do()`
 - The following can be chained onto a request before `Do()`
-  - Headers: `Header(k, v)` / `Headers(map)` / `Bearer(token)` / `Basic(user, pass)`
-  - Query: `Query(k, v)` / `Queries(url.Values)` (values are escaped)
+  - Headers: `Header(k, v)` / `Headers(map)` / `Bearer(token)` / `Basic(user, pass)`. `Header("Host", v)` (or `Host(v)`) sets the Host that is sent, to select a virtual host or tenant while connecting to the address in `BaseURL`; it does not change the TLS server name
+  - Query: `Query(k, v)` / `Queries(url.Values)` (values are escaped). A query written into `Path` is sent as is, so a space or control character in it makes `Do()` return an error and send nothing (the path part itself is escaped by `net/http`)
   - Body: `JSON(v)` / `Form(url.Values)` / `Body(v)` (`[]byte` / `string` / `io.Reader` are sent as is, `url.Values` as a form, anything else as JSON. Set `Content-Type` with `Header` when you need it)
 - After `Do()`, chain `Decode(&v)` (read JSON) or one of the `Expect*` checks
   - `ExpectStatus(code)` / `ExpectStatusIn(codes...)`: the status code
   - `ExpectHeader(key, want)` / `ExpectBodyContains(substr)`: a header value / a substring of the body
   - `ExpectJSON(path, want)`: the value at a dot path such as `data.items.0.id`. `Response.JSON(path)` returns that value so you can use it in the next request without defining a struct
   - A failed check returns an error and the step is recorded as `expect_mismatch`. It is not counted as a request error (see `error_rate` under [Threshold syntax](#threshold-syntax))
+- To send several requests at once (a page and its API calls, the widgets of a dashboard), use `s.Parallel(fn1, fn2, ...)` inside the step: it runs the functions concurrently, waits for all of them and returns their errors joined (`errors.Join`). Requests of one step may also be sent from your own goroutines, as long as they finish before the step function returns. `u.Step` and `u.Think` must be called from the scenario goroutine only. `Parallel` does not limit how many requests are in flight
 - `Think` is think time. Scenario time is reported both without and with `Think`
 - Even if a step fails, the iteration counts as successful as long as the scenario function returns `nil`. Step failures show up in the per-step stats
 - Cookies are fresh for each iteration. The connection pool is shared by all users
 
 Use a `Feeder` to hand out different data (accounts, etc.) to each user. `LoadCSV` reads one from a CSV.
 
+<!-- doccheck: stmts -->
 ```go
 var accounts = jotaro.NewFeeder([]map[string]string{
 	{"user": "alice"}, {"user": "bob"},
@@ -86,6 +91,7 @@ creds, ok := accounts.Next()
 
 ### 2. Choose the load and run
 
+<!-- doccheck: before var checkout *jotaro.Scenario -->
 ```go
 rep, err := jotaro.Run(ctx, jotaro.Plan{
 	Scenario: checkout,
@@ -116,18 +122,20 @@ With `UserStages`, a user that is stopped by a lower target finishes the iterati
 
 To repeat a sequence of stages (for example three waves), use `jotaro.RepeatUserStages(3, stage1, stage2, ...)`; it returns the stages repeated 3 times and can be joined with other stages by `append`. Each round starts from the Target the previous round ended at.
 
-You can also set `MaxUsers` (the cap on concurrency in the open model; an arrival that comes in while the cap is reached is not run and not waited for, but counted as dropped, and the text report prints a `warning:` line when that happened), `Timeout` (the limit for a single request), `Grace` (how long to wait for running iterations after `Duration`), `Raw` (where to write raw data), `Progress` (an `io.Writer`, such as `os.Stderr`, that gets one line per second while the run is in progress, e.g. `12s/60s rps=480 p95=38ms err=0.2%`), and `MetricsAddr` (for example `":9090"`: serve the state of the run so far at `/metrics` in the Prometheus text format, so Grafana and similar tools can chart it during the run; it needs no extra dependency and stops when `Run` returns).
+You can also set `MaxUsers` (the cap on concurrency in the open model; an arrival that comes in while the cap is reached is not run and not waited for, but counted as dropped, and the text report prints a `warning:` line when that happened), `Timeout` (the limit for a single request), `Grace` (how long to wait for running iterations after `Duration`), `Raw` (where to write raw data), `Progress` (an `io.Writer`, such as `os.Stderr`, that gets one line per second while the run is in progress, e.g. `12s/60s rps=480 p95=38ms err=0.2% 5xx=31.0% fail=31.2%`; `err` is the share of transport-level errors only, `5xx` the share of 5xx responses and `fail` the share of failed iterations such as a failed `Expect*` check, and `5xx`, `fail` and `dropped` are left out while they are zero), and `MetricsAddr` (for example `":9090"`: serve the state of the run so far at `/metrics` in the Prometheus text format, so Grafana and similar tools can chart it during the run; it needs no extra dependency and stops when `Run` returns).
 
 To stop a run as soon as the server is clearly broken, set `AbortOn`, for example `AbortOn: []jotaro.AbortRule{{When: "http_5xx_rate>50%", For: 5 * time.Second}}`. `When` uses the threshold syntax but describes the state to stop at; it is checked every second against the whole run so far, and `For` is how long it must hold. Running iterations get `Grace` to finish, then `Run` returns the partial report together with an error that satisfies `errors.Is(err, jotaro.ErrAborted)`.
 
 ### 3. Output the results
 
+<!-- doccheck: before var rep *report.Report -->
 ```go
 rep.Write(os.Stdout, report.FormatText) // FormatText / FormatJSON / FormatHTML
 ```
 
 You can also judge the results against thresholds.
 
+<!-- doccheck: before var rep *report.Report -->
 ```go
 th, _ := report.ParseThreshold("p95<200ms")
 checks := rep.Check(th)
@@ -164,7 +172,7 @@ go install github.com/RIRUa/jotaro/cmd/jotaro@latest
 
 Prebuilt binaries (Linux / macOS / Windows) are attached to each [GitHub Release](https://github.com/RIRUa/jotaro/releases). `jotaro version` prints the version (please include it in bug reports).
 
-Put options **before** the file names.
+Options can come before or after the file names (`jotaro check result.json -t 'p95<200ms'` works), and `--` ends the options. `jotaro help <command>` and `jotaro <command> -h` print the options of a command to standard output. A command that is given the wrong arguments says what is wrong on standard error and exits with code 2.
 
 ```sh
 # Build an HTML report from a JSON result (default format is html)
@@ -203,12 +211,21 @@ jotaro export -format csv -o series.csv raw.jsonl        # per-second counts and
 | `iteration_min` … `iteration_max`, `iteration_active_min` … `iteration_active_max` | Latency of a whole scenario iteration, with / without Think time (filter with `{scenario=...}`) |
 | `requests` `rps` `dropped` | Number of requests / requests per second / number of dropped arrivals |
 
+A step or scenario name that contains a comma, an unbalanced brace, `<` / `>` or spaces at its ends is written as a Go double-quoted string: `p95{step="list, then order"}<1s` (`\"` and `\\` are escapes).
+
 When the target or the data is missing, the threshold counts as not met, so that a mistyped step name cannot pass silently. See chapter 5 of [`docs/result.md`](docs/result.md) for details.
 
 Two things to know when you choose thresholds:
 
 - `error_rate` is the share of requests that ended in a transport-level error (timeout, connection refused, DNS failure and so on). A failed `Expect*` check is not counted as a request error: it fails the step with `expect_mismatch`, which is listed in the step's errors, and it reaches `iteration_fail_rate` when the scenario returns that error. To fail a run on wrong responses, return the step's error from the scenario (as in the example above) and set `iteration_fail_rate<1%`; use `http_5xx_rate` / `http_4xx_rate` for HTTP error statuses.
 - In the open model, when `MaxUsers` is full an arrival is dropped instead of waited for, and a dropped arrival leaves no latency sample. When you use `corrected_*` thresholds, add `dropped<1` so that a run that dropped arrivals cannot pass on the latencies of the arrivals that did run.
+
+## Guides
+
+- [Running in CI](docs/ci.md): a complete GitHub Actions workflow with `jotaro check` as the gate, results kept as artifacts, and a comparison with a baseline
+- [Running from several machines](docs/multi-machine.md): splitting the load, starting the generators together, and what `jotaro merge` does to the numbers
+- [Tuning the load generator and trusting the result](docs/tuning.md): file descriptors, ports and CPU, `corrected` against `latency`, HTTP/2, `bytes_in`, and a checklist for before you believe a result
+- [Generator performance](docs/performance.md): how much load one generator can drive, and how that is measured
 
 ## MCP server (scenario authoring and result checks)
 
@@ -224,9 +241,9 @@ claude mcp add jotaro -- jotaro mcp     # Claude Code; other clients take the sa
 | Resource | `jotaro://thresholds` | Threshold syntax and metrics |
 | Resource | `jotaro://result` | How to save a result and read it: structure, what each number and error kind means, what to check first |
 | Prompt | `write_scenario` | Write a scenario for a described flow, then check it |
-| Tool | `check_scenario` | Check a scenario file: Go syntax, jotaro lint (exactly one of `Users` / `UserStages` / `Arrival`, unchecked responses, duplicate step names, ...) and a type check by compiling. Pass `dir` (a module that requires jotaro) to check against its jotaro version; without it a temporary module with the jotaro version of the running `jotaro` binary (the latest one for a development build) is used, which needs network access |
+| Tool | `check_scenario` | Check a scenario file: Go syntax, jotaro lint (exactly one of `Users` / `UserStages` / `Arrival`, unchecked responses, duplicate or data-built step names, ...) and a type check by compiling. The lint rules match jotaro's types and methods, so they see through aliased imports and variables and ignore your own `Plan` type or `Do()` method; they run once the code compiles, and until then only a name-based fallback that reports warnings runs. Pass `dir` (a module that requires jotaro) to check against its jotaro version; without it a temporary module with the jotaro version of the running `jotaro` binary (the latest one for a development build) is used, which needs network access |
 | Tool | `validate_threshold` | Parse a threshold such as `p99{step=login}<100ms` |
-| Tool | `summarize_result` | Summarize a saved result file: throughput, error rate, latency per step, dropped arrivals, the worst second, and warnings such as a saturated load generator. Much smaller than the file itself, which holds histograms and a per-second series |
+| Tool | `summarize_result` | Summarize a saved result file: throughput, error rate, latency and failure reasons per step, dropped arrivals, the worst second, and warnings that say why not to trust it (a saturated load generator, dropped arrivals, too few requests for p95/p99, failed checks that `error_rate` does not show, many 4xx responses, late arrivals, a run that degraded while it ran). Much smaller than the file itself, which holds histograms and a per-second series |
 | Tool | `check_result` | Judge a saved result file against thresholds, like `jotaro check`: pass or fail per threshold with the measured value. `raw: true` reads raw JSON Lines data |
 
 ## Packages

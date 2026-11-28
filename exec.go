@@ -25,10 +25,37 @@ type executor struct {
 
 	// tag is a template record.Record with Scenario, Step, UserID, Iteration and so on filled in.
 	tag record.Record
-	// sched holds the scheduled arrival time. The first request uses it for Scheduled and resets it to zero.
-	// Steps run in order, so there is no locking.
-	sched *time.Time
-	sink  func(record.Record)
+	// sched holds the scheduled arrival time. The first request of the iteration takes it for Scheduled
+	// and later ones get none. It may be nil. Requests of one step can run concurrently
+	// (see Step), so the slot guards itself.
+	sched *schedSlot
+	// col receives the record of each request. When it is nil, sink does. col exists so that a step does not
+	// allocate a method value of col.AddRequest for every executor.
+	col  *record.Collector
+	sink func(record.Record)
+}
+
+// schedSlot holds the scheduled arrival time of an iteration until a request takes it.
+// It is safe for concurrent use: exactly one of several concurrent callers of take gets the time.
+type schedSlot struct {
+	mu sync.Mutex
+	t  time.Time
+}
+
+// set stores the scheduled arrival time, replacing any that was not taken yet.
+func (s *schedSlot) set(t time.Time) {
+	s.mu.Lock()
+	s.t = t
+	s.mu.Unlock()
+}
+
+// take returns the stored time and clears it, so the next call returns the zero time.
+func (s *schedSlot) take() time.Time {
+	s.mu.Lock()
+	t := s.t
+	s.t = time.Time{}
+	s.mu.Unlock()
+	return t
 }
 
 // resolve turns a request path into a full URL.
@@ -55,6 +82,10 @@ func (e *executor) do(r *Request) *Response {
 		return &Response{err: r.err}
 	}
 
+	if err := checkRawQuery(r.Spec.Path); err != nil {
+		return &Response{err: err}
+	}
+
 	url := withQuery(e.resolve(r.Spec.Path), r.Spec.Query)
 	rec := e.tag
 	rec.Method = r.Spec.Method
@@ -62,23 +93,37 @@ func (e *executor) do(r *Request) *Response {
 	rec.BytesOut = int64(len(r.Spec.Body))
 
 	rec.Start = time.Now()
+	var sched time.Time
+	if e.sched != nil {
+		sched = e.sched.take()
+	}
 	switch {
-	case e.sched != nil && !e.sched.IsZero():
-		rec.Scheduled = *e.sched
-		*e.sched = time.Time{}
+	case !sched.IsZero():
+		rec.Scheduled = sched
 	case rec.Scheduled.IsZero():
 		rec.Scheduled = rec.Start
 	}
 	tr := &tracer{start: rec.Start}
 
+	// An empty body is passed as nil, which net/http treats the same as an empty reader (it sends the
+	// same headers) without the reader.
+	var body io.Reader
+	if len(r.Spec.Body) > 0 {
+		body = bytes.NewReader(r.Spec.Body)
+	}
 	httpReq, err := http.NewRequestWithContext(
 		httptrace.WithClientTrace(e.ctx, tr.clientTrace()),
-		r.Spec.Method, url, bytes.NewReader(r.Spec.Body),
+		r.Spec.Method, url, body,
 	)
 	if err != nil {
 		return &Response{err: err}
 	}
 	httpReq.Header = r.Spec.Header.Clone()
+	// net/http ignores a Host entry in Header; the value that goes out is Request.Host.
+	if host := httpReq.Header.Get("Host"); host != "" {
+		httpReq.Host = host
+	}
+	httpReq.Header.Del("Host")
 
 	resp := &Response{}
 	hr, err := e.client.Do(httpReq)
@@ -86,7 +131,7 @@ func (e *executor) do(r *Request) *Response {
 		resp.Code = hr.StatusCode
 		resp.Header = hr.Header
 		rec.Code = hr.StatusCode
-		resp.Body, err = io.ReadAll(hr.Body)
+		resp.Body, err = readBody(hr.Body, hr.ContentLength)
 		hr.Body.Close()
 	}
 	rec.Latency = time.Since(rec.Start)
@@ -97,8 +142,43 @@ func (e *executor) do(r *Request) *Response {
 		rec.Err = classify(err)
 		resp.err = err
 	}
-	e.sink(rec)
+	if e.col != nil {
+		e.col.AddRequest(rec)
+	} else {
+		e.sink(rec)
+	}
 	return resp
+}
+
+// maxPresize caps the buffer that is allocated up front from a declared Content-Length, so that a target that
+// declares a huge length and sends nothing cannot make the generator allocate it. Longer bodies grow as usual.
+const maxPresize = 1 << 20
+
+// readBody reads r to the end like io.ReadAll, but allocates the buffer once when the length is declared
+// (size > 0), instead of starting at 512 bytes and growing. The result is never nil, as with io.ReadAll,
+// and an empty body costs no allocation.
+func readBody(r io.Reader, size int64) ([]byte, error) {
+	if r == http.NoBody {
+		return []byte{}, nil
+	}
+	if size <= 0 || size > maxPresize {
+		return io.ReadAll(r)
+	}
+	// One byte more than declared, so that the read that finds EOF does not grow the buffer.
+	buf := make([]byte, 0, size+1)
+	for {
+		n, err := r.Read(buf[len(buf):cap(buf)])
+		buf = buf[:len(buf)+n]
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				err = nil
+			}
+			return buf, err
+		}
+		if len(buf) == cap(buf) {
+			buf = append(buf, 0)[:len(buf)] // the declaration was too small: grow
+		}
+	}
 }
 
 // tracer derives the duration of each phase from httptrace events.
@@ -112,12 +192,16 @@ type tracer struct {
 	tlsStart, tlsEnd time.Time
 	firstByte        time.Time
 	conn             record.ConnKind
+
+	// trace is the set of hooks handed to net/http. It lives in the tracer, so one allocation serves both.
+	trace httptrace.ClientTrace
 }
 
 // clientTrace returns the hooks to attach to the request context.
 // Start events keep the first call only; done events keep the last.
+// The returned value belongs to the tracer, and a second call rebuilds it in place, so call it once per tracer.
 func (t *tracer) clientTrace() *httptrace.ClientTrace {
-	return &httptrace.ClientTrace{
+	t.trace = httptrace.ClientTrace{
 		DNSStart: func(httptrace.DNSStartInfo) { t.set(&t.dnsStart, false) },
 		DNSDone:  func(httptrace.DNSDoneInfo) { t.set(&t.dnsEnd, true) },
 		// When connecting to several addresses in turn, measure from the first start to the last completion.
@@ -128,13 +212,17 @@ func (t *tracer) clientTrace() *httptrace.ClientTrace {
 		GotConn: func(info httptrace.GotConnInfo) {
 			t.mu.Lock()
 			defer t.mu.Unlock()
-			t.conn = record.ConnNew
-			if info.Reused {
+			// A request that got more than one connection (a retry after a stale one) keeps "new" if any
+			// of them was its own, so no connection is counted as new more than once (a retry that was first to use two fresh connections counts as one new).
+			if connFirstUse(info) {
+				t.conn = record.ConnNew
+			} else if t.conn == "" {
 				t.conn = record.ConnReused
 			}
 		},
 		GotFirstResponseByte: func() { t.set(&t.firstByte, true) },
 	}
+	return &t.trace
 }
 
 // set records only the first call when overwrite is false.
@@ -170,7 +258,14 @@ func span(from, to time.Time) time.Duration {
 
 // classify sorts a communication error into a record.ErrKind.
 func classify(err error) record.ErrKind {
+	// This check comes first on purpose. The variables below are targets of errors.As, so they are
+	// moved to the heap when the function is entered, and a success (the common case: classify runs for
+	// every step and iteration) would pay eight allocations for nothing.
+	if err == nil {
+		return record.ErrNone
+	}
 	var (
+		pan     *panicError
 		expect  *ExpectError
 		dnsErr  *net.DNSError
 		certErr *tls.CertificateVerificationError
@@ -180,8 +275,8 @@ func classify(err error) record.ErrKind {
 		netErr  net.Error
 	)
 	switch {
-	case err == nil:
-		return record.ErrNone
+	case errors.As(err, &pan):
+		return record.ErrPanic
 	case errors.As(err, &expect):
 		return record.ErrExpect
 	case errors.Is(err, context.Canceled):

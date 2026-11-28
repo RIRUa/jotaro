@@ -53,8 +53,17 @@ func index(d time.Duration) int {
 }
 
 // value is the representative value of a bucket. Wherever a sample lies in the bucket, the relative error is within Alpha.
+//
+// The value saturates at the largest Duration. Without that, a bucket near the top of the range (the
+// representative of the bucket that holds math.MaxInt64 is above it), or a bucket number far out of range
+// in a hand-edited result (the power is +Inf), is converted from a float that does not fit, and the
+// result is implementation-dependent: a negative percentile on amd64.
 func value(i int) time.Duration {
-	return time.Duration(math.Round(2 * math.Pow(gamma, float64(i)) / (gamma + 1)))
+	v := math.Round(2 * math.Pow(gamma, float64(i)) / (gamma + 1))
+	if v >= math.MaxInt64 { // float64(math.MaxInt64) is 2^63, which does not fit either
+		return time.Duration(math.MaxInt64)
+	}
+	return time.Duration(v)
 }
 
 // Total is the sum of the counts of all buckets.

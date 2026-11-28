@@ -92,3 +92,87 @@ func TestRequestBodyAndBasic(t *testing.T) {
 		t.Error("an unencodable value did not cause an error")
 	}
 }
+
+func TestRequestHostHeader(t *testing.T) {
+	var host, hdr string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		host, hdr = r.Host, r.Header.Get("X-Keep")
+	}))
+	defer srv.Close()
+
+	cases := map[string]func(e *executor) *Request{
+		"Header": func(e *executor) *Request { return newRequest(e, "GET", "/h").Header("Host", "tenant.example.com") },
+		"Headers": func(e *executor) *Request {
+			return newRequest(e, "GET", "/h").Headers(map[string]string{"Host": "tenant.example.com"})
+		},
+		"Host": func(e *executor) *Request { return newRequest(e, "GET", "/h").Host("tenant.example.com") },
+	}
+	for name, build := range cases {
+		t.Run(name, func(t *testing.T) {
+			host, hdr = "", ""
+			e, recs := testExec(t, srv.URL, nil)
+			if err := build(e).Header("X-Keep", "1").Do().ExpectStatus(200); err != nil {
+				t.Fatal(err)
+			}
+			if host != "tenant.example.com" || hdr != "1" {
+				t.Errorf("host = %q, X-Keep = %q", host, hdr)
+			}
+			if len(*recs) != 1 || !strings.HasPrefix((*recs)[0].URL, srv.URL) {
+				t.Errorf("records = %+v, want one request to %s", *recs, srv.URL)
+			}
+		})
+	}
+
+	// Without a Host header the host of the URL is sent, as before.
+	e, _ := testExec(t, srv.URL, nil)
+	if err := newRequest(e, "GET", "/h").Do().ExpectStatus(200); err != nil {
+		t.Fatal(err)
+	}
+	if host != strings.TrimPrefix(srv.URL, "http://") {
+		t.Errorf("default host = %q", host)
+	}
+}
+
+func TestRequestInvalidPath(t *testing.T) {
+	called := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { called = true }))
+	defer srv.Close()
+
+	for _, path := range []string{"/search?q=a b", "/search?q=a&x=b c#f", "/s?q=a\tb", "/s?q=a\x7fb"} {
+		e, recs := testExec(t, srv.URL, nil)
+		err := newRequest(e, "GET", path).Do().ExpectStatus(200)
+		if err == nil || !strings.Contains(err.Error(), "url.QueryEscape") {
+			t.Errorf("path %q: err = %v, want an error that points to url.QueryEscape", path, err)
+		}
+		if len(*recs) != 0 {
+			t.Errorf("path %q: %d records, want none", path, len(*recs))
+		}
+	}
+	if called {
+		t.Error("the server was called for an invalid path")
+	}
+
+	// The path component is escaped by net/http, so a space or non-ASCII text in it is sent as %XX
+	// (not an error), a fragment is never sent, and a query with existing %XX is sent as written.
+	var uri string
+	srv2 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { uri = r.RequestURI }))
+	defer srv2.Close()
+	e, _ := testExec(t, srv2.URL, nil)
+	for path, want := range map[string]string{
+		"/users/a b":                      "/users/a%20b",
+		"/users/日本":                       "/users/%E6%97%A5%E6%9C%AC",
+		"/users/" + url.PathEscape("a b"): "/users/a%20b",
+		"/s?x=%E6%97%A5#f g":              "/s?x=%E6%97%A5",
+	} {
+		uri = ""
+		if err := newRequest(e, "GET", path).Do().ExpectStatus(200); err != nil {
+			t.Errorf("path %q: %v", path, err)
+		}
+		if uri != want {
+			t.Errorf("path %q: RequestURI = %q, want %q", path, uri, want)
+		}
+	}
+	if err := newRequest(e, "GET", "/s").Query("q", "a b").Do().ExpectStatus(200); err != nil || uri != "/s?q=a+b" {
+		t.Errorf("Query: err = %v, RequestURI = %q", err, uri)
+	}
+}

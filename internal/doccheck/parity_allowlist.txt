@@ -1,0 +1,11 @@
+# Documents whose Japanese twin is allowed to differ from the English one, one entry per line:
+#
+#   <English file> | <check> | <reason>
+#
+# <check> is one of: twin (the _jp.md file is missing), headings, blocks, code. See "Documentation checks" in
+# CONTRIBUTING.md. The reason says what is missing and, if known, the issue or pull request that brings it in line.
+# An entry that no longer matches a difference fails the test, so delete it when the twin catches up.
+#
+# Empty on purpose: README, DESIGN, docs/result and examples/README match their Japanese twins today.
+# Example:
+#   docs/ci.md | twin | Japanese version follows in #NNN

@@ -27,13 +27,14 @@ Facts checked against the README and `pkg.go.dev` (v12.13.0):
 |---|---|
 | Form | Library first, plus a thin CLI |
 | How scenarios are written | Start with **option A: plain Go functions**. Option B (a builder) is added later as sugar over A |
-| Execution model | One user (one run of a scenario) = one goroutine. Steps are delimited with `u.Step(name, fn)` |
+| Execution model | One user (one run of a scenario) = one goroutine. Steps are delimited with `u.Step(name, fn)`. `User` is used from that goroutine only; requests inside one step may be sent concurrently (`Step.Parallel`), and the scheduled arrival time is taken by exactly one of them |
 | Protocol | HTTP only. We first planned to cut interfaces so that others could be plugged in later, but none exists yet (`exec.go` calls `net/http` directly); we will cut one when a second protocol is actually needed |
 | YAML | Deferred. If done, one-way: YAML → B (data structures) → A (execution), loaded at run time |
 | Request description | Held internally as a data structure (`RequestSpec`: method, path, query, headers, body), to keep the YAML path open. Value extraction and expectations were first planned to live in it too, but as implemented they are methods of `Response` (`Decode`, `JSON(path)`, `Expect*`) |
 
 ## 3. How scenarios feel to write (option A)
 
+<!-- doccheck: before type Item struct{}; func creds(id int) any { return nil }; func order(it Item) any { return nil } -->
 ```go
 var checkout = jotaro.NewScenario("checkout", func(ctx context.Context, u *jotaro.User) error {
     var login struct{ Token string `json:"token"` }
@@ -70,6 +71,7 @@ The user ID, which run it is, an `http.Client` with a cookie jar (new for each i
 
 ## 4. Load models
 
+<!-- doccheck: before var checkout *jotaro.Scenario -->
 ```go
 jotaro.Run(ctx, jotaro.Plan{
     Scenario: checkout,
@@ -110,7 +112,7 @@ How a run ends (all models):
 
 Watching a run while it is in progress (all optional, all fed by the same stream of records):
 
-- `Plan.Progress` (an `io.Writer`): one line per second, such as `12s/60s rps=480 p95=38ms err=0.2%`. It uses a light counter and its own histogram (`progress.go`), so it costs the same with and without `Plan.Raw`.
+- `Plan.Progress` (an `io.Writer`): one line per second, such as `12s/60s rps=480 p95=38ms err=0.2% 5xx=31.0% fail=31.2%` (`5xx`, `fail` and `dropped` only while they are not zero). It uses a light counter and its own histogram (`progress.go`), so it costs the same with and without `Plan.Raw`.
 - `Plan.MetricsAddr` (for example `":9090"`): serves the aggregator's snapshot at `/metrics` in the Prometheus text format (`metrics.go`). The text is written by hand, so no `client_golang` dependency is added; the labels are only the status class and the error kind; the latency is a summary of quantiles, not a fixed-bucket histogram. The server stops when `Run` returns, and a bad address fails the run before any request.
 - `Plan.AbortOn`: see above.
 
@@ -118,6 +120,7 @@ Watching a run while it is in progress (all optional, all fed by the same stream
 
 A `Feeder[T]` hands out different data (accounts, input values) to each user. It can be called concurrently from all users.
 
+<!-- doccheck: before var f *os.File -->
 ```go
 rows, _ := jotaro.LoadCSV(f) // first row is the header; a list of maps keyed by column name
 accounts := jotaro.NewFeeder(rows, jotaro.Once)

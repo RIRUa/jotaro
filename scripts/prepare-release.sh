@@ -45,12 +45,30 @@ if [ -z "$(awk '
 fi
 
 tmp=$(mktemp)
-trap 'rm -f "$tmp"' EXIT
+trap 'rm -f "$tmp" "$tmp.refs"' EXIT
 # Keep an empty [Unreleased] on top and put the version heading right under it.
 awk -v ver="$version" -v date="$date" '
 	{ print }
 	index($0, "## [Unreleased]") == 1 { printf "\n## [%s] - %s\n", ver, date }
 ' CHANGELOG.md >"$tmp"
+# Keep the link references at the bottom (Keep a Changelog) in step: [Unreleased] now compares with
+# the new version, and the new version compares with the one that was "Unreleased" before.
+# Files without an [Unreleased] reference are left as they are.
+awk -v ver="$version" '
+	/^\[Unreleased\]: .*\/compare\/v[0-9.]+\.\.\.HEAD$/ {
+		base = $0
+		sub(/\/compare\/.*$/, "", base)
+		sub(/^\[Unreleased\]: /, "", base)
+		prev = $0
+		sub(/^.*\/compare\/v/, "", prev)
+		sub(/\.\.\.HEAD$/, "", prev)
+		printf "[Unreleased]: %s/compare/v%s...HEAD\n", base, ver
+		printf "[%s]: %s/compare/v%s...v%s\n", ver, base, prev, ver
+		next
+	}
+	{ print }
+' "$tmp" >"$tmp.refs"
+mv "$tmp.refs" "$tmp"
 cat "$tmp" >CHANGELOG.md
 
 echo "CHANGELOG.md: [Unreleased] -> [$version] - $date"

@@ -19,7 +19,8 @@ import (
 // not on the number of requests.
 //
 // The price is precision: Count, Min, Max and Mean are exact, but P50 to P99 are approximations
-// within 1% relative error (the same as after MergeReports). Use BuildReport when exact percentiles are needed.
+// within 1% relative error (see Latency, which says which constructors give exact percentiles).
+// Use BuildReport when exact percentiles are needed.
 //
 // It implements record.Observer, so it can be given to record.NewStreamingCollector.
 // All methods are safe for concurrent use.

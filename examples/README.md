@@ -24,6 +24,8 @@ go run ./cmd/jotaro report -format text result.json                             
 
 To compare two runs, or to hand the data to other tools, save the raw data as well (`-raw raw.jsonl`), then use `jotaro compare -max-p95-regression 20 base.json new.json` (exit status 1 if a p95 got more than 20% worse) or `jotaro export -format csv -o series.csv raw.jsonl` (also `-format vegeta`).
 
+To run a test like this regularly in CI, from several machines, and to know how far to trust its numbers, see [`docs/ci.md`](../docs/ci.md), [`docs/multi-machine.md`](../docs/multi-machine.md) and [`docs/tuning.md`](../docs/tuning.md). The examples start their mock server in the same process as the load generator so that nothing else has to be set up; a real test should not do that (see [the generator and the target on the same machine](../docs/tuning.md#the-generator-and-the-target-on-the-same-machine)).
+
 ## checkout
 
 A small sample that starts its own mock server.

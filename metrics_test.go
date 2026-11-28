@@ -64,7 +64,8 @@ func TestRunMetrics(t *testing.T) {
 	if err := <-done; err != nil {
 		t.Fatal(err)
 	}
-	if _, err := http.Get("http://" + addr + "/metrics"); err == nil {
+	if resp, err := http.Get("http://" + addr + "/metrics"); err == nil {
+		resp.Body.Close()
 		t.Error("metrics server still running after Run returned")
 	}
 }

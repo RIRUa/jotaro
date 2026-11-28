@@ -1,0 +1,31 @@
+name: api-compat
+
+# Compares the exported API of a pull request with the last release (the highest vX.Y.Z tag) and
+# fails on an incompatible change that is not acknowledged in .github/api-breaks.txt. Additions
+# pass. See scripts/api-compat.sh and CONTRIBUTING.md.
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+# Cancel the outdated run when a pull request is updated.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  api-compat:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The last release is found by its tag, so all tags (and their history) are needed.
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version: stable
+      # The apidiff version is pinned inside the script.
+      - name: Compare the exported API with the last release
+        run: scripts/api-compat.sh

@@ -85,201 +85,220 @@ func TestPlanValidateUserStages(t *testing.T) {
 // TestRunUserStages ramps up to 4 users, holds, then drops to 1 and checks the load shape:
 // the number of concurrent iterations follows the target, and user IDs and iteration counts stay stable.
 func TestRunUserStages(t *testing.T) {
-	var (
-		running, peak atomic.Int64
-		mu            sync.Mutex
-		lastIter      = map[int]int{}
-		badIter       bool
-		ids           = map[int]bool{}
-	)
-	sc := NewScenario("s", func(ctx context.Context, u *User) error {
-		n := running.Add(1)
-		defer running.Add(-1)
-		for {
-			p := peak.Load()
-			if n <= p || peak.CompareAndSwap(p, n) {
-				break
+	inBubble(t, func(t *testing.T) {
+		var (
+			running, peak atomic.Int64
+			mu            sync.Mutex
+			lastIter      = map[int]int{}
+			badIter       bool
+			ids           = map[int]bool{}
+		)
+		sc := NewScenario("s", func(ctx context.Context, u *User) error {
+			n := running.Add(1)
+			defer running.Add(-1)
+			for {
+				p := peak.Load()
+				if n <= p || peak.CompareAndSwap(p, n) {
+					break
+				}
+			}
+			mu.Lock()
+			ids[u.ID] = true
+			if u.Iteration != lastIter[u.ID] {
+				badIter = true // iterations of one user must be 0, 1, 2, ... without gaps or resets
+			}
+			lastIter[u.ID] = u.Iteration + 1
+			mu.Unlock()
+			time.Sleep(5 * time.Millisecond)
+			return nil
+		})
+
+		rep, err := Run(context.Background(), Plan{
+			Scenario: sc,
+			UserStages: []UserStage{
+				{Target: 4, For: 200 * time.Millisecond},
+				{Target: 4, For: 200 * time.Millisecond},
+				{Target: 1, For: 100 * time.Millisecond},
+			},
+			Duration: 600 * time.Millisecond,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := peak.Load(); got != 4 {
+			t.Errorf("peak concurrency = %d, want 4", got)
+		}
+		if badIter {
+			t.Error("Iteration of a user is not consecutive")
+		}
+		for id := 0; id < 4; id++ {
+			if !ids[id] {
+				t.Errorf("user %d never ran", id)
 			}
 		}
-		mu.Lock()
-		ids[u.ID] = true
-		if u.Iteration != lastIter[u.ID] {
-			badIter = true // iterations of one user must be 0, 1, 2, ... without gaps or resets
+		if len(ids) != 4 {
+			t.Errorf("IDs = %v, want 0..3", ids)
 		}
-		lastIter[u.ID] = u.Iteration + 1
-		mu.Unlock()
-		time.Sleep(5 * time.Millisecond)
-		return nil
-	})
-
-	rep, err := Run(context.Background(), Plan{
-		Scenario: sc,
-		UserStages: []UserStage{
-			{Target: 4, For: 200 * time.Millisecond},
-			{Target: 4, For: 200 * time.Millisecond},
-			{Target: 1, For: 100 * time.Millisecond},
-		},
-		Duration: 600 * time.Millisecond,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := peak.Load(); got != 4 {
-		t.Errorf("peak concurrency = %d, want 4", got)
-	}
-	if badIter {
-		t.Error("Iteration of a user is not consecutive")
-	}
-	for id := 0; id < 4; id++ {
-		if !ids[id] {
-			t.Errorf("user %d never ran", id)
+		if rep.Open {
+			t.Error("UserStages is the closed model, but Report.Open is set")
 		}
-	}
-	if len(ids) != 4 {
-		t.Errorf("IDs = %v, want 0..3", ids)
-	}
-	if rep.Open {
-		t.Error("UserStages is the closed model, but Report.Open is set")
-	}
-	if len(rep.Scenarios) != 1 || rep.Scenarios[0].Iterations.Count == 0 {
-		t.Fatal("no iterations ran")
-	}
-	// After the drop to 1 user (the last 100ms) at most one iteration runs at a time, so with
-	// the 1-second granularity the series only tells the peak: it must reach 4 and never exceed it.
-	peakSeries := 0
-	for _, p := range rep.Series {
-		peakSeries = max(peakSeries, p.Concurrency)
-	}
-	if peakSeries != 4 {
-		t.Errorf("Series peak Concurrency = %d, want 4", peakSeries)
-	}
+		if len(rep.Scenarios) != 1 || rep.Scenarios[0].Iterations.Count == 0 {
+			t.Fatal("no iterations ran")
+		}
+		// After the drop to 1 user (the last 100ms) at most one iteration runs at a time, so with
+		// the 1-second granularity the series only tells the peak: it must reach 4 and never exceed it.
+		peakSeries := 0
+		for _, p := range rep.Series {
+			peakSeries = max(peakSeries, p.Concurrency)
+		}
+		if peakSeries != 4 {
+			t.Errorf("Series peak Concurrency = %d, want 4", peakSeries)
+		}
+	})
 }
 
 // TestRunUserStagesParkedUsersResume checks that a user stopped by a lower target runs again,
 // with the same ID and the next iteration number, when the target rises again.
+//
+// It runs on a fake clock with an iteration of 3ms, a length that never ties with a stage boundary, so the
+// number of iterations of every user is exact and does not depend on the speed of the machine.
 func TestRunUserStagesParkedUsersResume(t *testing.T) {
-	var (
-		mu    sync.Mutex
-		iters = map[int][]int{}
-	)
-	sc := NewScenario("s", func(ctx context.Context, u *User) error {
+	inBubble(t, func(t *testing.T) {
+		var (
+			mu    sync.Mutex
+			iters = map[int][]int{}
+		)
+		sc := NewScenario("s", func(ctx context.Context, u *User) error {
+			mu.Lock()
+			iters[u.ID] = append(iters[u.ID], u.Iteration)
+			mu.Unlock()
+			time.Sleep(3 * time.Millisecond)
+			return nil
+		})
+		_, err := Run(context.Background(), Plan{
+			Scenario: sc,
+			UserStages: []UserStage{
+				{Target: 2, For: 10 * time.Millisecond},  // user 0 starts at 5ms, user 1 at 10ms
+				{Target: 2, For: 100 * time.Millisecond}, // hold until 110ms
+				{Target: 1, For: 10 * time.Millisecond},  // user 1 is parked at 120ms
+				{Target: 1, For: 100 * time.Millisecond}, // hold until 220ms
+				{Target: 2, For: 10 * time.Millisecond},  // user 1 resumes at 230ms
+				{Target: 2, For: 100 * time.Millisecond}, // hold until 330ms
+			},
+			Duration: 330 * time.Millisecond,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
 		mu.Lock()
-		iters[u.ID] = append(iters[u.ID], u.Iteration)
-		mu.Unlock()
-		time.Sleep(2 * time.Millisecond)
-		return nil
-	})
-	_, err := Run(context.Background(), Plan{
-		Scenario: sc,
-		UserStages: []UserStage{
-			{Target: 2, For: 10 * time.Millisecond},
-			{Target: 2, For: 100 * time.Millisecond},
-			{Target: 1, For: 10 * time.Millisecond},
-			{Target: 1, For: 100 * time.Millisecond},
-			{Target: 2, For: 10 * time.Millisecond},
-			{Target: 2, For: 100 * time.Millisecond},
-		},
-		Duration: 330 * time.Millisecond,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	mu.Lock()
-	defer mu.Unlock()
-	for id, seq := range iters {
-		for i, it := range seq {
-			if it != i {
-				t.Fatalf("user %d iterations = %v, want 0, 1, 2, ...", id, seq)
+		defer mu.Unlock()
+		for id, seq := range iters {
+			for i, it := range seq {
+				if it != i {
+					t.Fatalf("user %d iterations = %v, want 0, 1, 2, ...", id, seq)
+				}
 			}
 		}
-	}
-	// User 1 ran before the drop and after the rise, so it ran more than during the first hold alone.
-	if len(iters[1]) < 30 {
-		t.Errorf("user 1 ran %d iterations; it should have resumed after the target rose again", len(iters[1]))
-	}
+		// User 0 starts an iteration every 3ms from 5ms to 329ms: 109. User 1 starts one every 3ms from 10ms
+		// to 118ms (37), is parked at 120ms, and again from 230ms to 329ms (34), carrying on from iteration 37.
+		if got := len(iters[0]); got != 109 {
+			t.Errorf("user 0 ran %d iterations, want 109", got)
+		}
+		if got := len(iters[1]); got != 71 {
+			t.Errorf("user 1 ran %d iterations, want 71 (37 before the drop and 34 after the rise)", got)
+		}
+	})
 }
 
 // TestRunUserStagesFinishesIteration checks that scaling down does not interrupt a running iteration.
 func TestRunUserStagesFinishesIteration(t *testing.T) {
-	var canceled atomic.Int64
-	sc := NewScenario("s", func(ctx context.Context, u *User) error {
-		select {
-		case <-time.After(150 * time.Millisecond):
-		case <-ctx.Done():
-			canceled.Add(1)
+	inBubble(t, func(t *testing.T) {
+		var canceled atomic.Int64
+		sc := NewScenario("s", func(ctx context.Context, u *User) error {
+			select {
+			case <-time.After(150 * time.Millisecond):
+			case <-ctx.Done():
+				canceled.Add(1)
+			}
+			return nil
+		})
+		rep, err := Run(context.Background(), Plan{
+			Scenario: sc,
+			UserStages: []UserStage{
+				{Target: 2, For: 10 * time.Millisecond}, // user 0 starts at 5ms, user 1 at 10ms
+				{Target: 0, For: 10 * time.Millisecond}, // both are told to stop at 15ms and 20ms, while running
+			},
+			Duration: 100 * time.Millisecond,
+			Grace:    time.Second,
+		})
+		if err != nil {
+			t.Fatal(err)
 		}
-		return nil
+		if want := 160 * time.Millisecond; rep.Elapsed != want {
+			t.Errorf("Elapsed = %v, want %v (the last iteration, started at 10ms, ends at 160ms)", rep.Elapsed, want)
+		}
+		if canceled.Load() != 0 {
+			t.Errorf("%d iterations were canceled; they should finish within Grace", canceled.Load())
+		}
 	})
-	_, err := Run(context.Background(), Plan{
-		Scenario: sc,
-		UserStages: []UserStage{
-			{Target: 2, For: 10 * time.Millisecond},
-			{Target: 0, For: 10 * time.Millisecond},
-		},
-		Duration: 100 * time.Millisecond,
-		Grace:    time.Second,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if canceled.Load() != 0 {
-		t.Errorf("%d iterations were canceled; they should finish within Grace", canceled.Load())
-	}
 }
 
 func TestRunUserStagesContextCanceled(t *testing.T) {
-	sc := NewScenario("s", func(ctx context.Context, u *User) error {
-		time.Sleep(time.Millisecond)
-		return nil
+	inBubble(t, func(t *testing.T) {
+		sc := NewScenario("s", func(ctx context.Context, u *User) error {
+			time.Sleep(time.Millisecond)
+			return nil
+		})
+		ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+		defer cancel()
+		rep, err := Run(ctx, Plan{
+			Scenario:   sc,
+			UserStages: []UserStage{{Target: 3, For: time.Hour}},
+			Duration:   time.Hour,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if rep.Elapsed != 50*time.Millisecond {
+			t.Errorf("Elapsed = %v, want 50ms: Run must stop when the context ends", rep.Elapsed)
+		}
 	})
-	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
-	defer cancel()
-	start := time.Now()
-	_, err := Run(ctx, Plan{
-		Scenario:   sc,
-		UserStages: []UserStage{{Target: 3, For: time.Hour}},
-		Duration:   time.Hour,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if d := time.Since(start); d > 2*time.Second {
-		t.Errorf("Run took %v after the context ended", d)
-	}
 }
 
 // TestRunStartUsers checks that the first stage starts with StartUsers users already running,
 // not ramping up from 0: all of them are running at the very beginning.
 func TestRunStartUsers(t *testing.T) {
-	var running, atStart atomic.Int64
-	began := time.Now()
-	sc := NewScenario("s", func(ctx context.Context, u *User) error {
-		n := running.Add(1)
-		defer running.Add(-1)
-		if time.Since(began) < 50*time.Millisecond {
-			for {
-				p := atStart.Load()
-				if n <= p || atStart.CompareAndSwap(p, n) {
-					break
+	inBubble(t, func(t *testing.T) {
+		var running, atStart atomic.Int64
+		began := time.Now()
+		sc := NewScenario("s", func(ctx context.Context, u *User) error {
+			n := running.Add(1)
+			defer running.Add(-1)
+			if time.Since(began) < 50*time.Millisecond {
+				for {
+					p := atStart.Load()
+					if n <= p || atStart.CompareAndSwap(p, n) {
+						break
+					}
 				}
 			}
+			time.Sleep(100 * time.Millisecond)
+			return nil
+		})
+		_, err := Run(context.Background(), Plan{
+			Scenario:   sc,
+			StartUsers: 3,
+			// A hold at 3 users: without StartUsers the first stage would ramp up from 0 over the whole second.
+			UserStages: []UserStage{{Target: 3, For: time.Second}},
+			Duration:   300 * time.Millisecond,
+		})
+		if err != nil {
+			t.Fatal(err)
 		}
-		time.Sleep(100 * time.Millisecond)
-		return nil
+		if got := atStart.Load(); got != 3 {
+			t.Errorf("users running within the first 50ms = %d, want 3", got)
+		}
 	})
-	_, err := Run(context.Background(), Plan{
-		Scenario:   sc,
-		StartUsers: 3,
-		// A hold at 3 users: without StartUsers the first stage would ramp up from 0 over the whole second.
-		UserStages: []UserStage{{Target: 3, For: time.Second}},
-		Duration:   300 * time.Millisecond,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := atStart.Load(); got != 3 {
-		t.Errorf("users running within the first 50ms = %d, want 3", got)
-	}
 }
 
 func TestRepeatUserStages(t *testing.T) {

@@ -6,8 +6,11 @@ import (
 	"fmt"
 	"io"
 	"math/rand/v2"
+	"net"
 	"net/http"
 	"net/http/cookiejar"
+	"net/url"
+	"os"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -82,10 +85,26 @@ type Plan struct {
 	Raw io.Writer
 
 	// If Progress is not nil, one line is written to it every second while the run is in progress,
-	// for example "12s/60s rps=480 p95=38ms err=0.2%" (elapsed/Duration, throughput of the last second,
-	// and p95 and error rate over the run so far). Pass os.Stderr to watch a long run.
-	// The p95 is an approximation within 1% relative error. Nothing is written after Run returns,
-	// and write errors are ignored. It works together with Raw.
+	// for example "12s/60s rps=480 p95=38ms err=0.2% 5xx=31.0% fail=31.2% dropped=7". Pass os.Stderr to
+	// watch a long run. The fields are:
+	//
+	//   - elapsed/Duration, and rps, the throughput of the last second;
+	//   - p95, the 95th percentile of the request latency over the run so far (an approximation within
+	//     1% relative error);
+	//   - err, the share of requests so far that ended in a transport-level error (a timeout, a refused
+	//     connection and so on). It is the same as error_rate in the report. A request that got a response is
+	//     never counted here, whatever its status, so a server that answers every request with 500 or with a
+	//     body that fails an Expect check still shows err=0.0%;
+	//   - 5xx, the share of requests so far that got a 5xx response (http_5xx_rate). A request that ended in
+	//     a transport-level error is not counted here;
+	//   - fail, the share of iterations so far that ended with an error of any kind, such as the error that
+	//     a failed Expect check returns from the scenario (iteration_fail_rate). Only finished iterations are
+	//     counted;
+	//   - dropped, the number of arrivals dropped so far because of MaxUsers (open model, as dropped).
+	//
+	// 5xx, fail and dropped are left out while they are zero. So a line that shows only err=0.0% means no
+	// 5xx response and no failed iteration yet, not only no transport error. Nothing is written after Run
+	// returns, and write errors are ignored. It works together with Raw.
 	Progress io.Writer
 
 	// If MetricsAddr is not empty, Run serves the state of the run so far at http://<MetricsAddr>/metrics in the
@@ -97,7 +116,9 @@ type Plan struct {
 
 	// AbortOn stops the run early when any of its conditions holds, for example
 	// {When: "error_rate>50%", For: 5 * time.Second}. A broken server is then not hit for the whole Duration.
-	// See AbortRule for the syntax and how the conditions are evaluated.
+	// See AbortRule for the syntax and how the conditions are evaluated. A malformed condition, including a value
+	// that can never be meant (NaN, Inf, a negative value, a ratio above 100%: "error_rate>500%" could never fire),
+	// makes Run fail before any load is sent.
 	//
 	// On abort no new iterations are started and the running ones get Grace, counted from the moment of the abort,
 	// to finish (the rest is cancelled and recorded as record.ErrCanceled), exactly as at the end of Duration.
@@ -225,6 +246,29 @@ func (p Plan) maxConcurrency() int {
 	return defaultMaxUsers
 }
 
+// newTransport returns a private transport for a run. It clones http.DefaultTransport so the run keeps
+// its settings (proxy, dialer and so on) but shares no connections with other code. When
+// http.DefaultTransport has been replaced by something that is not an *http.Transport (a tracing or
+// recording wrapper, for example), it falls back to a fresh transport with the standard library's defaults
+// instead of panicking.
+func newTransport() *http.Transport {
+	if t, ok := http.DefaultTransport.(*http.Transport); ok && t != nil {
+		return t.Clone()
+	}
+	return &http.Transport{
+		Proxy: http.ProxyFromEnvironment,
+		DialContext: (&net.Dialer{
+			Timeout:   30 * time.Second,
+			KeepAlive: 30 * time.Second,
+		}).DialContext,
+		ForceAttemptHTTP2:     true,
+		MaxIdleConns:          100,
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+	}
+}
+
 // Run applies load according to the Plan, then aggregates and returns the result.
 //
 // Flow of a run:
@@ -232,23 +276,35 @@ func (p Plan) maxConcurrency() int {
 //  1. validate the Plan, and clone the default Transport so connections are not shared with other code
 //  2. start the health sampler, then run the closed (Users or UserStages) or open (Arrival) loop until Duration ends
 //  3. wait up to Grace for running iterations, then cancel them
-//  4. build the report. Records are folded into histograms as they arrive (percentiles within 1% relative
-//     error, memory independent of the run length). With Plan.Raw each record is also written to it at once,
-//     and the stream is finished (health and final run info) when the run ends
+//  4. build the report. Records are folded into histograms as they arrive (percentiles are approximate, within 1%
+//     relative error, see report.Latency; memory independent of the run length). With Plan.Raw each record is
+//     also written to it at once, and the stream is finished (health and final run info) when the run ends
 //
 // When ctx is done, everything stops at once, including running iterations,
 // and the results so far are returned. Report.Elapsed is the real time until all users have stopped.
 func Run(ctx context.Context, p Plan) (*report.Report, error) {
+	return run(ctx, p, nil)
+}
+
+// run is Run with a seam for tests: a non-nil rt is used instead of the transport that Run prepares, so a
+// test can serve a plan from memory (see fakeServer in the tests) without sockets, which lets it run
+// inside a testing/synctest bubble on a fake clock. Run itself always passes nil.
+func run(ctx context.Context, p Plan, rt http.RoundTripper) (*report.Report, error) {
 	if err := p.validate(); err != nil {
 		return nil, err
 	}
 	timeout := cmpOr(p.Timeout, defaultTimeout)
 	grace := cmpOr(p.Grace, defaultGrace)
 
-	tr := http.DefaultTransport.(*http.Transport).Clone()
-	tr.MaxIdleConns = p.maxConcurrency() * 2
-	tr.MaxIdleConnsPerHost = p.maxConcurrency()
-	defer tr.CloseIdleConnections()
+	tr := rt
+	if tr == nil {
+		t := newTransport()
+		trackDials(t)
+		t.MaxIdleConns = p.maxConcurrency() * 2
+		t.MaxIdleConnsPerHost = p.maxConcurrency()
+		defer t.CloseIdleConnections()
+		tr = t
+	}
 
 	// stopCtx: whether new iterations may be started.
 	// runCtx:  whether running iterations may continue. It is cancelled at Duration + Grace.
@@ -283,6 +339,9 @@ func Run(ctx context.Context, p Plan) (*report.Report, error) {
 		col = record.NewStreamingCollector(agg)
 	} else {
 		col = record.NewStreamingCollector(obs)
+	}
+	if prog != nil {
+		prog.dropped = col.Dropped
 	}
 	var live *report.Aggregator
 	if len(abortRules) > 0 {
@@ -332,6 +391,7 @@ func Run(ctx context.Context, p Plan) (*report.Report, error) {
 	if stopProgress != nil {
 		stopProgress()
 	}
+	r.reportPanic()
 	var abortErr error
 	if abortReason != "" {
 		abortErr = fmt.Errorf("%w: %s", ErrAborted, abortReason)
@@ -362,6 +422,37 @@ type runner struct {
 
 	stopCtx context.Context
 	runCtx  context.Context
+
+	// firstPanic is the first panic of a scenario in the run (see runScenario), set once.
+	panicOnce  sync.Once
+	firstPanic string
+}
+
+// runScenario runs the scenario once. The error is kept in the IterationRecord, so only a panic is
+// noted here: the first one of the run is kept, with its stack, and Run writes it once after the run
+// (see reportPanic). A panic is a bug in the test code, and without this a broken scenario would look
+// like a failing server.
+func (r *runner) runScenario(sc *Scenario, u *User) {
+	var pe *panicError
+	if err := sc.run(u); errors.As(err, &pe) {
+		r.panicOnce.Do(func() {
+			r.firstPanic = fmt.Sprintf("panic: scenario %q panicked (first panic of the run; the others are counted as the error kind \"panic\"): %v\n%s", sc.Name, pe.value, pe.stack)
+		})
+	}
+}
+
+// reportPanic writes the first panic of the run to Plan.Progress, or to os.Stderr when there is none.
+// It is called after the workers have finished and the progress line has stopped, so the writer is not
+// used concurrently.
+func (r *runner) reportPanic() {
+	if r.firstPanic == "" {
+		return
+	}
+	var w io.Writer = os.Stderr
+	if r.p.Progress != nil {
+		w = r.p.Progress
+	}
+	fmt.Fprint(w, r.firstPanic)
 }
 
 // runClosed has Users users repeat the scenario until Duration has passed.
@@ -373,11 +464,8 @@ func (r *runner) runClosed() {
 			defer wg.Done()
 			for iter := 0; r.stopCtx.Err() == nil; iter++ {
 				sc := r.p.pick()
-				u, err := newUser(r.runCtx, r.p, sc, id, iter, r.tr, r.timeout, r.col)
-				if err != nil {
-					return
-				}
-				_ = sc.run(u) // the error is kept in the IterationRecord
+				u := newUser(r.runCtx, r.p, sc, id, iter, r.tr, r.timeout, r.col)
+				r.runScenario(sc, u) // the error is kept in the IterationRecord
 			}
 		}()
 	}
@@ -413,11 +501,8 @@ func (r *runner) runStaged() {
 					continue // check the count and the context again
 				}
 				sc := r.p.pick()
-				u, err := newUser(r.runCtx, r.p, sc, id, iter, r.tr, r.timeout, r.col)
-				if err != nil {
-					return
-				}
-				_ = sc.run(u) // the error is kept in the IterationRecord
+				u := newUser(r.runCtx, r.p, sc, id, iter, r.tr, r.timeout, r.col)
+				r.runScenario(sc, u) // the error is kept in the IterationRecord
 				iter++
 			}
 		}()
@@ -493,31 +578,67 @@ func (r *runner) runOpen() {
 			defer func() { <-slots }()
 			// In the open model, each arrival is treated as a separate user.
 			sc := r.p.pick()
-			u, err := newUser(r.runCtx, r.p, sc, i, 0, r.tr, r.timeout, r.col)
-			if err != nil {
-				return
-			}
-			u.scheduled = at
-			_ = sc.run(u) // the error is kept in the IterationRecord
+			u := newUser(r.runCtx, r.p, sc, i, 0, r.tr, r.timeout, r.col)
+			u.scheduled.set(at)
+			r.runScenario(sc, u) // the error is kept in the IterationRecord
 		}()
 	}
 }
 
+// userBlock holds everything newUser creates, so that one allocation serves the user, its client and its
+// cookie jar instead of one each.
+type userBlock struct {
+	user   User
+	client http.Client
+	jar    lazyJar
+}
+
 // newUser creates the user for one iteration. The cookie jar is new every time.
-func newUser(ctx context.Context, p Plan, sc *Scenario, id, iter int, tr http.RoundTripper, timeout time.Duration, col *record.Collector) (*User, error) {
-	jar, err := cookiejar.New(nil)
-	if err != nil {
-		return nil, err
-	}
-	return &User{
+func newUser(ctx context.Context, p Plan, sc *Scenario, id, iter int, tr http.RoundTripper, timeout time.Duration, col *record.Collector) *User {
+	b := &userBlock{}
+	b.client = http.Client{Transport: tr, Jar: &b.jar, Timeout: timeout}
+	b.user = User{
 		ID:        id,
 		Iteration: iter,
-		Client:    &http.Client{Transport: tr, Jar: jar, Timeout: timeout},
+		Client:    &b.client,
 		ctx:       ctx,
 		scenario:  sc.Name,
 		baseURL:   p.BaseURL,
 		col:       col,
-	}, nil
+	}
+	return &b.user
+}
+
+// lazyJar is a cookie jar that is created on the first Set-Cookie. Most requests of a load test never
+// receive a cookie, and cookiejar.New allocates a jar and its map, so an iteration that sees no cookie
+// does not pay for them. Until then it holds nothing and Cookies returns nil, as an empty jar does.
+// It is safe for concurrent use, as http.CookieJar requires.
+type lazyJar struct {
+	jar atomic.Pointer[cookiejar.Jar]
+}
+
+func (j *lazyJar) Cookies(u *url.URL) []*http.Cookie {
+	if jar := j.jar.Load(); jar != nil {
+		return jar.Cookies(u)
+	}
+	return nil
+}
+
+func (j *lazyJar) SetCookies(u *url.URL, cookies []*http.Cookie) {
+	if len(cookies) == 0 {
+		return
+	}
+	jar := j.jar.Load()
+	if jar == nil {
+		// cookiejar.New only returns an error for invalid options, and there are none.
+		fresh, _ := cookiejar.New(nil)
+		if j.jar.CompareAndSwap(nil, fresh) {
+			jar = fresh
+		} else {
+			jar = j.jar.Load()
+		}
+	}
+	jar.SetCookies(u, cookies)
 }
 
 // cmpOr returns d, or fallback when d is 0. It is like cmp.Or, but only for durations.

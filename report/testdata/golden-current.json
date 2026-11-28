@@ -1,0 +1,803 @@
+{
+  "version": 3,
+  "open": true,
+  "dropped": 3,
+  "started_at": "2026-01-02T03:04:05Z",
+  "elapsed_ns": 2500000000,
+  "rps": 2,
+  "requests": {
+    "count": 5,
+    "latency": {
+      "count": 5,
+      "min_ns": 7000000,
+      "mean_ns": 491800000,
+      "p50_ns": 40000000,
+      "p90_ns": 1500000000,
+      "p95_ns": 1500000000,
+      "p99_ns": 1500000000,
+      "max_ns": 1500000000,
+      "buckets": {
+        "1031": 1,
+        "1057": 1,
+        "789": 1,
+        "815": 1,
+        "876": 1
+      }
+    },
+    "ttfb": {
+      "count": 3,
+      "min_ns": 10000000,
+      "mean_ns": 306666666,
+      "p50_ns": 30000000,
+      "p90_ns": 880000000,
+      "p95_ns": 880000000,
+      "p99_ns": 880000000,
+      "max_ns": 880000000,
+      "buckets": {
+        "1030": 1,
+        "806": 1,
+        "861": 1
+      }
+    },
+    "corrected": {
+      "count": 5,
+      "min_ns": 7000000,
+      "mean_ns": 492200000,
+      "p50_ns": 42000000,
+      "p90_ns": 1500000000,
+      "p95_ns": 1500000000,
+      "p99_ns": 1500000000,
+      "max_ns": 1500000000,
+      "buckets": {
+        "1031": 1,
+        "1057": 1,
+        "789": 1,
+        "815": 1,
+        "878": 1
+      }
+    },
+    "dns": {
+      "count": 1,
+      "min_ns": 3000000,
+      "mean_ns": 3000000,
+      "p50_ns": 3000000,
+      "p90_ns": 3000000,
+      "p95_ns": 3000000,
+      "p99_ns": 3000000,
+      "max_ns": 3000000,
+      "buckets": {
+        "746": 1
+      }
+    },
+    "connect": {
+      "count": 2,
+      "min_ns": 2000000,
+      "mean_ns": 3500000,
+      "p50_ns": 2000000,
+      "p90_ns": 5000000,
+      "p95_ns": 5000000,
+      "p99_ns": 5000000,
+      "max_ns": 5000000,
+      "buckets": {
+        "726": 1,
+        "772": 1
+      }
+    },
+    "tls": {
+      "count": 1,
+      "min_ns": 9000000,
+      "mean_ns": 9000000,
+      "p50_ns": 9000000,
+      "p90_ns": 9000000,
+      "p95_ns": 9000000,
+      "p99_ns": 9000000,
+      "max_ns": 9000000,
+      "buckets": {
+        "801": 1
+      }
+    },
+    "conn_new": 2,
+    "conn_reused": 3,
+    "status": {
+      "2xx": 2,
+      "4xx": 1,
+      "5xx": 1
+    },
+    "errors": {
+      "timeout": 1
+    },
+    "bytes_in": 2158,
+    "bytes_out": 50
+  },
+  "scenarios": [
+    {
+      "name": "shop",
+      "iterations": {
+        "count": 2,
+        "failed": 1,
+        "active": {
+          "count": 2,
+          "min_ns": 150000000,
+          "mean_ns": 875000000,
+          "p50_ns": 150000000,
+          "p90_ns": 1600000000,
+          "p95_ns": 1600000000,
+          "p99_ns": 1600000000,
+          "max_ns": 1600000000,
+          "buckets": {
+            "1060": 1,
+            "942": 1
+          }
+        },
+        "total": {
+          "count": 2,
+          "min_ns": 200000000,
+          "mean_ns": 950000000,
+          "p50_ns": 200000000,
+          "p90_ns": 1700000000,
+          "p95_ns": 1700000000,
+          "p99_ns": 1700000000,
+          "max_ns": 1700000000,
+          "buckets": {
+            "1063": 1,
+            "956": 1
+          }
+        },
+        "errors": {
+          "timeout": 1
+        }
+      },
+      "steps": [
+        {
+          "name": "login",
+          "count": 1,
+          "failed": 0,
+          "duration": {
+            "count": 1,
+            "min_ns": 45000000,
+            "mean_ns": 45000000,
+            "p50_ns": 45000000,
+            "p90_ns": 45000000,
+            "p95_ns": 45000000,
+            "p99_ns": 45000000,
+            "max_ns": 45000000,
+            "buckets": {
+              "882": 1
+            }
+          },
+          "errors": {},
+          "requests": {
+            "count": 1,
+            "latency": {
+              "count": 1,
+              "min_ns": 40000000,
+              "mean_ns": 40000000,
+              "p50_ns": 40000000,
+              "p90_ns": 40000000,
+              "p95_ns": 40000000,
+              "p99_ns": 40000000,
+              "max_ns": 40000000,
+              "buckets": {
+                "876": 1
+              }
+            },
+            "ttfb": {
+              "count": 1,
+              "min_ns": 30000000,
+              "mean_ns": 30000000,
+              "p50_ns": 30000000,
+              "p90_ns": 30000000,
+              "p95_ns": 30000000,
+              "p99_ns": 30000000,
+              "max_ns": 30000000,
+              "buckets": {
+                "861": 1
+              }
+            },
+            "corrected": {
+              "count": 1,
+              "min_ns": 42000000,
+              "mean_ns": 42000000,
+              "p50_ns": 42000000,
+              "p90_ns": 42000000,
+              "p95_ns": 42000000,
+              "p99_ns": 42000000,
+              "max_ns": 42000000,
+              "buckets": {
+                "878": 1
+              }
+            },
+            "dns": {
+              "count": 1,
+              "min_ns": 3000000,
+              "mean_ns": 3000000,
+              "p50_ns": 3000000,
+              "p90_ns": 3000000,
+              "p95_ns": 3000000,
+              "p99_ns": 3000000,
+              "max_ns": 3000000,
+              "buckets": {
+                "746": 1
+              }
+            },
+            "connect": {
+              "count": 1,
+              "min_ns": 5000000,
+              "mean_ns": 5000000,
+              "p50_ns": 5000000,
+              "p90_ns": 5000000,
+              "p95_ns": 5000000,
+              "p99_ns": 5000000,
+              "max_ns": 5000000,
+              "buckets": {
+                "772": 1
+              }
+            },
+            "tls": {
+              "count": 1,
+              "min_ns": 9000000,
+              "mean_ns": 9000000,
+              "p50_ns": 9000000,
+              "p90_ns": 9000000,
+              "p95_ns": 9000000,
+              "p99_ns": 9000000,
+              "max_ns": 9000000,
+              "buckets": {
+                "801": 1
+              }
+            },
+            "conn_new": 1,
+            "conn_reused": 0,
+            "status": {
+              "2xx": 1
+            },
+            "errors": {},
+            "bytes_in": 100,
+            "bytes_out": 20
+          }
+        },
+        {
+          "name": "list",
+          "count": 2,
+          "failed": 1,
+          "duration": {
+            "count": 2,
+            "min_ns": 14000000,
+            "mean_ns": 459500000,
+            "p50_ns": 14000000,
+            "p90_ns": 905000000,
+            "p95_ns": 905000000,
+            "p99_ns": 905000000,
+            "max_ns": 905000000,
+            "buckets": {
+              "1032": 1,
+              "823": 1
+            }
+          },
+          "errors": {
+            "expect_mismatch": 1
+          },
+          "requests": {
+            "count": 2,
+            "latency": {
+              "count": 2,
+              "min_ns": 12000000,
+              "mean_ns": 456000000,
+              "p50_ns": 12000000,
+              "p90_ns": 900000000,
+              "p95_ns": 900000000,
+              "p99_ns": 900000000,
+              "max_ns": 900000000,
+              "buckets": {
+                "1031": 1,
+                "815": 1
+              }
+            },
+            "ttfb": {
+              "count": 2,
+              "min_ns": 10000000,
+              "mean_ns": 445000000,
+              "p50_ns": 10000000,
+              "p90_ns": 880000000,
+              "p95_ns": 880000000,
+              "p99_ns": 880000000,
+              "max_ns": 880000000,
+              "buckets": {
+                "1030": 1,
+                "806": 1
+              }
+            },
+            "corrected": {
+              "count": 2,
+              "min_ns": 12000000,
+              "mean_ns": 456000000,
+              "p50_ns": 12000000,
+              "p90_ns": 900000000,
+              "p95_ns": 900000000,
+              "p99_ns": 900000000,
+              "max_ns": 900000000,
+              "buckets": {
+                "1031": 1,
+                "815": 1
+              }
+            },
+            "dns": {
+              "count": 0,
+              "min_ns": 0,
+              "mean_ns": 0,
+              "p50_ns": 0,
+              "p90_ns": 0,
+              "p95_ns": 0,
+              "p99_ns": 0,
+              "max_ns": 0,
+              "buckets": {}
+            },
+            "connect": {
+              "count": 0,
+              "min_ns": 0,
+              "mean_ns": 0,
+              "p50_ns": 0,
+              "p90_ns": 0,
+              "p95_ns": 0,
+              "p99_ns": 0,
+              "max_ns": 0,
+              "buckets": {}
+            },
+            "tls": {
+              "count": 0,
+              "min_ns": 0,
+              "mean_ns": 0,
+              "p50_ns": 0,
+              "p90_ns": 0,
+              "p95_ns": 0,
+              "p99_ns": 0,
+              "max_ns": 0,
+              "buckets": {}
+            },
+            "conn_new": 0,
+            "conn_reused": 2,
+            "status": {
+              "2xx": 1,
+              "5xx": 1
+            },
+            "errors": {},
+            "bytes_in": 2058,
+            "bytes_out": 0
+          }
+        },
+        {
+          "name": "order",
+          "count": 1,
+          "failed": 1,
+          "duration": {
+            "count": 1,
+            "min_ns": 1500000000,
+            "mean_ns": 1500000000,
+            "p50_ns": 1500000000,
+            "p90_ns": 1500000000,
+            "p95_ns": 1500000000,
+            "p99_ns": 1500000000,
+            "max_ns": 1500000000,
+            "buckets": {
+              "1057": 1
+            }
+          },
+          "errors": {
+            "timeout": 1
+          },
+          "requests": {
+            "count": 1,
+            "latency": {
+              "count": 1,
+              "min_ns": 1500000000,
+              "mean_ns": 1500000000,
+              "p50_ns": 1500000000,
+              "p90_ns": 1500000000,
+              "p95_ns": 1500000000,
+              "p99_ns": 1500000000,
+              "max_ns": 1500000000,
+              "buckets": {
+                "1057": 1
+              }
+            },
+            "ttfb": {
+              "count": 0,
+              "min_ns": 0,
+              "mean_ns": 0,
+              "p50_ns": 0,
+              "p90_ns": 0,
+              "p95_ns": 0,
+              "p99_ns": 0,
+              "max_ns": 0,
+              "buckets": {}
+            },
+            "corrected": {
+              "count": 1,
+              "min_ns": 1500000000,
+              "mean_ns": 1500000000,
+              "p50_ns": 1500000000,
+              "p90_ns": 1500000000,
+              "p95_ns": 1500000000,
+              "p99_ns": 1500000000,
+              "max_ns": 1500000000,
+              "buckets": {
+                "1057": 1
+              }
+            },
+            "dns": {
+              "count": 0,
+              "min_ns": 0,
+              "mean_ns": 0,
+              "p50_ns": 0,
+              "p90_ns": 0,
+              "p95_ns": 0,
+              "p99_ns": 0,
+              "max_ns": 0,
+              "buckets": {}
+            },
+            "connect": {
+              "count": 0,
+              "min_ns": 0,
+              "mean_ns": 0,
+              "p50_ns": 0,
+              "p90_ns": 0,
+              "p95_ns": 0,
+              "p99_ns": 0,
+              "max_ns": 0,
+              "buckets": {}
+            },
+            "tls": {
+              "count": 0,
+              "min_ns": 0,
+              "mean_ns": 0,
+              "p50_ns": 0,
+              "p90_ns": 0,
+              "p95_ns": 0,
+              "p99_ns": 0,
+              "max_ns": 0,
+              "buckets": {}
+            },
+            "conn_new": 0,
+            "conn_reused": 1,
+            "status": {},
+            "errors": {
+              "timeout": 1
+            },
+            "bytes_in": 0,
+            "bytes_out": 30
+          }
+        }
+      ]
+    },
+    {
+      "name": "admin",
+      "iterations": {
+        "count": 1,
+        "failed": 1,
+        "active": {
+          "count": 1,
+          "min_ns": 10000000,
+          "mean_ns": 10000000,
+          "p50_ns": 10000000,
+          "p90_ns": 10000000,
+          "p95_ns": 10000000,
+          "p99_ns": 10000000,
+          "max_ns": 10000000,
+          "buckets": {
+            "806": 1
+          }
+        },
+        "total": {
+          "count": 1,
+          "min_ns": 10000000,
+          "mean_ns": 10000000,
+          "p50_ns": 10000000,
+          "p90_ns": 10000000,
+          "p95_ns": 10000000,
+          "p99_ns": 10000000,
+          "max_ns": 10000000,
+          "buckets": {
+            "806": 1
+          }
+        },
+        "errors": {
+          "expect_mismatch": 1
+        }
+      },
+      "steps": [
+        {
+          "name": "stats",
+          "count": 1,
+          "failed": 1,
+          "duration": {
+            "count": 1,
+            "min_ns": 8000000,
+            "mean_ns": 8000000,
+            "p50_ns": 8000000,
+            "p90_ns": 8000000,
+            "p95_ns": 8000000,
+            "p99_ns": 8000000,
+            "max_ns": 8000000,
+            "buckets": {
+              "795": 1
+            }
+          },
+          "errors": {
+            "expect_mismatch": 1
+          },
+          "requests": {
+            "count": 1,
+            "latency": {
+              "count": 1,
+              "min_ns": 7000000,
+              "mean_ns": 7000000,
+              "p50_ns": 7000000,
+              "p90_ns": 7000000,
+              "p95_ns": 7000000,
+              "p99_ns": 7000000,
+              "max_ns": 7000000,
+              "buckets": {
+                "789": 1
+              }
+            },
+            "ttfb": {
+              "count": 0,
+              "min_ns": 0,
+              "mean_ns": 0,
+              "p50_ns": 0,
+              "p90_ns": 0,
+              "p95_ns": 0,
+              "p99_ns": 0,
+              "max_ns": 0,
+              "buckets": {}
+            },
+            "corrected": {
+              "count": 1,
+              "min_ns": 7000000,
+              "mean_ns": 7000000,
+              "p50_ns": 7000000,
+              "p90_ns": 7000000,
+              "p95_ns": 7000000,
+              "p99_ns": 7000000,
+              "max_ns": 7000000,
+              "buckets": {
+                "789": 1
+              }
+            },
+            "dns": {
+              "count": 0,
+              "min_ns": 0,
+              "mean_ns": 0,
+              "p50_ns": 0,
+              "p90_ns": 0,
+              "p95_ns": 0,
+              "p99_ns": 0,
+              "max_ns": 0,
+              "buckets": {}
+            },
+            "connect": {
+              "count": 1,
+              "min_ns": 2000000,
+              "mean_ns": 2000000,
+              "p50_ns": 2000000,
+              "p90_ns": 2000000,
+              "p95_ns": 2000000,
+              "p99_ns": 2000000,
+              "max_ns": 2000000,
+              "buckets": {
+                "726": 1
+              }
+            },
+            "tls": {
+              "count": 0,
+              "min_ns": 0,
+              "mean_ns": 0,
+              "p50_ns": 0,
+              "p90_ns": 0,
+              "p95_ns": 0,
+              "p99_ns": 0,
+              "max_ns": 0,
+              "buckets": {}
+            },
+            "conn_new": 1,
+            "conn_reused": 0,
+            "status": {
+              "4xx": 1
+            },
+            "errors": {},
+            "bytes_in": 0,
+            "bytes_out": 0
+          }
+        }
+      ]
+    }
+  ],
+  "series": [
+    {
+      "second": 0,
+      "requests": 2,
+      "errors": 0,
+      "http_5xx": 0,
+      "conn_new": 1,
+      "conn_reused": 1,
+      "latency": {
+        "count": 2,
+        "min_ns": 12000000,
+        "mean_ns": 26000000,
+        "p50_ns": 12000000,
+        "p90_ns": 40000000,
+        "p95_ns": 40000000,
+        "p99_ns": 40000000,
+        "max_ns": 40000000,
+        "buckets": {
+          "815": 1,
+          "876": 1
+        }
+      },
+      "dns": {
+        "count": 1,
+        "min_ns": 3000000,
+        "mean_ns": 3000000,
+        "p50_ns": 3000000,
+        "p90_ns": 3000000,
+        "p95_ns": 3000000,
+        "p99_ns": 3000000,
+        "max_ns": 3000000,
+        "buckets": {
+          "746": 1
+        }
+      },
+      "connect": {
+        "count": 1,
+        "min_ns": 5000000,
+        "mean_ns": 5000000,
+        "p50_ns": 5000000,
+        "p90_ns": 5000000,
+        "p95_ns": 5000000,
+        "p99_ns": 5000000,
+        "max_ns": 5000000,
+        "buckets": {
+          "772": 1
+        }
+      },
+      "tls": {
+        "count": 1,
+        "min_ns": 9000000,
+        "mean_ns": 9000000,
+        "p50_ns": 9000000,
+        "p90_ns": 9000000,
+        "p95_ns": 9000000,
+        "p99_ns": 9000000,
+        "max_ns": 9000000,
+        "buckets": {
+          "801": 1
+        }
+      },
+      "concurrency": 1
+    },
+    {
+      "second": 1,
+      "requests": 3,
+      "errors": 1,
+      "http_5xx": 1,
+      "conn_new": 1,
+      "conn_reused": 2,
+      "latency": {
+        "count": 3,
+        "min_ns": 7000000,
+        "mean_ns": 802333333,
+        "p50_ns": 900000000,
+        "p90_ns": 1500000000,
+        "p95_ns": 1500000000,
+        "p99_ns": 1500000000,
+        "max_ns": 1500000000,
+        "buckets": {
+          "1031": 1,
+          "1057": 1,
+          "789": 1
+        }
+      },
+      "dns": {
+        "count": 0,
+        "min_ns": 0,
+        "mean_ns": 0,
+        "p50_ns": 0,
+        "p90_ns": 0,
+        "p95_ns": 0,
+        "p99_ns": 0,
+        "max_ns": 0,
+        "buckets": {}
+      },
+      "connect": {
+        "count": 1,
+        "min_ns": 2000000,
+        "mean_ns": 2000000,
+        "p50_ns": 2000000,
+        "p90_ns": 2000000,
+        "p95_ns": 2000000,
+        "p99_ns": 2000000,
+        "max_ns": 2000000,
+        "buckets": {
+          "726": 1
+        }
+      },
+      "tls": {
+        "count": 0,
+        "min_ns": 0,
+        "mean_ns": 0,
+        "p50_ns": 0,
+        "p90_ns": 0,
+        "p95_ns": 0,
+        "p99_ns": 0,
+        "max_ns": 0,
+        "buckets": {}
+      },
+      "concurrency": 2
+    },
+    {
+      "second": 2,
+      "requests": 0,
+      "errors": 0,
+      "http_5xx": 0,
+      "conn_new": 0,
+      "conn_reused": 0,
+      "latency": {
+        "count": 0,
+        "min_ns": 0,
+        "mean_ns": 0,
+        "p50_ns": 0,
+        "p90_ns": 0,
+        "p95_ns": 0,
+        "p99_ns": 0,
+        "max_ns": 0,
+        "buckets": {}
+      },
+      "dns": {
+        "count": 0,
+        "min_ns": 0,
+        "mean_ns": 0,
+        "p50_ns": 0,
+        "p90_ns": 0,
+        "p95_ns": 0,
+        "p99_ns": 0,
+        "max_ns": 0,
+        "buckets": {}
+      },
+      "connect": {
+        "count": 0,
+        "min_ns": 0,
+        "mean_ns": 0,
+        "p50_ns": 0,
+        "p90_ns": 0,
+        "p95_ns": 0,
+        "p99_ns": 0,
+        "max_ns": 0,
+        "buckets": {}
+      },
+      "tls": {
+        "count": 0,
+        "min_ns": 0,
+        "mean_ns": 0,
+        "p50_ns": 0,
+        "p90_ns": 0,
+        "p95_ns": 0,
+        "p99_ns": 0,
+        "max_ns": 0,
+        "buckets": {}
+      },
+      "concurrency": 1
+    }
+  ],
+  "health": [
+    {
+      "second": 0,
+      "goroutines": 12,
+      "cpu": 0.25
+    },
+    {
+      "second": 1,
+      "goroutines": 31,
+      "cpu": -1
+    }
+  ]
+}

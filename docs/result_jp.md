@@ -37,7 +37,7 @@ Report
 ├─ Scenarios[] ScenarioReport
 │  ├─ Name
 │  ├─ Iterations  IterationStats（Active = Think 除く / Total = Think 含む）
-│  └─ Steps[]     StepStats（最初に実行された順）
+│  └─ Steps[]     StepStats（最初に実行された順）: Count、Failed、Duration、Errors（ステップが失敗した理由。`ErrKind` ごと）
 │     └─ Requests RequestStats
 ├─ Series[]    SeriesPoint: StartedAt からの 1 秒ごとの集計（「レポートの結合」を参照）
 └─ Health[]    record.HealthPoint: 負荷生成側の 1 秒ごとの健全性（`Run` で実行したときだけ）
@@ -49,7 +49,7 @@ Report
 |---|---|
 | `Count` | 件数 |
 | `Min` / `Mean` / `Max` | 最小 / 平均 / 最大 |
-| `P50` `P90` `P95` `P99` | パーセンタイル（nearest-rank 法） |
+| `P50` `P90` `P95` `P99` | パーセンタイル。`BuildReport` / `FromRaw` は正確（nearest-rank 法。実際に観測された値）。`Run` と `MergeReports` は近似（相対誤差 1% 以内で `[Min, Max]` に収める。観測された値とは限らない）。下の「補足」を参照 |
 
 ### `RequestStats`
 
@@ -59,11 +59,11 @@ Report
 | `Latency` | レイテンシ。通信エラーのものも含む |
 | `TTFB` | 応答を受け取れたものだけ |
 | `DNS` / `Connect` / `TLS` | 接続を張る各区間の時間。その区間が実際に起きたリクエストだけ |
-| `NewConns` / `ReusedConns` | 接続を新しく張った / 再利用したリクエストの数 |
-| `Corrected` | 予定開始時刻からの時間（Coordinated Omission 補正後）。クローズドモデル（`Users` / `UserStages`）では `Latency` と同じ |
+| `NewConns` / `ReusedConns` | `NewConns` は開いた接続の数（各接続を最初に使ったリクエストで数える。つまり 1 回以上リクエストを運んだ接続の数）、`ReusedConns` は先行するリクエストがすでに使った接続を使ったリクエストの数。接続を張ったが一度もリクエストを運ばなかった接続はどちらにも数えないので、サーバーが受け付けた接続数は `NewConns` より多いことがある（実行終了時にまだアイドルだった接続、失敗した dial、HTTP/2 で `net/http` が開始時に余分に張って使わずに閉じる接続）。HTTP/2 は 1 本の接続で多数のリクエストをさばくので `NewConns` は小さくなる |
+| `Corrected` | 予定開始時刻からの時間（Coordinated Omission 補正後）。クローズドモデル（`Users` / `UserStages`）では `Latency` と同じ。オープンモデルでは、何もキューに入っていなくても、負荷生成側が加える小さな一定量だけ `Latency` より大きい。[`tuning_jp.md`](tuning_jp.md#corrected-と-latency) を参照 |
 | `Status` | `"2xx"` などステータスクラスごとの件数 |
-| `Errors` | 通信レベルのエラーの内訳（`ErrKind` ごと）。`Expect*` の失敗は入らない |
-| `BytesIn` / `BytesOut` | ボディのバイト数（ヘッダーは含まない） |
+| `Errors` | 通信レベルのエラーの内訳（`ErrKind` ごと）。`Expect*` の失敗は入らない（ステップの `Errors` に入る） |
+| `BytesIn` / `BytesOut` | ボディのバイト数（ヘッダーは含まない）。`BytesIn` は展開後のレスポンスボディ、`BytesOut` はリクエストボディで、どちらもワイヤ上のトラフィックではない。[`tuning_jp.md`](tuning_jp.md#bytes_in-と-bytes_out) を参照 |
 
 ### `ErrKind`（失敗の種類）
 
@@ -76,11 +76,16 @@ Report
 | `tls` | TLS の失敗 |
 | `canceled` | `Grace` 超過などによる中断 |
 | `expect_mismatch` | `Expect*`（`ExpectStatus`、`ExpectJSON` など）の不一致。ステップとイテレーションにだけ現れる |
+| `panic` | シナリオ関数が panic した（テストコードのバグで、対象の性質ではない）。ステップとイテレーションにだけ現れる |
 | `other` | 上記以外 |
 
-HTTP 4xx/5xx は `ErrKind` ではなくステータス（`Status`）として記録される。
+HTTP 4xx/5xx は `ErrKind` ではなくステータス（`Status`）として記録される。両方を持つリクエストもある。ステータス行を受け取ったあとでボディの読み取りに失敗した場合（タイムアウトなど）、記録は `Code` と `ErrKind` の両方を持つ。
 
-どこに記録されるか: 通信レベルの種類（`timeout`、`connection_refused`、`dns`、`tls`、`canceled`、`other`）はリクエストに記録され、エラーがステップやイテレーションから返されたときは、それらにも記録される。`expect_mismatch` は、応答が届いたあとの `Expect*` の呼び出しで決まるので、リクエストには**記録されない**。ステップの `Errors`（シナリオがそのエラーを返したときはイテレーションの `Errors`）に現れ、ステップを失敗（`Failed`）にする。`error_rate`（5 章）に映らないのはこのため。
+どこに記録されるか: 通信レベルの種類（`timeout`、`connection_refused`、`dns`、`tls`、`canceled`、`other`）はリクエストに記録され、エラーがステップやイテレーションから返されたときは、それらにも記録される。`panic` は、実行中だったステップとイテレーションに記録される。ステップは panic までの時間つきで失敗（`Failed`）として一覧に載り、panic 前に送ったリクエストもそのステップに残り、実行は他のユーザーで続く。実行中の最初の panic は、実行が終わったあとにスタックつきで一度だけ `Plan.Progress`（`Progress` が nil のときは標準エラー）に書かれ、以降のものは数えるだけ。`expect_mismatch` は、応答が届いたあとの `Expect*` の呼び出しで決まるので、リクエストには**記録されない**。ステップの `Errors`（シナリオがそのエラーを返したときはイテレーションの `Errors`）に現れ、ステップを失敗（`Failed`）にする。`error_rate`（5 章）に映らないのはこのため。
+
+ステップの `Errors` は、失敗した実行 1 回につき `ErrKind` 1 つの理由で、合計は `Failed` と一致する。
+
+理由の表示先: テキストレポートは「steps (duration)」の `failures` 列（`expect_mismatch=500`）に、HTML レポートはステップの表の同じ列に出す。「steps (requests)」の `errors` 列は、リクエストの通信レベルのエラーだけを数えるので、どちらも `net errors` という名前にしてある。チェックが失敗したステップは、`fail` が 0 より大きく、`failures` に `expect_mismatch` が出て、`net errors` は `-` になる。`jotaro mcp` の `summarize_result` は同じ内訳を各ステップの `errors` として返し、`failed_checks` 警告には種類を添える。失敗のないステップの `failures` は `-`。
 
 ### 補足
 
@@ -92,6 +97,7 @@ HTTP 4xx/5xx は `ErrKind` ではなくステータス（`Status`）として記
 
 `Report.WriteJSON(w io.Writer) error` で、集計結果を JSON として書き出せる（`report/json.go`）。
 
+<!-- doccheck: before var rep *report.Report -->
 ```go
 f, _ := os.Create("result.json")
 defer f.Close()
@@ -113,6 +119,7 @@ if err := rep.WriteJSON(f); err != nil {
 
 `Report.WriteHTML(w io.Writer) error` で、外部に依存しない 1 枚の HTML を書き出せる（`report/html.go` / `report/report.html.tmpl`）。
 
+<!-- doccheck: before var rep *report.Report -->
 ```go
 f, _ := os.Create("report.html")
 defer f.Close()
@@ -123,7 +130,8 @@ if err := rep.WriteHTML(f); err != nil {
 
 - `html/template` で生成するので、シナリオ名やステップ名は自動でエスケープされる。
 - CSS は埋め込み、JS・グラフのライブラリ・外部リソースは使わない（グラフはインラインの SVG）。ライト／ダークは OS の設定に従う。
-- 内容: サマリー（負荷のモデル `closed` / `open` を含む）、ステータス・エラーの内訳、レイテンシ（p50〜max の棒）、`corrected`（オープンモデル、つまり `Arrival` のときのみ）、TTFB、シナリオ別のイテレーション時間とステップ別の表。レポートに時系列があるときは、続けて 1 秒ごとのタイムラインとして、インラインの SVG 折れ線グラフを出す: リクエスト数・エラー・5xx、レイテンシ p50 / p95 / p99、同時実行数、接続、DNS / connect / TLS の時間、負荷生成側のゴルーチン数と CPU。
+- ページは `<html lang="en">` を宣言する（表示は英語）。開始時刻（UTC）をヘッダーと `<title>` に出すので、複数のレポートを見分けられる。開始時刻が不明なときは、どちらにも出さない。
+- 内容: サマリー（負荷のモデル `closed` / `open` を含む）、ステータス・エラーの内訳、レイテンシ（p50〜max の棒）、`corrected`（オープンモデル、つまり `Arrival` のときのみ）、TTFB、シナリオ別のイテレーション時間とステップ別の表（`failures` 列に各ステップの失敗理由）。レポートに時系列があるときは、続けて 1 秒ごとのタイムラインとして、インラインの SVG 折れ線グラフを出す: リクエスト数・エラー・5xx、レイテンシ p50 / p95 / p99、同時実行数、接続、DNS / connect / TLS の時間、負荷生成側のゴルーチン数と CPU。
 - 表示用の値は `Print` と同じ書式（`fmtDur`）。ナノ秒の無損失な値は JSON を使う。
 - サンプル: `go run ./examples/checkout -format html -o report.html`（`-rate 30` で `Rate` モデル）。
 
@@ -136,7 +144,7 @@ jotaro merge -o merged.json a.json b.json c.json
 jotaro merge -format html -o report.html a.json b.json
 ```
 
-ライブラリでは `report.MergeReports(reps ...*report.Report) (*report.Report, error)`（`report/merge.go`）。`-format` の既定は `json`（結合結果を再び入力にできる）。
+ライブラリでは `report.MergeReports(reps ...*report.Report) (*report.Report, error)`（`report/merge.go`）。`-format` の既定は `json`（結合結果を再び入力にできる）。負荷の分け方、負荷生成側を同時に始める方法、結合した数字の読み方は [`multi-machine_jp.md`](multi-machine_jp.md) にある。
 
 | 項目 | 結合の仕方 |
 |---|---|
@@ -149,12 +157,12 @@ jotaro merge -format html -o report.html a.json b.json
 
 - **ヒストグラム**: 各 `latency` に対数バケット（DDSketch 方式、相対誤差 1%）を持たせた（JSON の `buckets`: バケット番号 → 件数）。バケットは足し算で結合できるので、何台分でも順序に関係なく同じ結果になる。全記録から作ったレポート（`BuildReport`、`FromRaw`）の `P50`〜`P99` は nearest-rank の正確な値。逐次集計したもの（`Run`。`Plan.Raw` の有無は問わない）と、結合したものは近似になる。
 - **サイズ**: バケットの数は分布の広がりで決まる（件数には比例しない）。10 万件・裾の重い分布で 1 つの `latency` あたり数百バケット。
-- **接続の内訳 (`requests` と各ステップの `requests`、version 3)**: `dns` / `connect`（TCP）/ `tls` は、その区間が実際に起きたリクエストだけのレイテンシ分布（`buckets` つき）。接続を再利用したリクエストや、http の TLS は含まない。`conn_new` / `conn_reused` は接続を新しく張った / 再利用したリクエストの数で、再利用率は `conn_reused / (conn_new + conn_reused)`。接続を得る前に失敗したリクエストはどちらにも数えない。version 1・2 の JSON には無い（0・空として読める）。
-- **時系列 (`series`、version 3)**: `started_at` からの 1 秒ごとの配列。要素は `second` / `requests` / `errors`（通信エラー。HTTP 4xx/5xx は含まない）/ `http_5xx`（HTTP 5xx の数。`errors` とは重ならない。無ければ 0）/ `latency`（`buckets` つき）/ `conn_new` / `conn_reused`（その秒に開始したリクエストのうち、接続を新しく張った / 再利用した数）/ `dns` / `connect` / `tls`（その区間が起きたリクエストだけの分布。`buckets` つき。`requests` の同名のフィールドと同じ範囲）/ `concurrency`（その秒の実行中イテレーション数の最大）。`started_at` が無いと空。結合では `started_at` の差だけ秒をずらして足し、`concurrency` は合計（上限の見積り）。version 1・2 の JSON には無い。`conn_new` 以降は version 3 に後から足した項目で、無い JSON は 0・空として読む（互換を壊さないので版は上げていない）。
+- **接続の内訳 (`requests` と各ステップの `requests`、version 3)**: `dns` / `connect`（TCP）/ `tls` は、その区間が実際に起きたリクエストだけのレイテンシ分布（`buckets` つき）。接続を再利用したリクエストや、http の TLS は含まない。`conn_new` は開いた接続の数（各接続を最初に使ったリクエストで数える）、`conn_reused` は先行するリクエストがすでに使った接続を使ったリクエストの数で、再利用率は `conn_reused / (conn_new + conn_reused)`。`net/http` 自身の「再利用」フラグは使わない。そのフラグは、あるリクエストのために張ったがアイドルプールに入り、別のリクエストが最初に使った接続も再利用と数えるため（TLS はハンドシェイクが遅いのでよく起きる）、`conn_new` が実際に開いた接続数より少なく出ていた。接続を張ったが一度もリクエストを運ばなかった接続（実行終了時にまだアイドルだったもの、HTTP/2 で `net/http` が開始時に余分に張って使わずに閉じるもの）はどちらにも数えないので、サーバーが受け付けた接続数は `conn_new` より多いことがある。接続の失敗はエラーとして現れる。dial した接続をすべて数えることは [#184](https://github.com/RIRUa/jotaro/issues/184) で扱う。`dns` / `connect` / `tls` の分布は接続を張り始めたリクエストのもので、`conn_new` に数えたリクエストと別のことがある。接続を得る前に失敗したリクエストはどちらにも数えない。version 1・2 の JSON には無い（0・空として読める）。
+- **時系列 (`series`、version 3)**: `started_at` からの 1 秒ごとの配列。要素は `second` / `requests` / `errors`（通信エラー。HTTP 4xx/5xx は含まない）/ `http_5xx`（HTTP 5xx の数。ステータスが 5xx で、そのあとボディの読み取りに失敗したリクエストは `errors` にも数えられるので、重なることがある。無ければ 0）/ `latency`（`buckets` つき）/ `conn_new` / `conn_reused`（その秒に開始したリクエストのうち、最初に接続を使った数 / すでに使われた接続を使った数。上記参照）/ `dns` / `connect` / `tls`（その区間が起きたリクエストだけの分布。`buckets` つき。`requests` の同名のフィールドと同じ範囲）/ `concurrency`（その秒の実行中イテレーション数の最大）。`started_at` が無いと空。結合では `started_at` の差だけ秒をずらして足し、`concurrency` は合計（上限の見積り）。version 1・2 の JSON には無い。`conn_new` 以降は version 3 に後から足した項目で、無い JSON は 0・空として読む（互換を壊さないので版は上げていない）。
 - **負荷生成側の健全性 (`health`、version 3)**: `jotaro.Run` を動かしているプロセスの、`started_at` からの 1 秒ごとの配列。要素は `second` / `goroutines`（その秒の終わりのゴルーチン数）/ `cpu`（その秒に使った CPU 時間の割合。GOMAXPROCS 個の CPU 全体に対して 0〜1。取得できない環境では -1）。`BuildReport` だけで作った結果や、古い JSON には無い（空）。結合では秒をずらして重ね、`goroutines` は合計、`cpu` は最大（負荷生成側が複数あるときは、一番詰まっているものを見る）。
   - CPU は `getrusage`（Unix 系）の CPU 時間から求める。Windows など取得できない環境では -1 で、グラフや平均には含めない。`runtime/metrics` の `/cpu/classes/*` は GC のたびにしか更新されないため使っていない。
   - 負荷をかける対象を同じプロセスで動かしている（`examples/checkout` など）と、その分も含む。
-  - CPU の最大が 90% 以上のとき、テキストと HTML のサマリーに「負荷生成側が詰まって測定値が悪く出ている疑い」の警告を出す。
+  - CPU の最大が 90% 以上のとき、テキストと HTML のサマリーに「負荷生成側が詰まって測定値が悪く出ている疑い」の警告を出す。対処は [`tuning_jp.md`](tuning_jp.md#cpu-と-gomaxprocs-とコンテナ) にある。
 - **version 1 の JSON との互換**: 読める。`buckets` と `started_at` が無いので、それが混じる結合では次のフォールバックになる。
   - `P50`〜`P99` は件数で重み付けした平均（誤差が大きい）。
   - `Elapsed` は最大値（同時に実行した前提）。
@@ -183,7 +191,7 @@ jotaro check -raw -t 'p95<200ms' raw.jsonl                    # 直接判定も�
 - `request` は `Record` と同じ内容: `scenario` / `step` / `user_id` / `iteration` / `method` / `url` / `code` / `err` / `scheduled` / `start` / `latency_ns` / `conn` / `dns_ns` / `connect_ns` / `tls_ns` / `ttfb_ns` / `bytes_out` / `bytes_in`。`step` は `StepRecord`、`iteration` は `IterationRecord`、`health` は `HealthPoint` と同じ。
 - `ReadRaw` は知らない `type` の行を読み飛ばす（新しい版が行を足しても、古い読み手が壊れない）。`meta` が無くても読める（実行時間は記録から求める）。
 - 集計済みの JSON（`ReadJSON`）に生データを渡すと、先頭の `meta` 行が `version: 1` の JSON として読めてしまう。`ReadJSON` は JSON の後ろに別のデータが続くとエラーにするので、`-raw` の付け忘れは「生データなら `-raw` を使う」というエラーになる。逆に、集計済みの結果を `-raw` や `export` に渡した場合もエラーになる。
-- `Run` は生データを実行中に少しずつ書く（`record.RawWriter`）。記録は届くたびに書くので、リクエスト数が増えてもメモリは一定。そのため行は到着順（`request` / `step` / `iteration` が混ざる）で、最後に `health` が続く。先頭に `meta` 行（`open`、`started_at`）を書き、最後に最終的な `dropped` と `elapsed_ns` を持つ 2 つ目の `meta` 行を書く。`ReadRaw` は同じ項目では最後の値を採る。途中で落ちたときも読めるファイルが残る（実行時間は記録から求める）。
+- `Run` は生データを実行中に少しずつ書く（`record.RawWriter`）。記録は届くたびに書くので、リクエスト数が増えてもメモリは一定。そのため行は到着順（`request` / `step` / `iteration` が混ざる）で、最後に `health` が続く。先頭に `meta` 行（`open`、`started_at`）を書き、最後に最終的な `dropped` と `elapsed_ns` を持つ 2 つ目の `meta` 行を書く。`ReadRaw` は同じ項目では最後の値を採る。バッファは記録を書いてから最大 1 秒以内にフラッシュするので、ファイルを `tail -f` などで追えるし、途中で落ちても失うのは最大で 1 秒分ほど。途中で落ちたときも読めるファイルが残る。最後の行が途中で切れていても `ReadRaw` はそれより前の記録を返し、`Raw.Truncated` を立てる（実行時間は記録から求める）。このとき `jotaro report` / `merge` / `check` / `compare` の `-raw` と `export` は stderr に警告を出す。末尾以外の壊れた行は従来どおりエラー。
 - 実行中に書くので、中断・キャンセルされた実行でも、そこまでに書いた分が残る。
 - 書き出しに失敗しても、`Run` は集計した `Report` を返す（`error` も同時に返す）。
 
@@ -273,10 +281,20 @@ Run ─(Plan.Progress)─▶ コンソールに 1 秒ごとの 1 行
 `Plan.Progress` に `io.Writer`（たとえば `os.Stderr`）を渡すと、`Run` は実行中、1 秒ごとに次のような 1 行を書き出す。
 
 ```
-12s/60s rps=480 p95=38ms err=0.2%
+12s/60s rps=480 p95=38ms err=0.2% 5xx=31.0% fail=31.2% dropped=7
 ```
 
-内容は、経過時間 / `Duration`、直近 1 秒のスループット、ここまでの実行全体の p95 とエラー率（`error_rate` と同じく、通信レベルのエラーで終わったリクエストの割合）。p95 は相対誤差 1% 以内の近似値。`Plan.Raw` の有無にかかわらず動き、記録のコストは増えず、書き込みのエラーは無視し、`Run` が返ったあとは何も書かない。`AbortOn` が実行を止めたときは、`aborted: ...` の行が続く（5 章の「実行を途中で止める」を参照）。
+内容は、経過時間 / `Duration` と直近 1 秒のスループットに続けて、ここまでの実行全体の値（最終レポートの値に収束する）。
+
+| 項目 | 意味 | 対応するもの |
+|---|---|---|
+| `p95` | リクエストのレイテンシの 95 パーセンタイル（相対誤差 1% 以内の近似値） | `p95` |
+| `err` | 通信レベルのエラー（タイムアウト、接続拒否など）で終わったリクエストの割合。応答が返ったリクエストは、ステータスにかかわらず数えない。そのため、すべてのリクエストに `500` を返すサーバーや、本文が `Expect*` の検査に失敗するサーバーでも `err=0.0%` のままになる | `error_rate` |
+| `5xx` | 5xx の応答を受け取ったリクエストの割合。通信レベルのエラーで終わったリクエストは数えない | `http_5xx_rate` |
+| `fail` | 終わったイテレーションのうち、何らかのエラーで終わったものの割合。`Expect*` の検査に失敗してシナリオがそのエラーを返した場合もここに入る | `iteration_fail_rate` |
+| `dropped` | `MaxUsers` のためにドロップした到着の数（オープンモデル） | `dropped` |
+
+`5xx`・`fail`・`dropped` は 0 の間は出さず、健全なときの行を短く保つ。`err=0.0%` だけの行は、通信エラーがないだけでなく、5xx の応答も失敗したイテレーションもまだないことを表す。`Expect*` の失敗をシナリオが返さずに無視した場合は、`fail` には映らない。`Plan.Raw` の有無にかかわらず動き、記録のコストは増えず、書き込みのエラーは無視し、`Run` が返ったあとは何も書かない。`AbortOn` が実行を止めたときは、`aborted: ...` の行が続く（5 章の「実行を途中で止める」を参照）。
 
 ### `/metrics`（`Plan.MetricsAddr`）（実装済み）
 
@@ -317,6 +335,7 @@ rep, err := jotaro.Run(ctx, jotaro.Plan{ /* ... */ MetricsAddr: ":9090" })
 *Report ─▶ Write(w, format) ─▶ Text / JSON / HTML ─▶ w
 ```
 
+<!-- doccheck: before var rep *report.Report -->
 ```go
 f, _ := report.ParseFormat("json") // CLI のフラグ文字列から
 if err := rep.Write(os.Stdout, f); err != nil {
@@ -339,6 +358,7 @@ if err := rep.Write(os.Stdout, f); err != nil {
 
 保存した JSON から、あとでレポートを作り直せる。
 
+<!-- doccheck: before var f *os.File -->
 ```go
 rep, err := report.ReadJSON(f) // WriteJSON が書いた JSON を Report に戻す
 ```
@@ -389,6 +409,7 @@ jotaro export -format vegeta|csv [-o 出力先] <raw.jsonl | ->
 
 利用者が独自の形式を足したくなったら、`Format` の `switch` の代わりにインターフェースへ移る。需要が出るまでは今の形のままにする。
 
+<!-- doccheck: skip: the declaration of report.Writer, quoted for reference -->
 ```go
 type Writer interface {
     Write(w io.Writer, r *Report) error
@@ -401,8 +422,9 @@ type Writer interface {
 
 ## 5. しきい値判定（実装済み）
 
-結果が条件を満たすかを確かめ、CI で「遅くなったら失敗」にする（`report/threshold.go`）。k6 の `thresholds` に近い。実行後の `Report` に対して判定する。`Plan` 自身にはしきい値のフィールドは無い。実行中に止めたいときは `Plan.AbortOn` を使う（この章の最後）。
+結果が条件を満たすかを確かめ、CI で「遅くなったら失敗」にする（`report/threshold.go`。完全なワークフローは [`ci_jp.md`](ci_jp.md) にある）。k6 の `thresholds` に近い。実行後の `Report` に対して判定する。`Plan` 自身にはしきい値のフィールドは無い。実行中に止めたいときは `Plan.AbortOn` を使う（この章の最後）。
 
+<!-- doccheck: before var rep *report.Report -->
 ```go
 th, _ := report.ParseThreshold("p95<200ms")
 checks := rep.Check(th)  // Checks
@@ -432,6 +454,28 @@ jotaro check -t 'p95<200ms' -t 'error_rate<1%' -t 'p99{step=login}<100ms' result
 | `requests` | リクエスト数 | 数 | `{step=...}` |
 | `rps` `dropped` | 1 秒あたりのリクエスト数 / ドロップされた到着の数 | 数 | 全体のみ |
 
+#### 受け付ける値
+
+値は、実際の計測値が取りうるものでなければならない。タイプミスで「決して失敗しない」「決して通らない」ゲートができないようにするためである。次の値には、式と理由を示すエラーを返す（`ParseThreshold`）。
+
+- `NaN` と `Inf`（`+Inf`、`-Inf`、`infinity` も）、64 ビット浮動小数点に収まらない大きな数（`1e400`）。どの種類の指標でも
+- 負の値。どの種類でも: `p95<-1s`、`rps>-1`、`error_rate<-5%`。負になる指標はない。`-0`、`-0s`、`-0%` は 0 として受け付ける
+- 100% を超える割合。`500%`、または数値だけの書き方で `1` を超えるもの（`error_rate<1.5`）。`100%`、`1`、`0` は受け付ける
+
+たとえば `error_rate<500%` は `ratio "500%" is above 100% (above 1 in the plain form)` で失敗する。この検査の前は、これらの式はエラーなく解釈されたが、満たせない（`error_rate<-5%`）か、常に満たされる（`error_rate<500%`）かのどちらかだった。同じ解析器が `Plan.AbortOn`、`jotaro check -t`、MCP のツールでも使われるので、同じ値が拒否される。
+
+#### 特殊な文字を含む名前
+
+`{...}` の中の引用符なしの名前は、次のカンマまで（前後の空白は取り除く）で、波括弧は釣り合っていなければならない。カンマ、釣り合わない `{` `}`、波括弧の外の `<` `>`、前後の空白を含むステップ名・シナリオ名は、Go の二重引用符付き文字列で書く。
+
+```
+p95{step="list, then order"}<1s
+p95{scenario="checkout, mobile",step=" padded "}<1s
+p95{step="say \"hi\""}<1s
+```
+
+引用符の中はすべてそのままの文字で、`\"` と `\\` はエスケープ（`\n` や `\u00e9` など Go のほかのエスケープも使える）。引用符なしの名前はこれまでどおりに読むので既存のしきい値は変わらない。ただし 1 つだけ例外がある。`step="login"` のように完全な引用符付き文字列になっている値は、引用符の文字を含む名前ではなく、引用符を外した名前（`login`）を指すようになった。名前に引用符そのものを含むステップを選ぶには `step="\"login\""` と書く。文字列として閉じていない引用符（`step="abc`、`step="a"b`）や、不正なエスケープを含むもの（`step="C:\users"`）は、引用符も含めて普通の文字として扱う。`\t` や `\n` などはエスケープなので、引用符の中でバックスラッシュを書くときは `\\` にする。空の名前（`step=""`）はエラー。`Threshold.String()`、`jotaro check` の出力、`AbortOn` のメッセージ、MCP の `canonical` は、必要なときに名前を引用符で囲むので、そのまま貼り直せる。
+
 ### 決めたこと
 
 - `{step=...}` が複数のシナリオにある同名のステップに当たるときは、それぞれを別の結果として確かめる（`scenario=` を足せば 1 つに絞れる）。
@@ -445,6 +489,7 @@ jotaro check -t 'p95<200ms' -t 'error_rate<1%' -t 'p99{step=login}<100ms' result
 
 `Plan.AbortOn` は k6 の `abortOnFail` に当たる。条件が成り立ったらすぐに実行を止め、壊れたサーバーに `Duration` のあいだ中負荷をかけ続けないようにする（`abort.go`）。
 
+<!-- doccheck: fields jotaro.Plan -->
 ```go
 AbortOn: []jotaro.AbortRule{
 	{When: "http_5xx_rate>50%", For: 5 * time.Second},
@@ -453,7 +498,7 @@ AbortOn: []jotaro.AbortRule{
 },
 ```
 
-- `When` は上のしきい値と同じ書き方（`report.ParseThreshold`）だが、「合格とする状態」ではなく**止める状態**を表す。`http_5xx_rate>50%` は、半分より多くのリクエストが 5xx を受けたら止める。`When` の書き方が誤っていると、`Run` は負荷をかける前に失敗する。
+- `When` は上のしきい値と同じ書き方（`report.ParseThreshold`）だが、「合格とする状態」ではなく**止める状態**を表す。`http_5xx_rate>50%` は、半分より多くのリクエストが 5xx を受けたら止める。`When` の書き方が誤っていると、`Run` は負荷をかける前に失敗する。意味のない値（`NaN`、`Inf`、負の値、100% を超える割合。`error_rate>500%` は決して発火しない）も同様。
 - 1 秒ごとに、ここまでの実行全体に対して判定する（直近の窓ではない）。終わったレポートを `Report.Check` が読むのと同じ方法。そのためパーセンタイルは、逐次集計の近似値になる。まだデータが無いあいだは、成り立っているとは数えない。
 - `For` は、条件が途切れず成り立ち続けるべき時間（0 なら、成り立った最初の判定で止める）。数秒にしておくと、統計が落ち着く前の一時的な失敗で止まらない。
 - どの指標が失敗を捉えるかに注意する。`error_rate` は通信レベルのエラーだけを数えるので、HTTP のエラーステータスには `http_5xx_rate` / `http_4xx_rate`、誤ったレスポンス（`Expect*`）には `iteration_fail_rate` が要る。

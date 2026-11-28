@@ -43,10 +43,11 @@ type htmlStep struct {
 	Name     string
 	Count    int
 	Failed   int
+	Failures string // why the step failed, per error kind (StepStats.Errors), such as "expect_mismatch=3"
 	Duration []string
 	Requests int
 	Status   string
-	Errors   string
+	Errors   string // transport-level errors of the step's requests (RequestStats.Errors)
 	P50      string
 	P95      string
 	P99      string
@@ -70,6 +71,7 @@ type htmlScenario struct {
 type htmlView struct {
 	Version   int
 	Model     string
+	Started   string // start time in UTC; empty when unknown
 	Elapsed   string
 	Requests  int
 	RPS       string
@@ -120,6 +122,9 @@ func (r *Report) toHTMLView() htmlView {
 		Connect:  latencyBars(r.Requests.Connect),
 		TLS:      latencyBars(r.Requests.TLS),
 	}
+	if !r.StartedAt.IsZero() {
+		v.Started = r.StartedAt.UTC().Format("2006-01-02 15:04:05 UTC")
+	}
 	if q := r.Requests; q.NewConns+q.ReusedConns > 0 {
 		v.Conns = fmt.Sprintf("%.1f%% reused (new %d / reused %d)", q.ReuseRate()*100, q.NewConns, q.ReusedConns)
 	}
@@ -150,6 +155,7 @@ func (r *Report) toHTMLView() htmlView {
 			q := s.Requests
 			hs.Steps = append(hs.Steps, htmlStep{
 				Name: s.Name, Count: s.Count, Failed: s.Failed,
+				Failures: fmtErrors(s.Errors),
 				Duration: latencyCellList(s.Duration),
 				Requests: q.Count,
 				Status:   fmtStatus(q.Status),

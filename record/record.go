@@ -9,6 +9,7 @@ import (
 // ErrKind is the kind of a failure. The empty string means success.
 type ErrKind string
 
+// The values of ErrKind.
 const (
 	ErrNone        ErrKind = ""                   // success
 	ErrTimeout     ErrKind = "timeout"            // a deadline passed or the network timed out
@@ -17,15 +18,19 @@ const (
 	ErrTLS         ErrKind = "tls"                // the handshake or certificate verification failed
 	ErrCanceled    ErrKind = "canceled"           // the run was stopped while the request was in flight
 	ErrExpect      ErrKind = "expect_mismatch"    // the response arrived but an Expect* check failed
+	ErrPanic       ErrKind = "panic"              // the scenario function panicked (a bug in the test code, never the target)
 	ErrOther       ErrKind = "other"              // any failure that fits none of the above
 )
 
 // ConnKind is where the connection used by a request came from. Empty means it failed before getting a connection.
+// A connection is new for the first request that uses it and reused for every later one, even if net/http took it
+// from the idle pool the first time.
 type ConnKind string
 
+// The values of ConnKind.
 const (
-	ConnNew    ConnKind = "new"    // a newly opened connection
-	ConnReused ConnKind = "reused" // reused from the connection pool
+	ConnNew    ConnKind = "new"    // a connection that no earlier request had used
+	ConnReused ConnKind = "reused" // a connection that an earlier request had already used
 )
 
 // Record is the raw data of one HTTP request. All aggregation is done from it.
@@ -37,8 +42,11 @@ type Record struct {
 
 	Method string
 	URL    string
-	Code   int     // 0 means no response (network error)
-	Err    ErrKind // kind of network error. HTTP 4xx/5xx are expressed by Code
+	// Code is the HTTP status code. It is 0 when no response was received (Err is then set).
+	// It can be non-zero together with a non-empty Err: the status line arrived but reading the body failed (see #149).
+	Code int
+	// Err is the kind of network error. HTTP 4xx/5xx alone are expressed by Code, not by Err.
+	Err ErrKind
 
 	// Scheduled is the scheduled start time. In the closed model it equals Start.
 	// In the open model, only the first request of an iteration gets the scheduled arrival time.

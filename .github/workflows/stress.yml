@@ -1,0 +1,45 @@
+name: stress
+
+# Runs the whole test suite many times with few CPUs on all three operating systems, to find tests that
+# depend on timing before they fail a pull request by chance. A failed run is the report: it is not a
+# required check, and it never runs on pull requests (only on the schedule and on demand).
+#
+# GitHub runs schedule and workflow_dispatch workflows only from the default branch (main), so this one
+# starts to run when the file reaches main (with the next release). Trigger it once by hand from the Actions
+# tab then.
+on:
+  schedule:
+    - cron: '0 4 * * 3'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  stress:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        # GOMAXPROCS squeezes the scheduler the way a loaded machine does: '' leaves it alone.
+        procs: ['', '1', '2']
+    env:
+      GOMAXPROCS: ${{ matrix.procs }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version: stable
+      # -count=20 runs every round in one test binary, and the default -timeout is 10 minutes per binary, so set
+      # it explicitly (below the job's timeout-minutes). One round of the remaining packages takes about 12 s on a
+      # laptop under -race (the root package 5 s, the rest less); a slow runner at a quarter of that speed
+      # needs under 1 minute a round, so 20 rounds are about 16 minutes and 80 minutes is five times that.
+      # internal/mcpserver is left out: it type-checks Go code (9 s a round, 26 s on Windows in CI, so over 8
+      # minutes for 20 rounds on its own) and has no timing to shake out.
+      - name: go test -race -count=20
+        shell: bash
+        run: go test -race -count=20 -timeout=80m $(go list ./... | grep -v /internal/mcpserver)

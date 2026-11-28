@@ -59,19 +59,26 @@ func TestHealthSamplerShortRun(t *testing.T) {
 	}
 }
 
+// The health sampler reads the real CPU time of the process (getrusage), which a fake clock does not
+// move, so on a fake clock the CPU values mean nothing and only the sampling schedule is checked here:
+// one point per second of the run (TestHealthSampler covers the values on the real clock).
 func TestRunRecordsHealth(t *testing.T) {
-	sc := NewScenario("s", func(ctx context.Context, u *User) error {
-		u.Think(10 * time.Millisecond)
-		return nil
+	inBubble(t, func(t *testing.T) {
+		sc := NewScenario("s", func(ctx context.Context, u *User) error {
+			u.Think(10 * time.Millisecond)
+			return nil
+		})
+		rep, err := Run(context.Background(), Plan{Scenario: sc, Users: 2, Duration: 5*time.Second + 100*time.Millisecond})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(rep.Health) != 5 {
+			t.Fatalf("got %d health points, want 5 (one per second, the last 0.1s is dropped as shorter than half a second)", len(rep.Health))
+		}
+		for i, p := range rep.Health {
+			if p.Second != i || p.Goroutines < 1 {
+				t.Errorf("Health[%d] = %+v", i, p)
+			}
+		}
 	})
-	rep, err := Run(context.Background(), Plan{Scenario: sc, Users: 2, Duration: 100 * time.Millisecond})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(rep.Health) == 0 {
-		t.Fatal("Health is missing from the result of Run")
-	}
-	if p := rep.Health[0]; p.Second != 0 || p.Goroutines < 1 {
-		t.Errorf("Health[0] = %+v", p)
-	}
 }

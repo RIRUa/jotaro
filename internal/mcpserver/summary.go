@@ -78,8 +78,14 @@ type ScenarioSummary struct {
 type StepSummary struct {
 	Name string `json:"name"`
 	// Count and Failed count runs of the step; Requests covers the HTTP requests sent inside it.
-	Count    int            `json:"count"`
-	Failed   int            `json:"failed"`
+	Count  int `json:"count"`
+	Failed int `json:"failed"`
+	// Errors is why the runs of the step failed, per kind: expect_mismatch (a failed Expect* check), panic, or a
+	// transport-level kind (timeout, ...) that the step returned. It holds one kind per failed run, so the counts add up
+	// to Failed, and it is empty when no run failed. Requests.Errors, by contrast, counts only transport-level
+	// errors of the requests, so a step that failed its checks has Failed above 0 and Errors with expect_mismatch while
+	// Requests.Errors is empty, and error_rate is 0.
+	Errors   map[string]int `json:"errors"`
 	Requests RequestSummary `json:"requests"`
 }
 
@@ -135,6 +141,7 @@ func summarize(rep *report.Report) SummaryOutput {
 				Name:     st.Name,
 				Count:    st.Count,
 				Failed:   st.Failed,
+				Errors:   errorKinds(st.Errors),
 				Requests: summarizeRequests(st.Requests, rep.Open),
 			})
 		}
@@ -163,6 +170,9 @@ func summarize(rep *report.Report) SummaryOutput {
 		out.Warnings = append(out.Warnings, fmt.Sprintf(
 			"load generator CPU reached %.0f%%: measured latencies may be worse than the target's actual behavior; lower the load or use more load generators", *lg.MaxCPU*100))
 	}
+	for _, w := range reviewWarnings(rep) {
+		out.Warnings = append(out.Warnings, w.Message)
+	}
 	return out
 }
 
@@ -190,6 +200,15 @@ func summarizeRequests(q report.RequestStats, open bool) RequestSummary {
 		s.Corrected = &c
 	}
 	return s
+}
+
+// errorKinds converts a breakdown of failures to a map with string keys. It is never nil, so it is written as {}.
+func errorKinds(m map[record.ErrKind]int) map[string]int {
+	out := make(map[string]int, len(m))
+	for k, n := range m {
+		out[string(k)] = n
+	}
+	return out
 }
 
 func summarizeLatency(l report.Latency) LatencySummary {

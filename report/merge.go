@@ -3,10 +3,11 @@ package report
 import (
 	"errors"
 	"fmt"
-	"github.com/RIRUa/jotaro/internal/histogram"
-	"github.com/RIRUa/jotaro/record"
 	"math"
 	"time"
+
+	"github.com/RIRUa/jotaro/internal/histogram"
+	"github.com/RIRUa/jotaro/record"
 )
 
 // MergeReports combines several reports into one.
@@ -20,8 +21,10 @@ import (
 //     Concurrency is summed assuming everything ran at the same time (an upper-bound estimate).
 //   - Scenarios and steps are matched by name, in the order they first appear.
 //   - Min / Max / Mean are exact. P50 to P99 are recomputed by adding the histograms,
-//     so they are approximations within 1% relative error. If reports without a histogram
-//     (such as version 1 JSON) are mixed in, a count-weighted average is used (with a larger error).
+//     so, when two or more non-empty distributions are merged, they are approximations within 1% relative error
+//     even if every input was exact (see Latency). A distribution that is merged with an empty one is kept as is.
+//     If reports without a histogram (such as version 1 JSON) are mixed in,
+//     a count-weighted average is used (with a larger error).
 //
 // Reports whose Open differs cannot be mixed, so an error is returned.
 func MergeReports(reps ...*Report) (*Report, error) {
@@ -83,14 +86,17 @@ func MergeReports(reps ...*Report) (*Report, error) {
 		out.Elapsed = last.Sub(first)
 	}
 	// Time series are overlaid, shifted by the difference in StartedAt. If any report lacks StartedAt, their starts are aligned.
-	for _, r := range reportSeries {
-		offset := 0
+	series := make([][]SeriesPoint, len(reportSeries))
+	health := make([][]record.HealthPoint, len(reportSeries))
+	offsets := make([]int, len(reportSeries))
+	for i, r := range reportSeries {
+		series[i], health[i] = r.Series, r.Health
 		if allStarted {
-			offset = int((r.StartedAt.Sub(first) + SeriesInterval/2) / SeriesInterval)
+			offsets[i] = int((r.StartedAt.Sub(first) + SeriesInterval/2) / SeriesInterval)
 		}
-		out.Series = mergeSeries(out.Series, r.Series, offset)
-		out.Health = mergeHealth(out.Health, r.Health, offset)
 	}
+	out.Series = mergeSeries(series, offsets)
+	out.Health = mergeHealth(health, offsets)
 	for _, sc := range scenarios {
 		out.Scenarios = append(out.Scenarios, *sc)
 	}
@@ -171,7 +177,7 @@ func mergeLatency(a, b Latency) Latency {
 	}
 	wa, wb := float64(a.Count), float64(b.Count)
 	avg := func(x, y time.Duration) time.Duration {
-		return time.Duration(math.Round((float64(x)*wa + float64(y)*wb) / (wa + wb)))
+		return durationFromFloat(math.Round((float64(x)*wa + float64(y)*wb) / (wa + wb)))
 	}
 	out := Latency{
 		Count: a.Count + b.Count,

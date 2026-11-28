@@ -9,8 +9,8 @@ import (
 	"github.com/RIRUa/jotaro/report"
 )
 
-// abortInterval is how often Plan.AbortOn is evaluated. It is a variable so tests can shorten it.
-var abortInterval = time.Second
+// abortInterval is how often Plan.AbortOn is evaluated.
+const abortInterval = time.Second
 
 // ErrAborted is wrapped by the error Run returns when Plan.AbortOn stopped the run early.
 // The report returned together with it covers the run up to the abort. Test for it with errors.Is.
@@ -19,7 +19,9 @@ var ErrAborted = errors.New("jotaro: run aborted")
 // AbortRule is one condition of Plan.AbortOn: stop the run as soon as When holds.
 //
 // When uses the threshold syntax of report.ParseThreshold, but it describes the state to stop at rather than
-// the state to accept. So "http_5xx_rate>50%" aborts once more than half of the requests got a 5xx response:
+// the state to accept. So "http_5xx_rate>50%" aborts once more than half of the requests got a 5xx response.
+// The value is checked the same way: NaN, Inf, a negative value and a ratio above 100% (or above 1 in the plain form)
+// are errors, because such a rule could never fire or could never be meant. For example:
 //
 //	AbortOn: []jotaro.AbortRule{
 //		{When: "http_5xx_rate>50%", For: 5 * time.Second},
